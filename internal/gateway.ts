@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
+import { appendSaid } from "./people.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -129,6 +130,12 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     if (typeof chat !== "number") return false;
     if (trip(key, texts)) return false;
     for (const text of texts) await sendMessage(cfg.token, chat, text);
+    const p = instanceData(key);
+    if (p) {
+      for (const text of texts) {
+        appendSaid(p.data, chat, { at: new Date().toISOString(), dir: "out", text });
+      }
+    }
     return true;
   };
 
@@ -165,12 +172,22 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
     const dir = decision.high ? p.inbox : p.inboxLow;
     const id = `${message.chat.id}-${message.message_id}`;
+    const at = new Date().toISOString();
     writeJson(join(dir, `${id}.json`), {
       id,
       text: message.text,
       from: senderName(message),
-      at: new Date().toISOString(),
+      at,
+      chat: message.chat.id,
       route: decision.reason,
+    });
+    // Only what was actually delivered: a message the policy chose not to forward must
+    // not reappear later in the transcript.
+    appendSaid(p.data, message.chat.id, {
+      at,
+      dir: "in",
+      text: message.text,
+      from: senderName(message),
     });
     log(`${key} ← ${decision.reason}${decision.high ? " (唤醒)" : ""}`);
   };

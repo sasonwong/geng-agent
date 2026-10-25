@@ -39,6 +39,7 @@ function fixture(): {
     searchLeft: 12,
     envChanged: null,
     lastSaid: null,
+    thread: null,
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
 }
@@ -85,15 +86,13 @@ test("nudge admits it was woken by default rather than by an alarm", () => {
   assert.match(buildPacket(input({ reason: "nudge" })), /没有留下下次什么时候醒/);
 });
 
-test("open loops are counted and pointed at, not pasted", () => {
-  const { input } = fixture();
-  const i = input({});
-  writeJson(i.paths.openLoops, [
-    { title: "弄清一个问题", since: "2026-03-01T09:00:00Z", state: "查过两次" },
-    { title: "第二件", since: "2026-03-02T08:00:00Z" },
-  ]);
-  const text = buildPacket(i);
-  assert.match(text, /未闭合的事：2 条，在 \/state\/open-loops\.json。/);
+test("open loops are counted by file, and pointed at instead of pasted", () => {
+  const { input, paths } = fixture();
+  mkdirSync(paths.openLoops, { recursive: true });
+  writeText(join(paths.openLoops, "弄清一个问题.md"), "查过两次");
+  writeText(join(paths.openLoops, "第二件.md"), "随便什么形状都行");
+  const text = buildPacket(input({}));
+  assert.match(text, /未闭合的事：2 件，在 \/state\/open-loops\/。/);
   // the title is for the agent to dig out, not for the daemon to summarize
   assert.doesNotMatch(text, /弄清一个问题/);
 });
@@ -105,14 +104,35 @@ test("it is told how it left things, since nothing else carries over", () => {
   assert.doesNotMatch(buildPacket(input({ lastSaid: null })), /没再说话/);
 });
 
-test("open loops are counted whatever shape it wrote", () => {
+test("an empty open-loops directory is stated plainly", () => {
   const { input, paths } = fixture();
-  writeText(paths.openLoops, JSON.stringify({ loops: [{ title: "a" }, { title: "b" }] }));
-  assert.match(buildPacket(input({})), /未闭合的事：2 条/);
-  writeText(paths.openLoops, JSON.stringify([{ title: "a" }]));
-  assert.match(buildPacket(input({})), /未闭合的事：1 条/);
-  writeText(paths.openLoops, JSON.stringify({ loops: [] }));
+  mkdirSync(paths.openLoops, { recursive: true });
   assert.match(buildPacket(input({})), /没有未闭合的事/);
+});
+
+test("a conversation carries how much was said and when it started", () => {
+  const { input } = fixture();
+  const text = buildPacket(
+    input({
+      thread: {
+        who: "telegram:@you",
+        chat: 123456789,
+        total: 214,
+        bytes: 43 * 1024,
+        lines: [
+          { dir: "in", text: "它在干嘛", at: "2026-02-27T09:00:00Z" },
+          { dir: "out", text: "在看自己写的 status.sh", at: "2026-02-27T09:00:30Z" },
+          { dir: "in", text: "那 sun.js 呢", at: "2026-03-02T08:59:00Z" },
+        ],
+      },
+    }),
+  );
+  assert.match(text, /你和 telegram:@you 说过 214 句，下面是最新的 3 句/);
+  assert.match(text, /对方：它在干嘛/);
+  assert.match(text, /你：在看自己写的 status.sh/);
+  assert.match(text, /全部在 \/state\/people\/123456789\.jsonl（214 句，43 KB）。/);
+  // no summary of the relationship, ever
+  assert.doesNotMatch(text, /关系|关心|画像/);
 });
 
 test("a long gap is stated as a fact, not an excuse", () => {
@@ -151,14 +171,12 @@ test("the page stays bounded without being cut: nothing external is pasted", () 
     text: "很长的一句话。".repeat(100),
     from: "telegram:@someone",
   }));
-  writeText(
-    paths.openLoops,
-    JSON.stringify(Array.from({ length: 200 }, (_, n) => ({ title: `第 ${n} 件事`, since: "2026-03-01T00:00:00Z" }))),
-  );
+  mkdirSync(paths.openLoops, { recursive: true });
+  for (let n = 0; n < 200; n++) writeText(join(paths.openLoops, `第 ${n} 件事.md`), "x");
   const text = buildPacket(input({ inbox: many, lowPending: 500 }));
   assert.ok(Buffer.byteLength(text, "utf8") < 2500, `page grew to ${Buffer.byteLength(text, "utf8")}`);
   assert.match(text, /有人在跟你说话：200 条，在 \/state\/inbox\/。/);
-  assert.match(text, /未闭合的事：200 条/);
+  assert.match(text, /未闭合的事：200 件/);
 });
 
 test("a mute is stated as state, and says plainly that it changes nothing", () => {

@@ -72,6 +72,8 @@ export function buildCommand(
       "-v",
       `${paths.daemonLog}:/state/daemon.log:ro`,
       "-v",
+      `${paths.people}:/state/people:ro`,
+      "-v",
       `${paths.palimpsest}/policy.json:/state/policy.json:ro`,
       "-v",
       `${paths.workspace}:/work`,

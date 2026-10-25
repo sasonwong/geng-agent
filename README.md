@@ -156,6 +156,9 @@ node cmd/geng/index.ts doctor alice --probe
 
 镜像里烤好：pi、`say`/`mute`/`web_search`。不挂载，它改不了自己的工具。
 
+它和人说的话记在 `data/<inst>/people/<chat>.jsonl`——一个地址一个文件，只追加，不总结、
+不建画像。唤醒纸上只贴最近 10 句。
+
 不装记忆扩展：**每轮醒来是一个新会话**，上下文里只有唤醒纸，用完就丢。所以既不需要压缩，
 也没有"阈值到点自动遗忘"这种事。它的记忆是 palimpsest 里的文件，不是上下文。
 

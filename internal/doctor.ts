@@ -114,6 +114,15 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 
   // A directory here is not a cosmetic problem: docker materialises a missing bind-mount
   // target as a directory, and then every line the daemon appends fails with EISDIR.
+  checks.push({
+    name: "open-loops 是目录",
+    ok: !existsSync(`${p.openLoops}.json`),
+    detail: existsSync(`${p.openLoops}.json`)
+      ? "旧的 open-loops.json 还在：现在是一件一个文件的目录，旧文件不会被读"
+      : "是",
+    warnOnly: true,
+  });
+
   const logIsFile = (() => {
     try {
       return statSync(p.daemonLog).isFile();

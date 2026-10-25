@@ -9,6 +9,8 @@ export interface InboxMsg {
   text: string;
   from?: string;
   at?: string;
+  /** Which address it came from, so its transcript can be found. */
+  chat?: number;
 }
 
 function parseFile(dir: string, name: string): InboxMsg | null {
@@ -20,6 +22,7 @@ function parseFile(dir: string, name: string): InboxMsg | null {
     text: msg.text,
     from: msg.from,
     at: msg.at,
+    chat: typeof msg.chat === "number" ? msg.chat : undefined,
   };
 }
 

@@ -13,6 +13,7 @@ import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, spentThisCycle, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
+import { readSaid } from "./people.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
@@ -43,6 +44,8 @@ function requiredDirs(p: Paths): string[] {
     p.inboxSeen,
     p.inboxLow,
     p.outbox,
+    p.openLoops,
+    p.people,
   ];
 }
 
@@ -244,6 +247,19 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       inbox,
       mutes: readMutes(paths.mute, nowMs),
       lastSaid: meta.lastSaid ?? null,
+      thread: (() => {
+        const last = [...inbox].reverse().find((m) => typeof m.chat === "number");
+        if (!last || last.chat === undefined) return null;
+        const t = readSaid(paths.data, last.chat, 10);
+        if (!t || t.tail.length === 0) return null;
+        return {
+          who: last.from ?? `chat ${last.chat}`,
+          chat: last.chat,
+          total: t.total,
+          bytes: t.bytes,
+          lines: t.tail,
+        };
+      })(),
       crashed,
       longGap,
       hint: plan.hint,

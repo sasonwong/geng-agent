@@ -1,3 +1,4 @@
+import { readdirSync } from "node:fs";
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
 import { excerpt, readJson, readText } from "./state.ts";
@@ -38,25 +39,41 @@ export interface PacketInput {
   envChanged: string | null;
   /** The last thing it said, because nothing else carries over between wakings. */
   lastSaid: string | null;
+  /** What was last said to and by it on the address that knocked, if any. */
+  thread: ThreadInput | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
 
-interface OpenLoop {
-  title?: string;
-  since?: string;
-  state?: string;
-}
-
 /**
- * How many, not what — the page points, the agent reads. The file is the agent's, so the
- * shape is whatever it wrote: a bare array, or an object holding one.
+ * How many, not what. The count comes from the filesystem, so no shape it invents can
+ * make the number wrong — one file per unfinished thing.
  */
 function countLoops(paths: Paths): number {
-  const raw = readJson<unknown>(paths.openLoops, null);
-  if (Array.isArray(raw)) return raw.length;
-  const wrapped = raw as { loops?: unknown } | null;
-  return Array.isArray(wrapped?.loops) ? wrapped.loops.length : 0;
+  try {
+    return readdirSync(paths.openLoops).filter((f) => !f.startsWith(".")).length;
+  } catch {
+    return 0;
+  }
+}
+
+export interface ThreadInput {
+  who: string;
+  chat: number;
+  total: number;
+  bytes: number;
+  lines: { dir: "in" | "out"; text: string; at: string }[];
+}
+
+function renderThread(t: ThreadInput, statePath: string): string[] {
+  const oldest = t.lines[0]?.at ? Date.parse(t.lines[0].at) : NaN;
+  const age = Number.isNaN(oldest) ? "" : `，最早的一句在 ${formatDuration(Date.now() - oldest)}前`;
+  const out = [`你和 ${t.who} 说过 ${t.total} 句，下面是最新的 ${t.lines.length} 句${age}：`];
+  for (const line of t.lines) {
+    out.push(`  ${line.dir === "out" ? "你" : "对方"}：${excerpt(line.text, 200)}`);
+  }
+  out.push(`全部在 ${statePath}/people/${t.chat}.jsonl（${t.total} 句，${Math.round(t.bytes / 1024)} KB）。`);
+  return out;
 }
 
 function renderMutes(mutes: Record<string, { until?: string | null }>): string | null {
@@ -74,7 +91,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, thread } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -99,11 +116,12 @@ export function buildPacket(input: PacketInput): string {
     "",
     "你的东西：",
     `  ${statePath}/identity.md      你是谁`,
-    `  ${statePath}/open-loops.json  没闭合的事`,
+    `  ${statePath}/open-loops/      没闭合的事，一件一个文件`,
     `  ${statePath}/waiting.json     下次什么时候醒`,
     `  ${statePath}/journal/         日记`,
     `  ${statePath}/inbox/           别人跟你说的话`,
-    `  ${statePath}/daemon.log       每轮一行`,
+    `  ${statePath}/daemon.log       每轮一行
+    ${statePath}/people/           和某个人的往来记录`,
     `  ${workPath}                   你干活的地方`,
   );
 
@@ -120,11 +138,12 @@ export function buildPacket(input: PacketInput): string {
   out.push(
     "",
     loops > 0
-      ? `未闭合的事：${loops} 条，在 ${statePath}/open-loops.json。`
+      ? `未闭合的事：${loops} 件，在 ${statePath}/open-loops/。`
       : "未闭合的事：（没有未闭合的事）",
   );
   out.push(`最近几轮：${statePath}/daemon.log 的最后几行。`);
 
+  if (thread) out.push("", ...renderThread(thread, statePath));
   if (inbox.length > 0) {
     out.push("", `有人在跟你说话：${inbox.length} 条，在 ${statePath}/inbox/。`);
   }

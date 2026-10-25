@@ -18,7 +18,10 @@ export interface Paths {
   daemonLog: string;
   policy: string;
   identity: string;
+  /** A directory, one file per unfinished thing: the count is the filesystem's job. */
   openLoops: string;
+  /** One append-only transcript per address, written only by the gateway. */
+  people: string;
   waiting: string;
   mute: string;
   waitingConsumed: string;
@@ -59,7 +62,8 @@ export function makePaths(root: string, instance: string): Paths {
     daemonLog: join(data, "daemon.log"),
     policy: join(palimpsest, "policy.json"),
     identity: join(palimpsest, "identity.md"),
-    openLoops: join(palimpsest, "open-loops.json"),
+    openLoops: join(palimpsest, "open-loops"),
+    people: join(data, "people"),
     waiting: join(palimpsest, "waiting.json"),
     mute: join(palimpsest, "mute.json"),
     waitingConsumed: join(palimpsest, "waiting.consumed.json"),
