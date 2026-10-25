@@ -178,9 +178,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
     if (o.once || o.dry) {
       reason = inboxPending(paths) ? "knock" : "timer";
-      pendingWait = readWaiting(paths.waiting, Date.now());
+      pendingWait = readWaiting(paths.waiting);
     } else {
-      pendingWait = readWaiting(paths.waiting, Date.now());
+      pendingWait = readWaiting(paths.waiting);
       const minWakeMs = policy.cycle.minWakeMinutes * 60_000;
       const backoffMs = policy.cycle.defaultWakeMinutes * 60_000 * plan.backoff;
       const dueAt =

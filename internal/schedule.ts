@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { readJson } from "./state.ts";
 
 export interface WaitSpec {
@@ -21,8 +22,15 @@ function parseAfter(v: string | number): number | null {
   return unit ? n * unit : null;
 }
 
-/** Returns null when waiting.json is absent or unparseable — the daemon treats that as "no alarm set". */
-export function readWaiting(file: string, nowMs: number): WaitSpec | null {
+/**
+ * Returns null when waiting.json is absent or unparseable — the daemon treats that
+ * as "no alarm set".
+ *
+ * A relative alarm ("in 30 minutes") is anchored to when the file was *written*,
+ * not to when the daemon happens to read it: otherwise every restart postpones the
+ * waking, and an alarm that came due while the machine was off never fires at all.
+ */
+export function readWaiting(file: string): WaitSpec | null {
   const raw = readJson<RawWaiting | null>(file, null);
   if (!raw || typeof raw !== "object") return null;
   const why = typeof raw.why === "string" ? raw.why : null;
@@ -37,7 +45,13 @@ export function readWaiting(file: string, nowMs: number): WaitSpec | null {
   if (wake.after !== undefined) {
     const delta = parseAfter(wake.after);
     if (delta === null) return null;
-    return { dueAtMs: nowMs + delta, why };
+    let writtenAt: number;
+    try {
+      writtenAt = statSync(file).mtimeMs;
+    } catch {
+      return null;
+    }
+    return { dueAtMs: writtenAt + delta, why };
   }
   return null;
 }

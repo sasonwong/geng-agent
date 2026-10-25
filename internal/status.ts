@@ -48,7 +48,7 @@ function countJson(dir: string): number {
 export function statusLine(root: string, instance: string): string {
   const p = makePaths(root, instance);
   const meta = readMeta(p);
-  const wait = readWaiting(p.waiting, Date.now());
+  const wait = readWaiting(p.waiting);
   const policy = loadPolicy(p.policy);
   const now = Date.now();
   const sinceLast = typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) : "从未";
@@ -63,7 +63,7 @@ export async function printStatus(root: string, instance: string): Promise<void>
   const now = Date.now();
   const meta = readMeta(p);
   const wakes = readWakes(p, now);
-  const wait = readWaiting(p.waiting, Date.now());
+  const wait = readWaiting(p.waiting);
 
   const identity = readText(p.identity);
   const loops = readJson<unknown[]>(p.openLoops, []);
