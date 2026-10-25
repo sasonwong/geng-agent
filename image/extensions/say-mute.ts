@@ -10,7 +10,9 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const STATE = process.env.GENG_STATE ?? "/state";
-const OUTBOX = join(STATE, "outbox");
+// mounted at the top level on purpose: a mount nested under /state makes docker create
+// its mountpoint inside the bind, which lands in the agent's own book as a root-owned dir
+const OUTBOX = process.env.GENG_OUTBOX ?? "/outbox";
 const MUTE = join(STATE, "mute.json");
 
 function writeAtomic(file: string, text: string): void {

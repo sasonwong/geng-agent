@@ -7,24 +7,25 @@ import { buildCommand } from "../internal/command.ts";
 import { makePaths } from "../internal/paths.ts";
 import { defaultPolicy } from "../internal/policy.ts";
 
-test("the container's /state/outbox is the directory the gateway reads", () => {
+test("the container's /outbox is the directory the gateway reads", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
   const { args } = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice");
 
-  const at = args.indexOf(`${paths.outbox}:/state/outbox`);
-  assert.notEqual(at, -1, "outbox 没有挂进容器：say 写的话没人读");
-
-  // and it must not shadow the whole /state mount that comes first
-  const stateAt = args.indexOf(`${paths.palimpsest}:/state`);
-  assert.ok(stateAt !== -1 && stateAt < at, "/state 要在 /state/outbox 之前挂");
+  assert.notEqual(args.indexOf(`${paths.outbox}:/outbox`), -1, "outbox 没有挂进容器：say 写的话没人读");
 })
 test("the page points at inbox and daemon.log, so both are mounted read-only", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
   const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice").args.join(" ");
-  assert.match(argv, new RegExp(`-v ${paths.inbox}:/state/inbox:ro`));
-  assert.match(argv, new RegExp(`-v ${paths.daemonLog}:/state/daemon.log:ro`));
+  assert.match(argv, new RegExp(`-v ${paths.inbox}:/inbox:ro`));
+  assert.match(argv, new RegExp(`-v ${paths.daemonLog}:/daemon.log:ro`));
+  assert.match(argv, new RegExp(`-v ${paths.people}:/people:ro`));
+  // nothing may be nested under the /state bind: docker would create the mountpoint
+  // through it, as root, inside the agent's own book
+  for (const target of [":/state/inbox", ":/state/daemon.log", ":/state/people", ":/state/outbox"]) {
+    assert.equal(argv.includes(target), false, `${target} 挂在 /state 里面了`);
+  }
 });
 
 test("the tools are loaded from outside the agent's home", () => {

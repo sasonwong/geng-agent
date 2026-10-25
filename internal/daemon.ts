@@ -180,7 +180,12 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   }
 
   const { ops } = ensureGatewayDirs(paths.root);
-  const statePath = policy.runner === "docker" ? "/state" : paths.palimpsest;
+  // The three read-only auxiliaries sit at the top level, not under /state: a mount
+  // nested inside the /state bind makes docker create its mountpoint through the bind,
+  // which drops root-owned directories into the agent's own book.
+  const at = (inContainer: string, host: string): string =>
+    policy.runner === "docker" ? inContainer : host;
+  const statePath = at("/state", paths.palimpsest);
   const workPath = policy.runner === "docker" ? "/work" : paths.workspace;
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
   let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
@@ -243,6 +248,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       lastWakeMs: typeof meta.lastWakeMs === "number" ? meta.lastWakeMs : null,
       waking,
       statePath,
+      inboxPath: at("/inbox", paths.inbox),
+      logPath: at("/daemon.log", paths.daemonLog),
+      peoplePath: at("/people", paths.people),
       workPath,
       inbox,
       mutes: readMutes(paths.mute, nowMs),

@@ -62,17 +62,19 @@ export function buildCommand(
       `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
       "-v",
       `${paths.palimpsest}:/state`,
-      // the say/mute extension writes /state/outbox; the gateway reads data/<inst>/outbox
+      // the say extension writes /outbox; the gateway reads data/<inst>/outbox.
+      // Top-level on purpose: a mount nested under /state makes docker create its
+      // mountpoint through the bind, leaving root-owned junk in the agent's own book.
       "-v",
-      `${paths.outbox}:/state/outbox`,
+      `${paths.outbox}:/outbox`,
       // read-only: the page points at these instead of pasting them, so they must be
       // readable from inside — but it must not be able to delete what a human said
       "-v",
-      `${paths.inbox}:/state/inbox:ro`,
+      `${paths.inbox}:/inbox:ro`,
       "-v",
-      `${paths.daemonLog}:/state/daemon.log:ro`,
+      `${paths.daemonLog}:/daemon.log:ro`,
       "-v",
-      `${paths.people}:/state/people:ro`,
+      `${paths.people}:/people:ro`,
       "-v",
       `${paths.palimpsest}/policy.json:/state/policy.json:ro`,
       "-v",

@@ -81,7 +81,7 @@ identity.md 原文（没有就写"这是你第 N 次醒来，你还没有写过�
 它上次说在等什么
 没闭合的事：N 条，在 /state/open-loops.json
 最近几轮：/state/daemon.log 的最后几行
-有人在跟你说话：N 条，在 /state/inbox/
+有人在跟你说话：N 条，在 /inbox/
 还有 N 条群里的消息在 /state/inbox/low/（没叫醒它）
 你静音了 X（到某时为止）—— 并明说这不改变投递
 上一轮没过完就断了（如果有）

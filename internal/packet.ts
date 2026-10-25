@@ -18,6 +18,10 @@ export interface PacketInput {
   /** Where the agent sees the palimpsest: /state in docker, an absolute path for the local runner. */
   statePath: string;
   workPath: string;
+  /** Where the read-only auxiliary mounts appear inside the container. */
+  inboxPath: string;
+  logPath: string;
+  peoplePath: string;
   inbox: InboxMsg[];
   /** Mutes that are still in force, shown as state — they do not change delivery. */
   mutes: Record<string, { until?: string | null }>;
@@ -65,14 +69,14 @@ export interface ThreadInput {
   lines: { dir: "in" | "out"; text: string; at: string }[];
 }
 
-function renderThread(t: ThreadInput, statePath: string): string[] {
+function renderThread(t: ThreadInput, peoplePath: string): string[] {
   const oldest = t.lines[0]?.at ? Date.parse(t.lines[0].at) : NaN;
   const age = Number.isNaN(oldest) ? "" : `，最早的一句在 ${formatDuration(Date.now() - oldest)}前`;
   const out = [`你和 ${t.who} 说过 ${t.total} 句，下面是最新的 ${t.lines.length} 句${age}：`];
   for (const line of t.lines) {
     out.push(`  ${line.dir === "out" ? "你" : "对方"}：${excerpt(line.text, 200)}`);
   }
-  out.push(`全部在 ${statePath}/people/${t.chat}.jsonl（${t.total} 句，${Math.round(t.bytes / 1024)} KB）。`);
+  out.push(`全部在 ${peoplePath}/${t.chat}.jsonl（${t.total} 句，${Math.round(t.bytes / 1024)} KB）。`);
   return out;
 }
 
@@ -90,7 +94,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 };
 
 export function buildPacket(input: PacketInput): string {
-  const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
+  const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath, inboxPath, logPath, peoplePath } = input;
   const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, thread } = input;
 
   const identity = readText(paths.identity);
@@ -119,9 +123,9 @@ export function buildPacket(input: PacketInput): string {
     `  ${statePath}/open-loops/      没闭合的事，一件一个文件`,
     `  ${statePath}/waiting.json     下次什么时候醒`,
     `  ${statePath}/journal/         日记`,
-    `  ${statePath}/inbox/           别人跟你说的话`,
-    `  ${statePath}/daemon.log       每轮一行
-    ${statePath}/people/           和某个人的往来记录`,
+    `  ${inboxPath}/                别人跟你说的话`,
+    `  ${logPath}          每轮一行`,
+    `  ${peoplePath}/               和某个人的往来记录`,
     `  ${workPath}                   你干活的地方`,
   );
 
@@ -141,14 +145,14 @@ export function buildPacket(input: PacketInput): string {
       ? `未闭合的事：${loops} 件，在 ${statePath}/open-loops/。`
       : "未闭合的事：（没有未闭合的事）",
   );
-  out.push(`最近几轮：${statePath}/daemon.log 的最后几行。`);
+  out.push(`最近几轮：${logPath} 的最后几行。`);
 
-  if (thread) out.push("", ...renderThread(thread, statePath));
+  if (thread) out.push("", ...renderThread(thread, peoplePath));
   if (inbox.length > 0) {
-    out.push("", `有人在跟你说话：${inbox.length} 条，在 ${statePath}/inbox/。`);
+    out.push("", `有人在跟你说话：${inbox.length} 条，在 ${inboxPath}/。`);
   }
   if (lowPending > 0) {
-    out.push(`还有 ${lowPending} 条群里的消息在 ${statePath}/inbox/low/，它们没有叫醒你。`);
+    out.push(`还有 ${lowPending} 条群里的消息在 ${inboxPath}/low/，它们没有叫醒你。`);
   }
   const muteLine = renderMutes(mutes);
   if (muteLine) out.push(muteLine);

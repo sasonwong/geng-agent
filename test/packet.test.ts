@@ -27,6 +27,9 @@ function fixture(): {
     waking: 2,
     statePath: "/state",
     workPath: "/work",
+    inboxPath: "/inbox",
+    logPath: "/daemon.log",
+    peoplePath: "/people",
     inbox: [],
     mutes: {},
     crashed: false,
@@ -130,7 +133,7 @@ test("a conversation carries how much was said and when it started", () => {
   assert.match(text, /你和 telegram:@you 说过 214 句，下面是最新的 3 句/);
   assert.match(text, /对方：它在干嘛/);
   assert.match(text, /你：在看自己写的 status.sh/);
-  assert.match(text, /全部在 \/state\/people\/123456789\.jsonl（214 句，43 KB）。/);
+  assert.match(text, /全部在 \/people\/123456789\.jsonl（214 句，43 KB）。/);
   // no summary of the relationship, ever
   assert.doesNotMatch(text, /关系|关心|画像/);
 });
@@ -175,7 +178,7 @@ test("the page stays bounded without being cut: nothing external is pasted", () 
   for (let n = 0; n < 200; n++) writeText(join(paths.openLoops, `第 ${n} 件事.md`), "x");
   const text = buildPacket(input({ inbox: many, lowPending: 500 }));
   assert.ok(Buffer.byteLength(text, "utf8") < 2500, `page grew to ${Buffer.byteLength(text, "utf8")}`);
-  assert.match(text, /有人在跟你说话：200 条，在 \/state\/inbox\/。/);
+  assert.match(text, /有人在跟你说话：200 条，在 \/inbox\/。/);
   assert.match(text, /未闭合的事：200 件/);
 });
 
