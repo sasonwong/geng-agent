@@ -28,6 +28,8 @@ export function buildCommand(
   paths: Paths,
   policy: Policy,
   sessionId: string,
+  /** The constant half of waking up, with the identity it wrote appended. */
+  systemPrompt: string,
   /** Replace the in-container command; used by the doctor probe. */
   tail?: string[],
 ): Command {
@@ -56,8 +58,6 @@ export function buildCommand(
       "HOME=/home/agent",
       "-v",
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
-      "-v",
-      `${paths.systemMd}:/home/agent/.pi/agent/SYSTEM.md:ro`,
       "-v",
       `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
       "-v",
@@ -93,6 +93,8 @@ export function buildCommand(
         "rpc",
         "--session-id",
         sessionId,
+        "--system-prompt",
+        systemPrompt,
         "-e",
         "/opt/geng/extensions/say-mute.ts",
         "-e",
@@ -111,6 +113,8 @@ export function buildCommand(
       sessionId,
       "--session-dir",
       paths.sessionDir,
+      "--system-prompt",
+      systemPrompt,
     ],
     env: localEnv(),
     cwd: paths.workspace,

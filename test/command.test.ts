@@ -10,14 +10,14 @@ import { defaultPolicy } from "../internal/policy.ts";
 test("the container's /outbox is the directory the gateway reads", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
-  const { args } = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice");
+  const { args } = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…");
 
   assert.notEqual(args.indexOf(`${paths.outbox}:/outbox`), -1, "outbox 没有挂进容器：say 写的话没人读");
 })
 test("the page points at inbox and daemon.log, so both are mounted read-only", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
-  const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice").args.join(" ");
+  const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…").args.join(" ");
   assert.match(argv, new RegExp(`-v ${paths.inbox}:/inbox:ro`));
   assert.match(argv, new RegExp(`-v ${paths.daemonLog}:/daemon.log:ro`));
   assert.match(argv, new RegExp(`-v ${paths.people}:/people:ro`));
@@ -30,7 +30,7 @@ test("the page points at inbox and daemon.log, so both are mounted read-only", (
 
 test("the tools are loaded from outside the agent's home", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
-  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy(), runner: "docker" }, "geng-alice");
+  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…");
   const joined = args.join(" ");
   assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
   assert.match(joined, /-e \/opt\/geng\/extensions\/websearch\.ts/);

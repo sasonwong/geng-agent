@@ -26,9 +26,7 @@ function fixture(): {
     lastWakeMs: Date.parse("2026-03-02T08:00:00Z"),
     waking: 2,
     statePath: "/state",
-    workPath: "/work",
     inboxPath: "/inbox",
-    logPath: "/daemon.log",
     peoplePath: "/people",
     inbox: [],
     mutes: {},
@@ -49,32 +47,25 @@ function fixture(): {
   return { root, paths, input: (over) => ({ ...base, ...over }) };
 }
 
-test("birth packet says nothing about who it is, and permits doing nothing", () => {
+test("birth packet says only what is new, and nothing about who it is", () => {
   const { input } = fixture();
   const text = buildPacket(input({ waking: 1, lastWakeMs: null }));
   assert.match(text, /这是你第一次醒来/);
   // birth must not claim it woke itself up, and must not count a 24h window
   assert.doesNotMatch(text, /被自己定的闹钟叫醒|最近 24 小时醒了/);
   assert.match(text, /你可以什么都不做，那不算失败/);
-  assert.match(text, /先写下你是谁/);
   assert.match(text, /没人在跟你说话/);
+  // the constants (paths, waiting.json instructions) are the system prompt's job now
+  assert.doesNotMatch(text, /waiting\.json/);
 });
 
-test("birth packet keeps counting when the identity is still missing", () => {
-  const { input } = fixture();
-  const text = buildPacket(input({ waking: 7 }));
-  assert.match(text, /你第 7 次醒来，你还没有写过你是谁/);
-});
-
-test("a written identity replaces the birth framing, and is labelled", () => {
+test("the page carries no identity: that is the system prompt's last section", () => {
   const { input } = fixture();
   const i = input({});
   writeText(i.paths.identity, "# 我是谁\n我是 alice。");
   const text = buildPacket(i);
-  // without the label the page opens with its own heading and reads as if it just wrote it
-  assert.match(text, /^你上次醒来时写下的 \/state\/identity\.md：\n\n# 我是谁\n我是 alice。/);
-  assert.doesNotMatch(text, /先写下你是谁/);
-  assert.match(text, /你可以什么都不做/);
+  assert.doesNotMatch(text, /我是 alice/);
+  assert.doesNotMatch(text, /identity\.md/);
 });
 
 test("knock and timer read differently, and a knock is addressed", () => {

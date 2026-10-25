@@ -226,7 +226,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     return checks;
   }
 
-  const command = buildCommand(o, policy, "geng-doctor-probe", PROBE);
+  const command = buildCommand(o, policy, "geng-doctor-probe", "probe", PROBE);
   const out = await new Promise<string>((resolve) => {
     const p = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "pipe"] });
     let text = "";

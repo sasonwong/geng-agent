@@ -15,6 +15,7 @@ import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { readSaid, type Said } from "./people.ts";
 import { countTouched } from "./touch.ts";
+import { systemPromptFor } from "./prompt.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
@@ -187,7 +188,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const at = (inContainer: string, host: string): string =>
     policy.runner === "docker" ? inContainer : host;
   const statePath = at("/state", paths.palimpsest);
-  const workPath = policy.runner === "docker" ? "/work" : paths.workspace;
+  const systemPrompt = systemPromptFor(paths);
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
   let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
   if (crashed) writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
@@ -250,9 +251,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       waking,
       statePath,
       inboxPath: at("/inbox", paths.inbox),
-      logPath: at("/daemon.log", paths.daemonLog),
       peoplePath: at("/people", paths.people),
-      workPath,
       inbox,
       mutes: readMutes(paths.mute, nowMs),
       lastSaid: meta.lastSaid ?? null,
@@ -309,7 +308,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     });
 
     if (o.dry) {
-      process.stdout.write(packet + "\n");
+      process.stdout.write(`--- 系统提示词（常量 + identity）---\n${systemPrompt}\n`);
+      process.stdout.write(`--- 唤醒纸（只有变量）---\n${packet}\n`);
       return;
     }
 
@@ -333,7 +333,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
     const startedMs = Date.now();
     const result = await runWaking({
-      command: buildCommand(paths, policy, sessionId),
+      command: buildCommand(paths, policy, sessionId, systemPrompt),
       instance: paths.instance,
       isDocker: policy.runner === "docker",
       timeoutMs: policy.cycle.timeoutSec * 1000,

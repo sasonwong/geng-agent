@@ -17,10 +17,8 @@ export interface PacketInput {
   waking: number;
   /** Where the agent sees the palimpsest: /state in docker, an absolute path for the local runner. */
   statePath: string;
-  workPath: string;
   /** Where the read-only auxiliary mounts appear inside the container. */
   inboxPath: string;
-  logPath: string;
   peoplePath: string;
   inbox: InboxMsg[];
   /** Mutes that are still in force, shown as state — they do not change delivery. */
@@ -116,23 +114,14 @@ function flatten(text: string): string {
 }
 
 export function buildPacket(input: PacketInput): string {
-  const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath, inboxPath, logPath, peoplePath } = input;
+  const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
   const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread } = input;
-
-  const identity = readText(paths.identity);
-  const hasIdentity = identity !== null && identity.trim() !== "";
 
   const out: string[] = [];
 
-  if (hasIdentity) {
-    // labelled, or the page opens with the agent's own heading and reads as if it wrote
-    // this whole thing just now
-    out.push(`你上次醒来时写下的 ${statePath}/identity.md：`, "", excerpt(identity, 2000), "");
-  } else if (waking <= 1) {
-    out.push("这是你第一次醒来。");
-  } else {
-    out.push(`这是你第 ${waking} 次醒来，你还没有写过你是谁。`);
-  }
+  // Only what changed since last time: the constants live in the system prompt, and the
+  // identity it wrote is its last section there.
+  if (waking <= 1) out.push("这是你第一次醒来。");
 
   const since =
     lastWakeMs === null ? "第一次醒来" : `距上次醒来 ${formatDuration(nowMs - lastWakeMs)}`;
@@ -149,16 +138,6 @@ export function buildPacket(input: PacketInput): string {
           : "，/work 里没动东西";
     out.push(`上一轮：${LAST_WAKE[lastCycle.wake]}${did}${moved}。`);
   }
-
-  // one wrapped line: per-item padding never lines up once a path is shorter than the
-  // longest one, and a misaligned legend reads like a bug
-  out.push(
-    "",
-    "你的东西：" +
-      `${statePath}/identity.md 你是谁，open-loops/ 没闭合的事，waiting.json 下次什么时候醒，` +
-      `journal/ 日记；${inboxPath} 别人说的话，${logPath} 每轮一行，${peoplePath} 和人的往来；` +
-      `${workPath} 你干活的地方。`,
-  );
 
   if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);
   if (lastWords) {
@@ -207,24 +186,17 @@ export function buildPacket(input: PacketInput): string {
 
   // nobody set an alarm yet on the first waking
   if (waking > 1) out.push("", REASON_LINE[reason]);
-  out.push(inbox.length > 0 ? "说句话回去，或者做你的事。" : "现在没人在跟你说话。");
-  out.push("你可以什么都不做，那不算失败。");
-  if (!hasIdentity) {
-    out.push("如果你决定做点什么，先写下你是谁，以及你为什么想做这件事。");
-  }
+  out.push(
+    inbox.length > 0
+      ? "说句话回去，或者做你的事。"
+      : "现在没人在跟你说话。你可以什么都不做，那不算失败。",
+  );
 
   if (searchLeft !== null) {
     out.push("", searchLeft === 0 ? "今天的搜索用完了。" : `今天还能搜 ${searchLeft} 次。`);
   }
 
   out.push("", `你现在的运行参数：${policyLine}`);
-  out.push(`想改的话，把 {"cycle":{"defaultWakeMinutes":30}} 这样的文件写到 ${statePath}/policy.proposal.json，下次醒来前会被检查。`);
-  out.push("");
-
-  out.push(`走之前，在 ${statePath}/waiting.json 写下你下次什么时候醒、为什么：`);
-  out.push('  { "wake": { "after": "20m" }, "why": "为什么" }');
-  out.push('  { "wake": { "at": "2026-03-02T09:15:00Z" }, "why": "为什么" }');
-  out.push("如果你不想再醒来，写 null —— 但先说清为什么。");
 
   // No truncation: nothing that grows with the outside world is pasted any more,
   // so the page is bounded by construction rather than by cutting it in half.
