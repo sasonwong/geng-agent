@@ -20,6 +20,7 @@ export interface Paths {
   identity: string;
   openLoops: string;
   waiting: string;
+  mute: string;
   waitingConsumed: string;
   intent: string;
   journal: string;
@@ -60,6 +61,7 @@ export function makePaths(root: string, instance: string): Paths {
     identity: join(palimpsest, "identity.md"),
     openLoops: join(palimpsest, "open-loops.json"),
     waiting: join(palimpsest, "waiting.json"),
+    mute: join(palimpsest, "mute.json"),
     waitingConsumed: join(palimpsest, "waiting.consumed.json"),
     intent: join(palimpsest, "intent.json"),
     journal,

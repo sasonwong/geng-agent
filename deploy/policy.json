@@ -8,9 +8,6 @@
     "repeatThreshold": 3
   },
   "backup": { "enabled": true },
-  "packet": {
-    "maxBytes": 8192
-  },
   "container": {
     "image": "geng-agent:latest",
     "memory": "2g",

@@ -52,35 +52,35 @@ export function planFor(e: Escalation): Plan {
     case 1:
       return {
         newSession: false,
-        hint: `上一轮${label}：${e.detail}\n这次换一个起点，别从停下的地方接着撞。`,
+        hint: `上一轮${label}：${e.detail}`,
         backoff: 1,
         parked: false,
       };
     case 3:
       return {
         newSession: true,
-        hint: `上一轮${label}：${e.detail}\n换了新的会话，之前的上下文不在这里了。`,
+        hint: `上一轮${label}：${e.detail}`,
         backoff: 1,
         parked: false,
       };
     case 4:
       return {
         newSession: true,
-        hint: `上一轮${label}：${e.detail}\n先写下两个不同的做法，挑一个再动手。`,
+        hint: `上一轮${label}：${e.detail}`,
         backoff: 1,
         parked: false,
       };
     case 5:
       return {
         newSession: false,
-        hint: `上一轮${label}：${e.detail}\n这件事先放下。把它写成一件未闭合的事，或者干脆不写。`,
+        hint: `上一轮${label}：${e.detail}`,
         backoff: 3,
         parked: false,
       };
     case 6:
       return {
         newSession: false,
-        hint: `连着 ${e.streak} 轮没有结果。定时唤醒已经停了，只有有人敲门才会醒。`,
+        hint: `连着 ${e.streak} 轮没有结果，定时唤醒已经停了。`,
         backoff: 0,
         parked: true,
       };

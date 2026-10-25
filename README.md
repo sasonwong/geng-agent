@@ -232,7 +232,6 @@ node cmd/geng/index.ts doctor alice --restore-test   # 真的读回来一次
 | `cycle.defaultWakeMinutes` | 1–720 |
 | `cycle.minWakeMinutes` | 1–120 |
 | `cycle.repeatThreshold` | 2–20 |
-| `packet.maxBytes` | 1024–32768 |
 
 runner、容器限额、网络、一轮的超时**不在谈判范围**——那是框，不是设置。旧 policy 会存进 `meta/policy.history/`。
 

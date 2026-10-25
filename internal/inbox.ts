@@ -4,6 +4,8 @@ import { readJson } from "./state.ts";
 
 export interface InboxMsg {
   id: string;
+  /** The file it came from, so it can be marked seen once it has actually been read. */
+  file: string;
   text: string;
   from?: string;
   at?: string;
@@ -14,6 +16,7 @@ function parseFile(dir: string, name: string): InboxMsg | null {
   if (!msg || typeof msg.text !== "string" || msg.text.trim() === "") return null;
   return {
     id: typeof msg.id === "string" ? msg.id : name.replace(/\.json$/, ""),
+    file: name,
     text: msg.text,
     from: msg.from,
     at: msg.at,
@@ -39,34 +42,27 @@ export function peekInbox(dir: string): InboxMsg[] {
 }
 
 /**
- * Drain inbox/*.json, moving each file into seen/ before returning it.
- * Anything unparseable is quarantined as *.bad: one broken message must never
- * block a whole waking.
+ * Move the messages this wake actually handed over into seen/. Until then they stay
+ * put: a cycle that dies before the model reads them must not eat what a human said.
+ * Anything unparseable is quarantined as *.bad — one broken message must never block
+ * a whole waking.
  */
-export function takeInbox(dir: string, seenDir: string, lowDir?: string): InboxMsg[] {
-  const out = drain(dir, seenDir);
-  if (lowDir) out.push(...drain(lowDir, seenDir));
-  return out;
-}
-
-function drain(dir: string, seenDir: string): InboxMsg[] {
-  const out: InboxMsg[] = [];
-  for (const f of jsonFiles(dir)) {
-    const msg = parseFile(dir, f);
-    const target = join(seenDir, f);
-    try {
-      renameSync(join(dir, f), target);
-    } catch {
-      // if the move fails the message stays put and is retried next waking
-    }
-    if (msg) out.push(msg);
-    else {
+export function markSeen(dirs: string[], seenDir: string, files: string[]): void {
+  for (const file of files) {
+    for (const dir of dirs) {
+      const from = join(dir, file);
+      const to = join(seenDir, file);
       try {
-        renameSync(target, `${target}.bad`);
+        renameSync(from, to);
+      } catch {
+        continue; // not in this dir
+      }
+      try {
+        if (parseFile(seenDir, file) === null) renameSync(to, `${to}.bad`);
       } catch {
         // nothing to quarantine
       }
+      break;
     }
   }
-  return out;
 }

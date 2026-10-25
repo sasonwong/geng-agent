@@ -19,6 +19,14 @@ test("the container's /state/outbox is the directory the gateway reads", () => {
   const stateAt = args.indexOf(`${paths.palimpsest}:/state`);
   assert.ok(stateAt !== -1 && stateAt < at, "/state 要在 /state/outbox 之前挂");
 })
+test("the page points at inbox and daemon.log, so both are mounted read-only", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice").args.join(" ");
+  assert.match(argv, new RegExp(`-v ${paths.inbox}:/state/inbox:ro`));
+  assert.match(argv, new RegExp(`-v ${paths.daemonLog}:/state/daemon.log:ro`));
+});
+
 test("the tools are loaded from outside the agent's home", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy(), runner: "docker" }, "geng-alice");

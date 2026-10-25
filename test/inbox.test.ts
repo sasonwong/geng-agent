@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { peekInbox, takeInbox } from "../internal/inbox.ts";
+import { markSeen, peekInbox } from "../internal/inbox.ts";
 
 function inbox(): { dir: string; seen: string } {
   const base = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -24,29 +24,42 @@ test("peekInbox does not consume anything", () => {
   assert.equal(readdirSync(seen).length, 0);
 });
 
-test("takeInbox drains in filename order", () => {
+test("peekInbox reads in filename order and leaves the files alone", () => {
   const { dir, seen } = inbox();
   writeFileSync(join(dir, "002.json"), JSON.stringify({ text: "第二条" }));
   writeFileSync(join(dir, "001.json"), JSON.stringify({ text: "第一条" }));
 
-  const taken = takeInbox(dir, seen);
-  assert.deepEqual(taken.map((m) => m.text), ["第一条", "第二条"]);
-  assert.equal(readdirSync(dir).filter((f) => f.endsWith(".json")).length, 0);
-  assert.equal(readdirSync(seen).length, 2);
+  const peeked = peekInbox(dir);
+  assert.deepEqual(peeked.map((m) => m.text), ["第一条", "第二条"]);
+  assert.deepEqual(peeked.map((m) => m.file), ["001.json", "002.json"]);
+  assert.equal(readdirSync(dir).filter((f) => f.endsWith(".json")).length, 2);
+  assert.equal(readdirSync(seen).length, 0);
 });
 
-test("takeInbox quarantines an unparseable message instead of dying", () => {
+test("markSeen moves only what this wake handed over", () => {
+  const { dir, seen } = inbox();
+  writeFileSync(join(dir, "001.json"), JSON.stringify({ text: "第一条" }));
+  writeFileSync(join(dir, "002.json"), JSON.stringify({ text: "第二轮才看" }));
+
+  markSeen([dir], seen, ["001.json"]);
+  assert.deepEqual(readdirSync(seen), ["001.json"]);
+  assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".json")), ["002.json"]);
+});
+
+test("markSeen quarantines an unparseable message instead of dying", () => {
   const { dir, seen } = inbox();
   writeFileSync(join(dir, "001.json"), "{not json");
   writeFileSync(join(dir, "002.json"), JSON.stringify({ text: "好的" }));
 
-  const taken = takeInbox(dir, seen);
-  assert.deepEqual(taken.map((m) => m.text), ["好的"]);
+  markSeen([dir], seen, ["001.json", "002.json"]);
   assert.ok(readdirSync(seen).some((f) => f.endsWith(".bad")));
+  assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".json")), []);
 });
 
-test("takeInbox drops an empty-text message", () => {
+test("an empty-text message is not handed over, and stays where it is", () => {
   const { dir, seen } = inbox();
   writeFileSync(join(dir, "001.json"), JSON.stringify({ text: "   " }));
-  assert.equal(takeInbox(dir, seen).length, 0);
+  assert.equal(peekInbox(dir).length, 0);
+  markSeen([dir], seen, ["001.json"]);
+  assert.ok(readdirSync(seen).some((f) => f.endsWith(".bad")));
 });

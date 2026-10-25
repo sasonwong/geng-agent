@@ -13,7 +13,6 @@ const NEGOTIABLE: Record<string, { min: number; max: number; integer: boolean }>
   "cycle.defaultWakeMinutes": { min: 1, max: 720, integer: true },
   "cycle.minWakeMinutes": { min: 1, max: 120, integer: true },
   "cycle.repeatThreshold": { min: 2, max: 20, integer: true },
-  "packet.maxBytes": { min: 1024, max: 32768, integer: true },
 };
 
 export interface ProposalResult {
@@ -120,6 +119,5 @@ export function policySummary(p: Policy): string {
     `defaultWakeMinutes=${p.cycle.defaultWakeMinutes}`,
     `minWakeMinutes=${p.cycle.minWakeMinutes}`,
     `repeatThreshold=${p.cycle.repeatThreshold}`,
-    `maxBytes=${p.packet.maxBytes}`,
   ].join(" ");
 }

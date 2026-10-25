@@ -1,6 +1,6 @@
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
-import { excerpt, readJson, readTail, readText } from "./state.ts";
+import { excerpt, readJson, readText } from "./state.ts";
 import { formatDuration } from "./schedule.ts";
 
 export type WakeReason = "timer" | "knock" | "nudge";
@@ -18,7 +18,8 @@ export interface PacketInput {
   statePath: string;
   workPath: string;
   inbox: InboxMsg[];
-  maxBytes: number;
+  /** Mutes that are still in force, shown as state — they do not change delivery. */
+  mutes: Record<string, { until?: string | null }>;
   /** The previous waking died mid-flight. */
   crashed: boolean;
   /** A [观察] block explaining how the last waking ended, if it did not end well. */
@@ -45,25 +46,17 @@ interface OpenLoop {
   state?: string;
 }
 
-function renderOpenLoops(paths: Paths, nowMs: number): string[] {
+/** How many, not what — the page points, the agent reads. */
+function countLoops(paths: Paths): number {
   const loops = readJson<OpenLoop[]>(paths.openLoops, []);
-  if (!Array.isArray(loops) || loops.length === 0) return ["（没有未闭合的事）"];
-  return loops.slice(0, 12).map((l) => {
-    const title = typeof l.title === "string" ? l.title : JSON.stringify(l);
-    const since = typeof l.since === "string" ? Date.parse(l.since) : NaN;
-    const age = Number.isNaN(since) ? "" : ` · 搁了 ${formatDuration(nowMs - since)}`;
-    const state = typeof l.state === "string" ? ` · ${l.state}` : "";
-    return `- ${title}${age}${state}`;
-  });
+  return Array.isArray(loops) ? loops.length : 0;
 }
 
-function renderInbox(inbox: InboxMsg[]): string[] {
-  const lines = ["有人在跟你说话："];
-  for (const m of inbox.slice(0, 12)) {
-    lines.push(`- ${m.from ?? "对方"}：${excerpt(m.text, 400)}`);
-  }
-  if (inbox.length > 12) lines.push(`- …还有 ${inbox.length - 12} 条`);
-  return lines;
+function renderMutes(mutes: Record<string, { until?: string | null }>): string | null {
+  const entries = Object.entries(mutes);
+  if (entries.length === 0) return null;
+  const parts = entries.map(([key, m]) => (m.until ? `${key}（到 ${m.until}）` : key));
+  return `你静音了 ${parts.join("、")}。这不改变投递：私聊和点名照样叫醒你。`;
 }
 
 const REASON_LINE: Record<WakeReason, string> = {
@@ -74,7 +67,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
-  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -102,10 +95,12 @@ export function buildPacket(input: PacketInput): string {
     `  ${statePath}/open-loops.json  没闭合的事`,
     `  ${statePath}/waiting.json     下次什么时候醒`,
     `  ${statePath}/journal/         日记`,
+    `  ${statePath}/inbox/           别人跟你说的话`,
+    `  ${statePath}/daemon.log       每轮一行`,
     `  ${workPath}                   你干活的地方`,
   );
 
-  if (waitWhy) out.push("", `你上次说在等：${waitWhy}`);
+  if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);
 
   // the first page must not contradict itself: on birth there is no counting yet
   if (waking > 1) out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);
@@ -113,15 +108,23 @@ export function buildPacket(input: PacketInput): string {
     out.push("定时唤醒已经停了：只有有人敲门才叫得醒你。");
   }
 
-  out.push("", "未闭合的事：", ...renderOpenLoops(paths, nowMs));
+  const loops = countLoops(paths);
+  out.push(
+    "",
+    loops > 0
+      ? `未闭合的事：${loops} 条，在 ${statePath}/open-loops.json。`
+      : "未闭合的事：（没有未闭合的事）",
+  );
+  out.push(`最近几轮：${statePath}/daemon.log 的最后几行。`);
 
-  const recent = readTail(paths.daemonLog, 6);
-  out.push("", "最近几轮:", ...(recent.length > 0 ? recent : ["（这是第一轮）"]));
-
-  if (inbox.length > 0) out.push("", ...renderInbox(inbox));
-  if (lowPending > 0) {
-    out.push("", `还有 ${lowPending} 条群里的消息在 ${statePath} 旁边的 inbox/low 里等你，它们没有叫醒你。`);
+  if (inbox.length > 0) {
+    out.push("", `有人在跟你说话：${inbox.length} 条，在 ${statePath}/inbox/。`);
   }
+  if (lowPending > 0) {
+    out.push(`还有 ${lowPending} 条群里的消息在 ${statePath}/inbox/low/，它们没有叫醒你。`);
+  }
+  const muteLine = renderMutes(mutes);
+  if (muteLine) out.push(muteLine);
 
   if (hint) {
     out.push("", "[观察]", hint);
@@ -152,9 +155,7 @@ export function buildPacket(input: PacketInput): string {
   out.push('  { "wake": { "at": "2026-03-02T09:15:00Z" }, "why": "为什么" }');
   out.push("如果你不想再醒来，写 null —— 但先说清为什么。");
 
-  let text = out.join("\n");
-  if (Buffer.byteLength(text, "utf8") > maxBytes) {
-    text = text.slice(0, maxBytes) + "\n…(唤醒纸被截断)";
-  }
-  return text;
+  // No truncation: nothing that grows with the outside world is pasted any more,
+  // so the page is bounded by construction rather than by cutting it in half.
+  return out.join("\n");
 }

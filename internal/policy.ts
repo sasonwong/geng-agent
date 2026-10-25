@@ -13,7 +13,6 @@ export interface Policy {
     /** Identical tool + args this many times counts as "stuck". */
     repeatThreshold: number;
   };
-  packet: { maxBytes: number };
   /** Off if you don't want snapshots; also skipped automatically when rustic or its password is missing. */
   backup: { enabled: boolean };
   container: {
@@ -31,7 +30,6 @@ export function defaultPolicy(): Policy {
     schema: 1,
     runner: "local",
     cycle: { timeoutSec: 1200, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
-    packet: { maxBytes: 8192 },
     backup: { enabled: true },
     container: {
       image: "geng-agent:latest",
@@ -88,7 +86,6 @@ export function loadPolicy(file: string): Policy {
       minWakeMinutes: num(cycle.minWakeMinutes, "cycle.minWakeMinutes", 1),
       repeatThreshold: num(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
-    packet: { maxBytes: num(p.packet?.maxBytes ?? d.packet.maxBytes, "packet.maxBytes", 512) },
     backup: { enabled: p.backup?.enabled !== false },
     container: {
       image: str(container.image, "container.image"),

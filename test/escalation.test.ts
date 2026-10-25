@@ -63,12 +63,12 @@ test("plans only change the next waking, and each level differs", () => {
   assert.match(hint(1).hint ?? "", /上一轮超时/);
 
   assert.equal(hint(3).newSession, true);
-  assert.match(hint(3).hint ?? "", /新的会话/);
+  assert.match(hint(3).hint ?? "", /上一轮超时/);
 
-  assert.match(hint(4).hint ?? "", /两个不同的做法/);
+  assert.match(hint(4).hint ?? "", /上一轮超时/);
 
   assert.equal(hint(5).backoff, 3);
-  assert.match(hint(5).hint ?? "", /先放下/);
+  assert.match(hint(6).hint ?? "", /连着 6 轮没有结果/);
 
   assert.equal(hint(6).parked, true);
 });

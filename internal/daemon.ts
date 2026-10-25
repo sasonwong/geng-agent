@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
-import { peekInbox, takeInbox } from "./inbox.ts";
+import { markSeen, peekInbox } from "./inbox.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -9,7 +9,7 @@ import { formatDuration, readWaiting, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
-import { ensureGatewayDirs, writeOps } from "./mute.ts";
+import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
@@ -115,6 +115,7 @@ function logLine(
       `tokens=${r.stats?.tokens ?? "-"}`,
       `cost=${r.stats?.cost?.toFixed(4) ?? "-"}`,
       `timedout=${r.timedOut ? "yes" : "no"}`,
+      `ctx=${r.stats?.contextPercent != null ? `${r.stats.contextPercent}%` : "-"}`,
     );
   }
   parts.push(`inbox=${inboxCount}`);
@@ -211,7 +212,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       }
     }
 
-    const inbox = o.dry ? peekInbox(paths.inbox) : takeInbox(paths.inbox, paths.inboxSeen, paths.inboxLow);
+    // Read without consuming: the messages stay on disk (and inside the container's
+    // read-only /state/inbox) until this wake has actually finished with them.
+    const inbox = [...peekInbox(paths.inbox), ...peekInbox(paths.inboxLow)];
     if (inbox.length > 0) reason = "knock";
 
     const nowMs = Date.now();
@@ -231,7 +234,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       statePath,
       workPath,
       inbox,
-      maxBytes: policy.packet.maxBytes,
+      mutes: readMutes(paths.mute, nowMs),
       crashed,
       longGap,
       hint: plan.hint,
@@ -279,6 +282,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     crashed = false;
 
     const symptom = classify(result);
+    // Only a wake that ran to the end has read them. Anything else leaves the messages
+    // in place so the next wake hands them over again rather than losing them.
+    if (symptom === "ok" && inbox.length > 0) {
+      markSeen([paths.inbox, paths.inboxLow], paths.inboxSeen, inbox.map((m) => m.file));
+    }
     escalation = advance(escalation, symptom, result);
     saveEscalation(paths, escalation);
 
