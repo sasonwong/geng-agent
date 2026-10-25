@@ -31,30 +31,9 @@ export interface Meta {
     touched: number;
   };
   env?: Env;
-  /**
-   * The session's running totals as of the last waking. pi reports them cumulatively for
-   * the whole session, so a per-cycle number only exists as a difference from these.
-   */
-  spent?: { tokens?: number; cost?: number };
 }
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * pi reports cost and tokens for the whole session, and the session is resumed every
- * waking — so what this cycle cost is the difference. A fresh session starts from zero,
- * which would read as negative: that is a new session, not a refund, so it is floored.
- */
-export function spentThisCycle(
-  before: { tokens?: number; cost?: number },
-  cumulative: { tokens?: number | null; cost?: number | null } | null,
-): { tokens: number; cost: number } | null {
-  if (!cumulative || (cumulative.tokens == null && cumulative.cost == null)) return null;
-  return {
-    tokens: Math.max(0, (cumulative.tokens ?? 0) - (before.tokens ?? 0)),
-    cost: Math.max(0, (cumulative.cost ?? 0) - (before.cost ?? 0)),
-  };
-}
 
 export function readMeta(paths: Paths): Meta {
   return readJson<Meta>(join(paths.meta, "state.json"), {});

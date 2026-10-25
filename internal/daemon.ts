@@ -10,7 +10,7 @@ import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
-import { DAY_MS, readMeta, recordWake, spentThisCycle, writeMeta, type Meta } from "./meta.ts";
+import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { readSaid, type Said } from "./people.ts";
@@ -344,19 +344,17 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     rmSync(paths.intent, { force: true });
     crashed = false;
 
-    // pi counts for the whole session, and this session is resumed every waking:
-    // what this cycle cost is the difference, never the total.
-    const cumulative = result.stats;
-    const before = meta.spent ?? {};
-    const spent = spentThisCycle(before, cumulative);
-    if (cumulative) {
+    // Every waking is its own session, so the session total *is* this cycle's cost.
+    // (It was a difference while one session spanned many wakings.)
+    const stats = result.stats;
+    const spent =
+      stats && (stats.tokens != null || stats.cost != null)
+        ? { tokens: stats.tokens ?? 0, cost: stats.cost ?? 0 }
+        : null;
+    if (stats) {
       meta = {
         ...meta,
         lastSaid: result.finalText.trim() === "" ? (meta.lastSaid ?? null) : result.finalText,
-        spent: {
-          tokens: cumulative.tokens ?? before.tokens ?? 0,
-          cost: cumulative.cost ?? before.cost ?? 0,
-        },
       };
       writeMeta(paths, meta);
     }
