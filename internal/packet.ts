@@ -93,6 +93,11 @@ const REASON_LINE: Record<WakeReason, string> = {
   nudge: "你上次没有留下下次什么时候醒，所以被按默认间隔叫醒了。",
 };
 
+/** One line, so a multi-paragraph sign-off does not take over the page. */
+function flatten(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath, inboxPath, logPath, peoplePath } = input;
   const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, thread } = input;
@@ -116,21 +121,18 @@ export function buildPacket(input: PacketInput): string {
   if (longGap) out.push("（这次空档比闹钟长得多，机器可能停过。）");
   if (envChanged) out.push(envChanged);
 
+  // one wrapped line: per-item padding never lines up once a path is shorter than the
+  // longest one, and a misaligned legend reads like a bug
   out.push(
     "",
-    "你的东西：",
-    `  ${statePath}/identity.md      你是谁`,
-    `  ${statePath}/open-loops/      没闭合的事，一件一个文件`,
-    `  ${statePath}/waiting.json     下次什么时候醒`,
-    `  ${statePath}/journal/         日记`,
-    `  ${inboxPath}/                别人跟你说的话`,
-    `  ${logPath}          每轮一行`,
-    `  ${peoplePath}/               和某个人的往来记录`,
-    `  ${workPath}                   你干活的地方`,
+    "你的东西：" +
+      `${statePath}/identity.md 你是谁，open-loops/ 没闭合的事，waiting.json 下次什么时候醒，` +
+      `journal/ 日记；${inboxPath} 别人说的话，${logPath} 每轮一行，${peoplePath} 和人的往来；` +
+      `${workPath} 你干活的地方。`,
   );
 
   if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);
-  if (lastSaid) out.push(`你上次说完这句就没再说话了：「${excerpt(lastSaid, 200)}」`);
+  if (lastSaid) out.push(`你上次说完这句就没再说话了：「${excerpt(flatten(lastSaid), 120)}」`);
 
   // the first page must not contradict itself: on birth there is no counting yet
   if (waking > 1) out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);
