@@ -18,4 +18,11 @@ test("the container's /state/outbox is the directory the gateway reads", () => {
   // and it must not shadow the whole /state mount that comes first
   const stateAt = args.indexOf(`${paths.palimpsest}:/state`);
   assert.ok(stateAt !== -1 && stateAt < at, "/state 要在 /state/outbox 之前挂");
+})
+test("the tools are loaded from outside the agent's home", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy(), runner: "docker" }, "geng-alice");
+  const joined = args.join(" ");
+  assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
+  assert.match(joined, /-e \/opt\/geng\/extensions\/websearch\.ts/);
 });

@@ -49,6 +49,18 @@ echo '{"text":"群里的一句闲话"}'    > data/alice/inbox/low/001.json      
 
 ### 通道
 
+#### 先把 bot 建出来
+
+每实例一个 bot：**Token 就是路由键**，所以 bot 的昵称和头像就是它在你手机里的身份。
+
+1. 找 [@BotFather](https://t.me/BotFather)，`/newbot`，起名字（这一步之后能改，头像也能改）
+2. **群聊必须关掉 privacy mode**：`/setprivacy` → 选 bot → `Disable`。不关的话它收不到群里的普通消息，
+   只会收到 @ 和命令，而你会以为它坏了
+3. `ops` bot 只需要一个：daemon 和 gateway 都借它说话（消息带 `[daemon@alice]` / `[gateway]` 前缀）
+4. 拉进群的时候要给 bot 管理员权限（论坛群创建 topic 需要，虽然现在不用 topic 了）
+
+#### 写 `secrets/bots.json`
+
 `secrets/bots.json`（一实例一个 bot，`token` 就是路由键）：
 
 ```json
@@ -60,11 +72,24 @@ echo '{"text":"群里的一句闲话"}'    > data/alice/inbox/low/001.json      
 ```
 
 ```bash
-node cmd/geng/index.ts gateway      # 收消息写 inbox，把 outbox 发出去
+node cmd/geng/index.ts gateway      # 前台跑
 ```
 
+常驻的话用 `deploy/geng-gateway.service`，和 daemon 一样替换 `@ROOT@` / `@NODE@`：
+
+```bash
+sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
+  deploy/geng-gateway.service > ~/.config/systemd/user/geng-gateway.service
+systemctl --user daemon-reload
+systemctl --user enable --now geng-gateway
+```
+
+unit 里已经带 `NODE_USE_ENV_PROXY=1`：node 的 `fetch` 默认不认 `HTTP(S)_PROXY`，
+没有它，需要代理的地方 Telegram 直接连不上。
+
 - `ops` 是运维频道；daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀
-- `chat` 可以省略，gateway 会记住第一个给它发消息的会话
+- `chat` 可以省略，gateway 会记住第一个给它发消息的**那个会话**（所以先对 bot 说句话，
+  再让它主动找你）。要知道 chat id 就先说一句话，然后看 `data/_gateway/chats.json`
 - 投递分两档：**直接对它说话（私聊 / @ / 回复）会叫醒它，群里的闲话只进 `inbox/low`**
 - 它自己可以 `mute` 某个来源；但直接对它说话永远穿透静音
 
@@ -83,7 +108,22 @@ node cmd/geng/index.ts search
 ```
 
 容器用 `GENG_SEARCH_URL` + `GENG_SEARCH_TOKEN` 得到 `web_search` / `web_fetch` 两个工具。
-限额写在宿主这边，容器改不了；用完时工具会说"今天的搜索用完了"。
+这两个变量写在 `secrets/<instance>.env` 里（`--env-file` 注入）：
+
+```
+GENG_SEARCH_URL=http://172.17.0.1:8787
+GENG_SEARCH_TOKEN=和上面 search.env 里那串一样
+```
+
+两个注意点：
+
+- 容器在 `agent-net` 上，宿主网关是 **`172.17.0.1`**（默认桥接）而不是它自己的网关，
+  所以 `geng search` 要 `GENG_SEARCH_BIND=0.0.0.0:8787` 才会被容器够到
+- **没有 `GENG_SEARCH_URL` 时扩展自己就不注册**，`web_search` 根本不在工具列表里——
+  这是故意的：工具不该存在但拒绝工作
+
+限额写在宿主这边，容器改不了；用完时工具会说"今天的搜索用完了"，唤醒纸上也会写着
+今天还剩几次。
 
 ## 目录
 
