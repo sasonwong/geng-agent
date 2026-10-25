@@ -26,17 +26,14 @@ export function packageVersion(root: string): string | null {
 }
 
 /**
- * Stated as fact, without advice: the tool list comes from the image, so a rebuild
- * can have added or removed tools, and only it can decide what that means.
+ * Stated as fact, without identifiers. The image id and the version are the daemon's
+ * own bookkeeping, useless to something that can look neither up; all it needs to know
+ * is that it woke into a different world than the one it fell asleep in.
  */
 export function describeEnvChange(before: Env | undefined, now: Env): string | null {
-  if (!before) return null; // first waking: there is nothing to compare against
-  const parts: string[] = [];
-  if (before.imageId && now.imageId && before.imageId !== now.imageId) {
-    parts.push(`镜像 ${before.imageId.replace("sha256:", "").slice(0, 8)} → ${now.imageId.replace("sha256:", "").slice(0, 8)}`);
-  }
-  if (before.version && now.version && before.version !== now.version) {
-    parts.push(`程序 ${before.version} → ${now.version}`);
-  }
-  return parts.length > 0 ? `环境变了：${parts.join("，")}。` : null;
+  if (!before) return null; // first waking: nothing to compare against
+  const changed =
+    (before.imageId ?? null) !== (now.imageId ?? null) ||
+    (before.version ?? null) !== (now.version ?? null);
+  return changed ? "环境变了。" : null;
 }
