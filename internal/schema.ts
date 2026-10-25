@@ -10,8 +10,11 @@ import { readJson } from "./state.ts";
 export const STATE_SCHEMA = 1;
 
 export function onDiskSchema(paths: Paths): number | null {
-  const raw = readJson<{ stateSchema?: unknown }>(join(paths.meta, "state.json"), {});
-  return typeof raw.stateSchema === "number" ? raw.stateSchema : null;
+  const file = join(paths.meta, "state.json");
+  const raw = readJson<{ stateSchema?: unknown } | null>(file, null);
+  if (raw === null) return null; // no life yet
+  // a file without the stamp was written before versioning: older, not unknown
+  return typeof raw.stateSchema === "number" ? raw.stateSchema : 0;
 }
 
 /**

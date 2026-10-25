@@ -120,12 +120,13 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   checks.push({
     name: "stateSchema",
     ok: conflict === null,
+    warnOnly: schema !== null && schema < STATE_SCHEMA,
     detail:
       conflict ??
       (schema === null
-        ? "还没写过（第一次醒来时会写上）"
+        ? "还没有这个生命（第一次醒来时会写上）"
         : schema < STATE_SCHEMA
-          ? `${schema} < ${STATE_SCHEMA}：旧版本写的，需要一次迁移`
+          ? `${schema} < ${STATE_SCHEMA}：旧版本写的，下一轮醒来会补上；真改过形状才需要迁移`
           : `${schema}`),
   });
 

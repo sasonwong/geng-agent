@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths } from "../internal/paths.ts";
@@ -25,4 +25,14 @@ test("the writer stamps the schema, so the file can never lack it", () => {
   mkdirSync(paths.meta, { recursive: true });
   writeMeta(paths, { wakings: 1 });
   assert.equal(onDiskSchema(paths), STATE_SCHEMA);
+});
+
+test("an unstamped file is older, not unknown", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  mkdirSync(paths.meta, { recursive: true });
+  // written by a build that predates the stamp
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({ wakings: 4 }));
+  assert.equal(onDiskSchema(paths), 0);
+  assert.equal(schemaConflict(0), null);
 });
