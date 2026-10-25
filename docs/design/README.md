@@ -256,6 +256,40 @@ waiting、journal 全在盘上，纸指路，它自己读。
 没有压缩兜底之后，唯一可能撑爆一轮的是极端的长轮次（20 分钟超时里几百个工具调用）。
 pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰到——它是一张网，不是日常机制。
 
+## 8.5 文件格式
+
+两类，规则完全不同。
+
+### 甲类：接口（定死，加字段安全，改名要迁移）
+
+两边都读的东西。读的一侧只用认识的字段，所以**加字段永远安全**。
+
+| 文件 | 写者 | 形状 |
+|---|---|---|
+| `palimpsest/policy.json` | 操作者 | `{schema, runner, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,network}}` |
+| `palimpsest/policy.proposal.json` | 它 | 同一形状，只允许白名单里的键，越界即拒绝 |
+| `palimpsest/waiting.json` | 它 | `{wake:{after:"20m"}\|{at:"ISO"},\ why}` 或 `null` |
+| `palimpsest/mute.json` | 它 | `{"*"\|"dm"\|"chat:<id>": {until:"ISO", why}}` |
+| `inbox/*.json` | gateway | `{id, text, from, at, chat, route}` |
+| `outbox/*.json` | 它 | `{id, messages: string[]}` |
+| `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?}` |
+| `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{at,wake,tools,inbox,talkedTo[],touched}}` |
+| `meta/escalation.json` | daemon | `{level, streak, symptom, detail, updatedAt}` |
+| `meta/wakes.json` | daemon | 24 小时内的唤醒时间戳数组 |
+
+`stateSchema` 是这些文件的版本号，由 `writeMeta` 统一盖戳。**磁盘上的版本比代码新就拒绝启动**——
+被旧代码按自己的形状覆盖一次，比重启一百次都糟。
+
+### 乙类：它的书（永不冻结，永不迁移）
+
+`identity.md`、`journal/`、`open-loops/*`、`/work`。
+
+**没有任何 schema。** daemon 只数个数、看 mtime、看存在与否。一旦哪天为了统计去解析内容，
+这套设计就退化成"我们规定的格式"，它写下来的东西就不再是它的。
+
+要改它的书只有一个合法动作：**在系统提示词里告诉它新路径，让它自己搬。** 我们动手搬
+等于替它改写记忆。
+
 ## 9. 隔离与网络
 
 - 每轮一个 `--rm` 容器，`--user` 对齐 uid，只挂子目录，`SYSTEM.md` 与 `policy.json` 单文件只读

@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { readJson, writeJson } from "./state.ts";
+import { STATE_SCHEMA } from "./schema.ts";
 
 /**
  * Everything the daemon counts about itself. One reader, used by the daemon, by
@@ -15,6 +16,8 @@ export interface Env {
 }
 
 export interface Meta {
+  /** Stamped by writeMeta: the shape the code expects to read back. */
+  stateSchema?: number;
   lastWakeMs?: number;
   wakings?: number;
   /** The last thing it said, so a fresh-context waking knows how it left things. */
@@ -40,7 +43,8 @@ export function readMeta(paths: Paths): Meta {
 }
 
 export function writeMeta(paths: Paths, meta: Meta): void {
-  writeJson(join(paths.meta, "state.json"), meta);
+  // stamped here rather than at every call site, so the file can never lack it
+  writeJson(join(paths.meta, "state.json"), { ...meta, stateSchema: STATE_SCHEMA });
 }
 
 export function readWakes(paths: Paths, nowMs: number): number[] {

@@ -17,7 +17,13 @@ test("meta reads what the daemon wrote, not an older layout", () => {
   const paths = fixture();
   assert.deepEqual(readMeta(paths), {});
   writeMeta(paths, { lastWakeMs: 1_000, wakings: 3, lastSaid: "先去看 cgroup" });
-  assert.deepEqual(readMeta(paths), { lastWakeMs: 1_000, wakings: 3, lastSaid: "先去看 cgroup" });
+  // the schema stamp is added by the writer, so no call site can forget it
+  assert.deepEqual(readMeta(paths), {
+    lastWakeMs: 1_000,
+    wakings: 3,
+    lastSaid: "先去看 cgroup",
+    stateSchema: 1,
+  });
 });
 
 test("wake history keeps only the last 24 hours", () => {

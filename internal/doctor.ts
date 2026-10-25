@@ -9,6 +9,7 @@ import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { repairTail } from "./session.ts";
+import { onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 
 export interface Check {
   name: string;
@@ -114,6 +115,20 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 
   // A directory here is not a cosmetic problem: docker materialises a missing bind-mount
   // target as a directory, and then every line the daemon appends fails with EISDIR.
+  const schema = onDiskSchema(p);
+  const conflict = schemaConflict(schema);
+  checks.push({
+    name: "stateSchema",
+    ok: conflict === null,
+    detail:
+      conflict ??
+      (schema === null
+        ? "还没写过（第一次醒来时会写上）"
+        : schema < STATE_SCHEMA
+          ? `${schema} < ${STATE_SCHEMA}：旧版本写的，需要一次迁移`
+          : `${schema}`),
+  });
+
   checks.push({
     name: "open-loops 是目录",
     ok: !existsSync(`${p.openLoops}.json`),
