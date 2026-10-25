@@ -33,6 +33,11 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 `waiting.json` 的解析。要加测试时按这个标准挑，别给 getter 写测试。
 验收标准不是覆盖率，是"连跑一周不自燃"。
 
+## 镜像
+
+用 `deploy/build.sh` 构建，不要手写 `docker build`：代理只在那个脚本里配对了（构建容器在
+桥接网络里看不见 `127.0.0.1` 上的代理，所以要 `--network=host` 加 build args）。
+
 ## 容器里的扩展
 
 `image/extensions/*.ts` 在镜像里被拷进 `~/.pi/agent/extensions/`，不挂载 ——

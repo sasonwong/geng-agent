@@ -41,6 +41,20 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     return checks;
   }
 
+  const settings = readJson<{ defaultProvider?: string; defaultModel?: string }>(
+    join(p.piDir, "settings.json"),
+    {},
+  );
+  checks.push({
+    name: "容器 settings",
+    ok: typeof settings.defaultProvider === "string" && typeof settings.defaultModel === "string",
+    detail:
+      typeof settings.defaultProvider === "string" && typeof settings.defaultModel === "string"
+        ? `${settings.defaultProvider}/${settings.defaultModel}`
+        : `${join(p.piDir, "settings.json")} 里没有 defaultProvider/defaultModel：容器连不上模型`,
+    warnOnly: policy.runner !== "docker",
+  });
+
   if (policy.runner === "docker") {
     checks.push({ name: "docker", ok: hasCmd("docker"), detail: "run 需要 docker 可执行" });
     checks.push({

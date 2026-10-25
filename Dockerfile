@@ -4,7 +4,12 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl git \
   && rm -rf /var/lib/apt/lists/*
 
-RUN npm i -g @earendil-works/pi-coding-agent
+# registry/retry are build args because a flaky proxy is the normal case
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry "$NPM_REGISTRY" \
+  && npm config set fetch-retries 5 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm i -g --fetch-retries=5 --fetch-retry-maxtimeout=120000 @earendil-works/pi-coding-agent
 
 ENV HOME=/home/agent
 RUN mkdir -p /home/agent/.pi/agent/sessions /home/agent/.pi/agent/extensions \

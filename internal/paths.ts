@@ -27,6 +27,8 @@ export interface Paths {
   journalIndex: string;
   secrets: string;
   systemMd: string;
+  /** Per-instance pi config, mounted read-only over the container's agent dir. */
+  piDir: string;
 }
 
 export function makePaths(root: string, instance: string): Paths {
@@ -66,6 +68,7 @@ export function makePaths(root: string, instance: string): Paths {
     journalIndex: join(journal, "INDEX.md"),
     secrets: join(r, "secrets", `${instance}.env`),
     systemMd: join(r, "deploy", "SYSTEM.md"),
+    piDir: join(data, "pi"),
   };
 }
 

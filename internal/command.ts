@@ -59,6 +59,8 @@ export function buildCommand(
       "-v",
       `${paths.systemMd}:/home/agent/.pi/agent/SYSTEM.md:ro`,
       "-v",
+      `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
+      "-v",
       `${paths.palimpsest}:/state`,
       "-v",
       `${paths.palimpsest}/policy.json:/state/policy.json:ro`,

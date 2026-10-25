@@ -26,6 +26,7 @@ export function initInstance(root: string, instance: string): void {
     p.inboxLow,
     p.outbox,
     p.acks,
+    p.piDir,
   ]) {
     mkdirSync(d, { recursive: true });
   }
@@ -34,6 +35,12 @@ export function initInstance(root: string, instance: string): void {
   if (!existsSync(p.policy) && existsSync(policyTemplate)) {
     mkdirSync(dirname(p.policy), { recursive: true });
     copyFileSync(policyTemplate, p.policy);
+  }
+
+  const settingsTemplate = join(root, "deploy", "settings.json");
+  const settingsFile = join(p.piDir, "settings.json");
+  if (!existsSync(settingsFile) && existsSync(settingsTemplate)) {
+    copyFileSync(settingsTemplate, settingsFile);
   }
 
   if (!existsSync(p.secrets)) {

@@ -99,6 +99,36 @@ deploy/    SYSTEM.md  policy.json  geng@.service  egress.sh
 
 `data/`、`backup/`、`secrets/` 全部 gitignore。
 
+## 容器
+
+```bash
+deploy/build.sh                # 需要代理时：DOCKER_BUILD_PROXY=http://127.0.0.1:3128 deploy/build.sh
+node cmd/geng/index.ts doctor alice --probe
+```
+
+镜像里烤好：pi、pi-observational-memory、`say`/`mute`/`web_search`。不挂载，它改不了自己的工具。
+
+每个实例自己的一份 pi 配置在 `data/<instance>/pi/settings.json`（`geng init` 从
+`deploy/settings.json` 拷），**只读**挂到容器的 agent 目录：provider / model / thinking /
+om 的阈值都在这里，它既不能换模型来躲上下文压力，也不能改 om 的压缩点。换模型改这个文件，不重建镜像。
+
+模型凭据走 `secrets/<instance>.env`（`--env-file` 注入，不挂载）：
+```
+OPENCODE_API_KEY=...
+```
+
+### 代理
+
+两处，别混：
+
+| 谁需要 | 怎么配 |
+|---|---|
+| docker daemon 拉镜像 | `/etc/systemd/system/docker.service.d/proxy.conf` |
+| 构建步骤里的 apt / npm | `deploy/build.sh`：构建容器在桥接网络里看不见 `127.0.0.1` 上的代理，所以它用 `--network=host` 加 build args |
+| gateway 连 Telegram | `NODE_USE_ENV_PROXY=1 node cmd/geng/index.ts gateway`（Node 的 fetch 默认不认 `HTTP(S)_PROXY`） |
+
+agent 容器本身**不需要**代理：`opencode.ai` 直连可达。
+
 ### 备份
 
 一次清醒一张快照，用 [rustic](https://rustic.cli.rs/)。`geng init` 会生成
