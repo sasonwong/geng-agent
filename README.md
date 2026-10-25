@@ -124,7 +124,7 @@ OPENCODE_API_KEY=...
 | 谁需要 | 怎么配 |
 |---|---|
 | docker daemon 拉镜像 | `/etc/systemd/system/docker.service.d/proxy.conf` |
-| 构建步骤里的 apt / npm | `deploy/build.sh`：构建容器在桥接网络里看不见 `127.0.0.1` 上的代理，所以它用 `--network=host` 加 build args |
+| 构建步骤里的 apt / npm | `deploy/build.sh`：只在设了 `DOCKER_BUILD_PROXY` 时才用 `--network=host` 加 build args（构建容器在桥接网络里看不见 `127.0.0.1` 上的代理）。直连的机器不用设 |
 | gateway 连 Telegram | `NODE_USE_ENV_PROXY=1 node cmd/geng/index.ts gateway`（Node 的 fetch 默认不认 `HTTP(S)_PROXY`） |
 
 agent 容器本身**不需要**代理：`opencode.ai` 直连可达。
