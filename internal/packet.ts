@@ -102,7 +102,8 @@ export function buildPacket(input: PacketInput): string {
 
   if (waitWhy) out.push("", `你上次说在等：${waitWhy}`);
 
-  out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);
+  // the first page must not contradict itself: on birth there is no counting yet
+  if (waking > 1) out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);
   if (parked) {
     out.push("定时唤醒已经停了：只有有人敲门才叫得醒你。");
   }
@@ -125,7 +126,8 @@ export function buildPacket(input: PacketInput): string {
     out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");
   }
 
-  out.push("", REASON_LINE[reason]);
+  // nobody set an alarm yet on the first waking
+  if (waking > 1) out.push("", REASON_LINE[reason]);
   out.push(inbox.length > 0 ? "说句话回去，或者做你的事。" : "现在没人在跟你说话。");
   out.push("你可以什么都不做，那不算失败。");
   if (!hasIdentity) {

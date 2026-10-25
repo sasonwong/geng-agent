@@ -40,6 +40,8 @@ test("birth packet says nothing about who it is, and permits doing nothing", () 
   const { input } = fixture();
   const text = buildPacket(input({ waking: 1, lastWakeMs: null }));
   assert.match(text, /这是你第一次醒来/);
+  // birth must not claim it woke itself up, and must not count a 24h window
+  assert.doesNotMatch(text, /被自己定的闹钟叫醒|最近 24 小时醒了/);
   assert.match(text, /你可以什么都不做，那不算失败/);
   assert.match(text, /先写下你是谁/);
   assert.match(text, /没人在跟你说话/);
