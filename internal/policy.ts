@@ -10,6 +10,8 @@ export interface Policy {
     timeoutSec: number;
     defaultWakeMinutes: number;
     minWakeMinutes: number;
+    /** Identical tool + args this many times counts as "stuck". */
+    repeatThreshold: number;
   };
   packet: { maxBytes: number };
   container: {
@@ -26,7 +28,7 @@ export function defaultPolicy(): Policy {
   return {
     schema: 1,
     runner: "local",
-    cycle: { timeoutSec: 1200, defaultWakeMinutes: 30, minWakeMinutes: 1 },
+    cycle: { timeoutSec: 1200, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
     packet: { maxBytes: 8192 },
     container: {
       image: "geng-agent:latest",
@@ -81,6 +83,7 @@ export function loadPolicy(file: string): Policy {
       timeoutSec: num(cycle.timeoutSec, "cycle.timeoutSec", 10),
       defaultWakeMinutes: num(cycle.defaultWakeMinutes, "cycle.defaultWakeMinutes", 1),
       minWakeMinutes: num(cycle.minWakeMinutes, "cycle.minWakeMinutes", 1),
+      repeatThreshold: num(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
     packet: { maxBytes: num(p.packet?.maxBytes ?? d.packet.maxBytes, "packet.maxBytes", 512) },
     container: {

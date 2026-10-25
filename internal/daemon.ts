@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { abortRunning, listSessionFiles, runCycle, sweepOrphans } from "./runner.ts";
+import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { peekInbox, takeInbox } from "./inbox.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, type Paths } from "./paths.ts";
@@ -9,9 +9,13 @@ import { formatDuration, readWaiting, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
+import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
+import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
+import { advance, loadEscalation, planFor, saveEscalation, type Escalation, type Plan } from "./escalation.ts";
 
 const POLL_MS = 5_000;
 const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
+const DAY_MS = 24 * 3_600_000;
 
 export interface DaemonOptions {
   root: string;
@@ -21,10 +25,10 @@ export interface DaemonOptions {
   log?: (line: string) => void;
 }
 
-interface StartState {
-  lastWakeMs: number | null;
-  waking: number;
-  crashed: boolean;
+interface Meta {
+  lastWakeMs?: number;
+  wakings?: number;
+  sessionGen?: number;
 }
 
 function requiredDirs(p: Paths): string[] {
@@ -38,6 +42,7 @@ function requiredDirs(p: Paths): string[] {
     p.meta,
     p.inbox,
     p.inboxSeen,
+    p.inboxLow,
     p.outbox,
     p.acks,
   ];
@@ -45,6 +50,7 @@ function requiredDirs(p: Paths): string[] {
 
 function inboxPending(p: Paths): boolean {
   try {
+    // only the top level counts as a knock; inbox/low is drained but never wakes
     return readdirSync(p.inbox).some((f) => f.endsWith(".json"));
   } catch {
     return false;
@@ -53,8 +59,14 @@ function inboxPending(p: Paths): boolean {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
 
-/** Wait until `dueAtMs`, but wake early if someone knocks. */
-async function sleepUntil(dueAtMs: number, paths: Paths): Promise<"time" | "knock"> {
+async function sleepUntil(dueAtMs: number, paths: Paths, parked: boolean): Promise<"time" | "knock"> {
+  if (parked) {
+    // only a knock can wake a parked instance; no timer
+    for (;;) {
+      await sleep(5_000);
+      if (inboxPending(paths)) return "knock";
+    }
+  }
   while (Date.now() < dueAtMs) {
     await sleep(Math.min(POLL_MS, dueAtMs - Date.now()));
     if (inboxPending(paths)) return "knock";
@@ -62,10 +74,6 @@ async function sleepUntil(dueAtMs: number, paths: Paths): Promise<"time" | "knoc
   return "time";
 }
 
-/**
- * A leftover intent.json means the previous waking never finished. Rename it out of
- * the way and report the fact once, so the next waking knows to look before working.
- */
 function recoverIntent(paths: Paths): boolean {
   if (!existsSync(paths.intent)) return false;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -77,16 +85,46 @@ function recoverIntent(paths: Paths): boolean {
   return true;
 }
 
-function readStart(paths: Paths): StartState {
-  const meta = readJson<{ lastWakeMs?: number; wakings?: number }>(
-    join(paths.meta, "state.json"),
-    {},
-  );
-  return {
-    lastWakeMs: typeof meta.lastWakeMs === "number" ? meta.lastWakeMs : null,
-    waking: typeof meta.wakings === "number" ? meta.wakings : 0,
-    crashed: false,
-  };
+function readMeta(paths: Paths): Meta {
+  return readJson<Meta>(join(paths.meta, "state.json"), {});
+}
+
+function recordWake(paths: Paths, nowMs: number): number {
+  const file = join(paths.meta, "wakes.json");
+  const all = readJson<number[]>(file, []).filter((t) => nowMs - t < DAY_MS);
+  all.push(nowMs);
+  writeJson(file, all);
+  return all.length;
+}
+
+function logLine(
+  waking: number,
+  reason: WakeReason,
+  r: RpcResult | null,
+  symptom: string,
+  level: number,
+  inboxCount: number,
+  interventions: string[],
+): string {
+  const parts = [
+    new Date().toISOString(),
+    `#${waking}`,
+    `wake=${reason}`,
+    `sym=${symptom}`,
+    `lvl=${level}`,
+  ];
+  if (r) {
+    parts.push(
+      `dur=${formatDuration(r.durationMs)}`,
+      `tools=${r.toolCalls.length}`,
+      `tokens=${r.stats?.tokens ?? "-"}`,
+      `cost=${r.stats?.cost?.toFixed(4) ?? "-"}`,
+      `timedout=${r.timedOut ? "yes" : "no"}`,
+    );
+  }
+  parts.push(`inbox=${inboxCount}`);
+  if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
+  return parts.join(" ");
 }
 
 export async function runDaemon(o: DaemonOptions): Promise<void> {
@@ -99,7 +137,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   if (!o.dry) {
     releaseLock = acquirePidLock(join(paths.data, "daemon.pid"));
     const onSignal = () => {
-      abortRunning();
+      abortActive();
       releaseLock?.();
       process.exit(0);
     };
@@ -116,28 +154,33 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
   }
 
-  const sessionId = `geng-${paths.instance}`;
   const statePath = policy.runner === "docker" ? "/state" : paths.palimpsest;
   const workPath = policy.runner === "docker" ? "/work" : paths.workspace;
-  // A dry run reports a leftover intent but must not move it: previews stay read-only.
-  let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
+  let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
+  let escalation: Escalation = loadEscalation(paths);
 
   for (;;) {
-    const start = readStart(paths);
+    const meta = readMeta(paths);
+    const waking = (meta.wakings ?? 0) + 1;
+    const plan: Plan = planFor(escalation);
     let reason: WakeReason;
     let pendingWait: WaitSpec | null;
 
-    if (o.once) {
+    if (o.once || o.dry) {
       reason = inboxPending(paths) ? "knock" : "timer";
       pendingWait = readWaiting(paths.waiting, Date.now());
     } else {
       pendingWait = readWaiting(paths.waiting, Date.now());
       const minWakeMs = policy.cycle.minWakeMinutes * 60_000;
-      const dueAt = pendingWait
-        ? Math.max(pendingWait.dueAtMs, Date.now() + minWakeMs)
-        : Date.now() + policy.cycle.defaultWakeMinutes * 60_000;
-      const outcome = await sleepUntil(dueAt, paths);
+      const backoffMs = policy.cycle.defaultWakeMinutes * 60_000 * plan.backoff;
+      const dueAt =
+        plan.backoff > 1
+          ? Date.now() + backoffMs
+          : pendingWait
+            ? Math.max(pendingWait.dueAtMs, Date.now() + minWakeMs)
+            : Date.now() + backoffMs;
+      const outcome = await sleepUntil(dueAt, paths, plan.parked);
       reason = outcome === "knock" ? "knock" : pendingWait ? "timer" : "nudge";
     }
 
@@ -149,20 +192,21 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       }
     }
 
-    const inbox = o.dry ? peekInbox(paths.inbox) : takeInbox(paths.inbox, paths.inboxSeen);
+    const inbox = o.dry ? peekInbox(paths.inbox) : takeInbox(paths.inbox, paths.inboxSeen, paths.inboxLow);
     if (inbox.length > 0) reason = "knock";
 
     const nowMs = Date.now();
-    const waking = start.waking + 1;
-    const longGap =
-      start.lastWakeMs !== null && nowMs - start.lastWakeMs > longGapMs;
+    const longGap = typeof meta.lastWakeMs === "number" && nowMs - meta.lastWakeMs > longGapMs;
+    const wakes24h = readJson<number[]>(join(paths.meta, "wakes.json"), []).filter(
+      (t) => nowMs - t < DAY_MS,
+    ).length;
 
     const packet = buildPacket({
       paths,
       nowMs,
       reason,
       waitWhy: pendingWait?.why ?? null,
-      lastWakeMs: start.lastWakeMs,
+      lastWakeMs: typeof meta.lastWakeMs === "number" ? meta.lastWakeMs : null,
       waking,
       statePath,
       workPath,
@@ -170,6 +214,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       maxBytes: policy.packet.maxBytes,
       crashed,
       longGap,
+      hint: plan.hint,
+      wakes24h: wakes24h + 1,
+      parked: plan.parked,
     });
 
     if (o.dry) {
@@ -177,39 +224,68 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       return;
     }
 
+    const sessionGen = plan.newSession ? (meta.sessionGen ?? 0) + 1 : (meta.sessionGen ?? 0);
+    const sessionId = sessionGen === 0 ? `geng-${paths.instance}` : `geng-${paths.instance}-${sessionGen}`;
+
     writeJson(paths.intent, {
       startedAt: new Date(nowMs).toISOString(),
       waking,
       reason,
-      inboxIds: inbox.map((m) => m.id),
+      level: escalation.level,
       sessionId,
+      inboxIds: inbox.map((m) => m.id),
     });
-    writeJson(join(paths.meta, "state.json"), { lastWakeMs: nowMs, wakings: waking });
+    writeJson(join(paths.meta, "state.json"), {
+      lastWakeMs: nowMs,
+      wakings: waking,
+      sessionGen,
+    });
+    recordWake(paths, nowMs);
 
-    const result = await runCycle({ paths, policy, prompt: packet, sessionId });
+    const result = await runWaking({
+      command: buildCommand(paths, policy, sessionId),
+      instance: paths.instance,
+      isDocker: policy.runner === "docker",
+      timeoutMs: policy.cycle.timeoutSec * 1000,
+      prompt: packet,
+      repeatThreshold: policy.cycle.repeatThreshold,
+    });
+
     rmSync(paths.intent, { force: true });
     crashed = false;
 
-    const line = [
-      new Date().toISOString(),
-      `#${waking}`,
-      `wake=${reason}`,
-      `dur=${formatDuration(result.durationMs)}`,
-      `code=${result.code ?? "null"}`,
-      `timedout=${result.timedOut ? "yes" : "no"}`,
-      `inbox=${inbox.length}`,
-      `out=${result.stdout.length}`,
-    ].join(" ");
+    const symptom = classify(result);
+    escalation = advance(escalation, symptom, result);
+    saveEscalation(paths, escalation);
+
+    const line = logLine(
+      waking,
+      reason,
+      result,
+      symptom,
+      escalation.level,
+      inbox.length,
+      result.interventions,
+    );
     appendLine(paths.daemonLog, line);
     log(line);
 
-    if (result.stdout.trim() !== "") writeText(join(paths.data, "last-output.txt"), result.stdout);
-    if (result.stderr.trim() !== "") {
+    if (result.finalText.trim() !== "") {
+      writeText(join(paths.data, "last-output.txt"), result.finalText);
+    }
+    if (result.stderrTail.trim() !== "") {
+      appendLine(join(paths.data, "last-stderr.log"), `${new Date().toISOString()} ${result.stderrTail.trim()}`);
+    }
+    if (symptom !== "ok") {
       appendLine(
-        join(paths.data, "last-stderr.log"),
-        `${new Date().toISOString()} ${result.stderr.trim()}`,
+        join(paths.usage, "symptoms.log"),
+        `${new Date().toISOString()} ${symptom} lvl=${escalation.level} ${escalation.detail}`,
       );
     }
+    if (escalation.level >= 3) {
+      log(`  → 下一轮按第 ${escalation.level} 档（${escalation.symptom ? SYMPTOM_LABEL[escalation.symptom] : "?"}，连续 ${escalation.streak} 次）`);
+    }
+
     if (o.once) return;
   }
 }

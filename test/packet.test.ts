@@ -27,6 +27,9 @@ function fixture(): { root: string; input: (over: Partial<PacketInput>) => Packe
     maxBytes: 8192,
     crashed: false,
     longGap: false,
+    hint: null,
+    wakes24h: 1,
+    parked: false,
   };
   return { root, input: (over) => ({ ...base, ...over }) };
 }

@@ -2,7 +2,7 @@
 import { resolve } from "node:path";
 import { runDaemon } from "../../internal/daemon.ts";
 import { ExpectedError } from "../../internal/errors.ts";
-import { runDoctor } from "../../internal/doctor.ts";
+import { runDoctorWithProbe } from "../../internal/doctor.ts";
 import { initInstance } from "../../internal/init.ts";
 import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
@@ -14,7 +14,7 @@ const USAGE = `geng <command> [options]
   init <instance>                    建目录、落 policy、生成 secrets 模板
   daemon --instance <instance>       一直跑（调试用 geng-dev，见 AGENTS.md）
   status [<instance>|--all]          一屏看状态
-  doctor [<instance>] [--fix]        把不变量变成检查
+  doctor <instance> [--fix] [--probe] 把不变量变成检查（--probe 起个容器真验挂载与出口）
   gateway                            阶段 2，未实现
 
 通用选项：
@@ -26,6 +26,7 @@ interface Args {
   instance: string | null;
   root: string;
   fix: boolean;
+  probe: boolean;
   all: boolean;
 }
 
@@ -35,6 +36,7 @@ function parse(argv: string[]): Args {
     instance: null,
     root: REPO_ROOT,
     fix: false,
+    probe: false,
     all: false,
   };
   const rest = argv.slice(1);
@@ -51,6 +53,8 @@ function parse(argv: string[]): Args {
       args.instance = v;
     } else if (a === "--fix") {
       args.fix = true;
+    } else if (a === "--probe") {
+      args.probe = true;
     } else if (a === "--all") {
       args.all = true;
     } else if (a === "-h" || a === "--help") {
@@ -134,7 +138,7 @@ async function main(): Promise<number> {
         console.error("用法：geng doctor <instance> [--fix]");
         return 2;
       }
-      return runDoctor(args.root, args.instance, args.fix);
+      return await runDoctorWithProbe(args.root, args.instance, args.fix, args.probe);
     }
 
     case "gateway":

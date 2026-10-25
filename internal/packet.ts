@@ -21,6 +21,12 @@ export interface PacketInput {
   maxBytes: number;
   /** The previous waking died mid-flight. */
   crashed: boolean;
+  /** A [观察] block explaining how the last waking ended, if it did not end well. */
+  hint: string | null;
+  /** Wakings in the last 24 hours, including this one. */
+  wakes24h: number;
+  /** Timer wakes are off; only a knock gets through. */
+  parked: boolean;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -60,7 +66,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
-  const { inbox, maxBytes, crashed, longGap } = input;
+  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -92,12 +98,21 @@ export function buildPacket(input: PacketInput): string {
 
   if (waitWhy) out.push("", `你上次说在等：${waitWhy}`);
 
+  out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);
+  if (parked) {
+    out.push("定时唤醒已经停了：只有有人敲门才叫得醒你。");
+  }
+
   out.push("", "未闭合的事：", ...renderOpenLoops(paths, nowMs));
 
   const recent = readTail(paths.daemonLog, 6);
   out.push("", "最近几轮:", ...(recent.length > 0 ? recent : ["（这是第一轮）"]));
 
   if (inbox.length > 0) out.push("", ...renderInbox(inbox));
+
+  if (hint) {
+    out.push("", "[观察]", hint);
+  }
 
   if (crashed) {
     out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");

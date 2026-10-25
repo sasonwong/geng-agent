@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
-import { listSessionFiles } from "./runner.ts";
+import { execFileSync, spawn } from "node:child_process";
+import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy } from "./policy.ts";
 import { repairTail } from "./session.ts";
@@ -149,8 +149,77 @@ function scanForSecrets(dir: string): string {
   return hits.join(", ");
 }
 
-export function runDoctor(root: string, instance: string, fix: boolean): number {
-  const checks = checkInstance(root, instance, fix);
+const PROBE = [
+  "sh",
+  "-c",
+  [
+    'if (echo x >> /state/policy.json) 2>/dev/null; then echo POLICY_WRITABLE; else echo POLICY_READONLY; fi',
+    'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
+    'if curl -s -m 3 -o /dev/null http://172.17.0.1:2375/version 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
+    "true",
+  ].join("; "),
+];
+
+/** What the container can actually do — the only honest way to test mounts and egress. */
+async function probe(root: string, instance: string): Promise<Check[]> {
+  const o = makePaths(root, instance);
+  const policy = loadPolicy(o.policy);
+  const checks: Check[] = [];
+
+  if (policy.runner !== "docker") {
+    checks.push({ name: "容器探针", ok: false, detail: "runner 不是 docker，跳过", warnOnly: true });
+    return checks;
+  }
+  if (!hasCmd("docker")) {
+    checks.push({ name: "容器探针", ok: false, detail: "没有 docker" });
+    return checks;
+  }
+
+  const command = buildCommand(o, policy, "geng-doctor-probe", PROBE);
+  const out = await new Promise<string>((resolve) => {
+    const p = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "pipe"] });
+    let text = "";
+    p.stdout?.setEncoding("utf8");
+    p.stdout?.on("data", (c: string) => {
+      text += c;
+    });
+    p.stderr?.setEncoding("utf8");
+    p.stderr?.on("data", (c: string) => {
+      text += c;
+    });
+    p.on("error", () => resolve(`PROBE_FAILED ${String(p.spawnfile)}`));
+    p.on("close", () => resolve(text));
+  });
+
+  checks.push({
+    name: "policy.json 只读",
+    ok: out.includes("POLICY_READONLY"),
+    detail: out.includes("POLICY_WRITABLE") ? "容器能改 policy.json —— 只读挂载没生效" : "写不进去",
+  });
+  checks.push({
+    name: "云元数据不可达",
+    ok: out.includes("META_BLOCKED"),
+    detail: out.includes("META_REACHABLE") ? "169.254.169.254 可达 —— 凭证可能泄露" : "不可达",
+  });
+  checks.push({
+    name: "宿主 docker 不可达",
+    ok: out.includes("DOCKER_BLOCKED"),
+    detail: out.includes("DOCKER_REACHABLE") ? "容器能摸到宿主 docker" : "不可达",
+  });
+  if (out.includes("PROBE_FAILED")) {
+    checks.push({ name: "容器探针", ok: false, detail: out.trim().slice(0, 300) });
+  }
+  return checks;
+}
+
+export function runDoctor(
+  root: string,
+  instance: string,
+  fix: boolean,
+  withProbe: boolean,
+  probeResult: Check[] = [],
+): number {
+  const checks = [...checkInstance(root, instance, fix), ...(withProbe ? probeResult : [])];
   let failed = 0;
   for (const c of checks) {
     const mark = c.ok ? "ok  " : c.warnOnly ? "warn" : "FAIL";
@@ -158,4 +227,14 @@ export function runDoctor(root: string, instance: string, fix: boolean): number 
     console.log(`${mark}  ${c.name.padEnd(20)} ${c.detail}`);
   }
   return failed === 0 ? 0 : 1;
+}
+
+export async function runDoctorWithProbe(
+  root: string,
+  instance: string,
+  fix: boolean,
+  withProbe: boolean,
+): Promise<number> {
+  const probeResult = withProbe ? await probe(root, instance) : [];
+  return runDoctor(root, instance, fix, withProbe, probeResult);
 }

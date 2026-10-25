@@ -4,7 +4,8 @@
   "cycle": {
     "timeoutSec": 1200,
     "defaultWakeMinutes": 30,
-    "minWakeMinutes": 1
+    "minWakeMinutes": 1,
+    "repeatThreshold": 3
   },
   "packet": {
     "maxBytes": 8192

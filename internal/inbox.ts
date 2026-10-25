@@ -43,7 +43,13 @@ export function peekInbox(dir: string): InboxMsg[] {
  * Anything unparseable is quarantined as *.bad: one broken message must never
  * block a whole waking.
  */
-export function takeInbox(dir: string, seenDir: string): InboxMsg[] {
+export function takeInbox(dir: string, seenDir: string, lowDir?: string): InboxMsg[] {
+  const out = drain(dir, seenDir);
+  if (lowDir) out.push(...drain(lowDir, seenDir));
+  return out;
+}
+
+function drain(dir: string, seenDir: string): InboxMsg[] {
   const out: InboxMsg[] = [];
   for (const f of jsonFiles(dir)) {
     const msg = parseFile(dir, f);

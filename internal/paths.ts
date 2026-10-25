@@ -13,6 +13,7 @@ export interface Paths {
   meta: string;
   inbox: string;
   inboxSeen: string;
+  inboxLow: string;
   outbox: string;
   acks: string;
   daemonLog: string;
@@ -51,6 +52,7 @@ export function makePaths(root: string, instance: string): Paths {
     meta: join(data, "meta"),
     inbox,
     inboxSeen: join(inbox, "seen"),
+    inboxLow: join(inbox, "low"),
     outbox,
     acks: join(outbox, "acks"),
     daemonLog: join(data, "daemon.log"),
