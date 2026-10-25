@@ -14,7 +14,10 @@ Restart=always
 RestartSec=10
 # Must exceed our own shutdown grace, and stay far below one cycle's timeout.
 TimeoutStopSec=45
-KillMode=mixed
+# control-group, not mixed: flock does not forward signals, so with `mixed` the SIGTERM
+# stops flock and leaves the node daemon orphaned to be SIGKILLed — the shutdown that
+# aborts an in-flight cycle and repairs a truncated session tail never runs.
+KillMode=control-group
 
 [Install]
 WantedBy=default.target

@@ -195,12 +195,16 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       pendingWait = readWaiting(paths.waiting);
       const minWakeMs = policy.cycle.minWakeMinutes * 60_000;
       const backoffMs = policy.cycle.defaultWakeMinutes * 60_000 * plan.backoff;
+      const firstWake = (meta.wakings ?? 0) === 0;
       const dueAt =
-        plan.backoff > 1
-          ? Date.now() + backoffMs
-          : pendingWait
-            ? Math.max(pendingWait.dueAtMs, Date.now() + minWakeMs)
-            : Date.now() + backoffMs;
+        // a life that has never woken has nothing to wait for: the first page is now
+        firstWake && !pendingWait
+          ? Date.now()
+          : plan.backoff > 1
+            ? Date.now() + backoffMs
+            : pendingWait
+              ? Math.max(pendingWait.dueAtMs, Date.now() + minWakeMs)
+              : Date.now() + backoffMs;
       const outcome = await sleepUntil(dueAt, paths, plan.parked);
       reason = outcome === "knock" ? "knock" : pendingWait ? "timer" : "nudge";
     }
