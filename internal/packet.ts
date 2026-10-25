@@ -31,6 +31,8 @@ export interface PacketInput {
   lowPending: number;
   /** The settings it is allowed to renegotiate, shown so it can renegotiate them. */
   policyLine: string;
+  /** Searches left today; null when no search endpoint is configured. */
+  searchLeft: number | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -70,7 +72,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
-  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine } = input;
+  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -132,6 +134,10 @@ export function buildPacket(input: PacketInput): string {
   out.push("你可以什么都不做，那不算失败。");
   if (!hasIdentity) {
     out.push("如果你决定做点什么，先写下你是谁，以及你为什么想做这件事。");
+  }
+
+  if (searchLeft !== null) {
+    out.push("", searchLeft === 0 ? "今天的搜索用完了。" : `今天还能搜 ${searchLeft} 次。`);
   }
 
   out.push("", `你现在的运行参数：${policyLine}`);

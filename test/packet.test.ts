@@ -32,6 +32,7 @@ function fixture(): { root: string; input: (over: Partial<PacketInput>) => Packe
     parked: false,
     lowPending: 0,
     policyLine: "defaultWakeMinutes=30",
+    searchLeft: 12,
   };
   return { root, input: (over) => ({ ...base, ...over }) };
 }
@@ -91,6 +92,20 @@ test("open loops carry their age", () => {
 test("a long gap is stated as a fact, not an excuse", () => {
   const { input } = fixture();
   assert.match(buildPacket(input({ longGap: true })), /机器可能停过/);
+});
+
+test("search quota is stated as a fact it can weigh", () => {
+  const { input } = fixture();
+  const build = (over: Partial<PacketInput>) => buildPacket(input(over));
+
+  const withQuota = build({ searchLeft: 12 });
+  assert.match(withQuota, /今天还能搜 12 次/);
+
+  const exhausted = build({ searchLeft: 0 });
+  assert.match(exhausted, /今天的搜索用完了/);
+
+  const unconfigured = build({ searchLeft: null });
+  assert.doesNotMatch(unconfigured, /搜索/);
 });
 
 test("packet is truncated rather than overflowing", () => {

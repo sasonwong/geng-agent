@@ -13,6 +13,7 @@ import { ensureGatewayDirs, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
+import { searchQuota } from "./search.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
 import { advance, loadEscalation, planFor, saveEscalation, type Escalation, type Plan } from "./escalation.ts";
@@ -228,6 +229,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       wakes24h: wakes24h + 1,
       parked: plan.parked,
       policyLine: policySummary(policy),
+      searchLeft: searchQuota(paths.root)?.left ?? null,
     });
 
     if (o.dry) {
