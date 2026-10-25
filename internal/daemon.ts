@@ -378,7 +378,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         tools: result.toolCalls.length,
         inbox: inbox.length,
         talkedTo: [...inbox].reverse().find((m) => m.from)?.from ?? null,
-        touched: countTouched(paths.workspace, startedMs),
+        // both halves: a cycle that only wrote a journal entry did something, and a
+        // count that only watches /work would quietly teach it to touch files instead
+        touched:
+          countTouched(paths.workspace, startedMs) + countTouched(paths.palimpsest, startedMs),
       },
     };
     writeMeta(paths, meta);

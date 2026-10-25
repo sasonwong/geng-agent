@@ -5,12 +5,13 @@ const SKIP = new Set(["node_modules", ".git", ".cache"]);
 
 /**
  * How many files under `dir` were written since `sinceMs`. A count, never a judgement:
- * the page states it as a fact, and no decision is ever made from it.
+ * the page states it as a fact, and no decision is ever made from it. A directory that
+ * cannot be read counts as zero — this number only ever decorates the page.
  *
  * shortcut: bounded walk (cap entries); a workspace with millions of files will
  * undercount. Raise the cap or use find -newer if that ever happens.
  */
-export function countTouched(dir: string, sinceMs: number, cap = 5000): number | null {
+export function countTouched(dir: string, sinceMs: number, cap = 5000): number {
   let seen = 0;
   let touched = 0;
   const walk = (at: string): void => {
@@ -36,10 +37,6 @@ export function countTouched(dir: string, sinceMs: number, cap = 5000): number |
       else if (st.mtimeMs > sinceMs) touched++;
     }
   };
-  try {
-    walk(dir);
-  } catch {
-    return null;
-  }
+  walk(dir);
   return touched;
 }

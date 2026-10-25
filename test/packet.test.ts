@@ -121,12 +121,12 @@ test("the previous waking is stated as counts, never as a story", () => {
       lastCycle: { at: "2026-03-02T08:59:00Z", wake: "knock", tools: 9, inbox: 1, talkedTo: "telegram:@you", touched: 0 },
     }),
   );
-  assert.match(knocked, /上一轮：有人敲门，和 telegram:@you 说了话，\/work 里没动东西。/);
+  assert.match(knocked, /上一轮：有人敲门，和 telegram:@you 说了话，写了 0 个文件。/);
 
   const worked = buildPacket(
     input({ lastCycle: { at: "2026-03-02T08:30:00Z", wake: "timer", tools: 9, inbox: 0, talkedTo: null, touched: 3 } }),
   );
-  assert.match(worked, /上一轮：你自己的闹钟，动了 3 个文件。/);
+  assert.match(worked, /上一轮：你自己的闹钟，写了 3 个文件。/);
 
   assert.doesNotMatch(buildPacket(input({ lastCycle: null })), /上一轮：/);
 });

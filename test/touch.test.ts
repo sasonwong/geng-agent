@@ -15,7 +15,7 @@ test("only files written after the last waking are counted", () => {
   assert.equal(countTouched(dir, 2_000_000), 1);
 });
 
-test("node_modules is skipped, and a missing workspace is not a crash", () => {
+test("node_modules is skipped, and a missing directory counts as nothing", () => {
   const dir = mkdtempSync(join(tmpdir(), "geng-test-"));
   mkdirSync(join(dir, "node_modules", "x"), { recursive: true });
   writeFileSync(join(dir, "node_modules", "x", "a.js"), "x");

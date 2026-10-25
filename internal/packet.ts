@@ -48,7 +48,7 @@ export interface PacketInput {
     tools: number;
     inbox: number;
     talkedTo: string | null;
-    touched: number | null;
+    touched: number;
   } | null;
   /** The last thing said on the address that last spoke, whoever said it. */
   lastWords: { dir: "in" | "out"; text: string; at: string; who: string } | null;
@@ -130,13 +130,10 @@ export function buildPacket(input: PacketInput): string {
   if (envChanged) out.push(envChanged);
   if (lastCycle) {
     const did = lastCycle.talkedTo ? `，和 ${lastCycle.talkedTo} 说了话` : "";
-    const moved =
-      lastCycle.touched === null
-        ? ""
-        : lastCycle.touched > 0
-          ? `，动了 ${lastCycle.touched} 个文件`
-          : "，/work 里没动东西";
-    out.push(`上一轮：${LAST_WAKE[lastCycle.wake]}${did}${moved}。`);
+    // state on disk is untrusted: an older record may carry a null here
+    const wrote = Number.isFinite(lastCycle.touched) ? lastCycle.touched : 0;
+    // 0 is stated as 0: "wrote 0 files" is a fact, "did nothing" would be a verdict
+    out.push(`上一轮：${LAST_WAKE[lastCycle.wake]}${did}，写了 ${wrote} 个文件。`);
   }
 
   if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);

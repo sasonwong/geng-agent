@@ -27,8 +27,8 @@ export interface Meta {
     inbox: number;
     /** Who it was talking to, if a message woke it. */
     talkedTo: string | null;
-    /** Files under /work written during that cycle. */
-    touched: number | null;
+    /** Files written during that cycle, in /work and /state together. */
+    touched: number;
   };
   env?: Env;
   /**
