@@ -32,8 +32,7 @@ export function packageVersion(root: string): string | null {
  */
 export function describeEnvChange(before: Env | undefined, now: Env): string | null {
   if (!before) return null; // first waking: nothing to compare against
-  const changed =
-    (before.imageId ?? null) !== (now.imageId ?? null) ||
-    (before.version ?? null) !== (now.version ?? null);
-  return changed ? "环境变了。" : null;
+  // Only the image matters: it is what carries the tool list. A program update that
+  // does not rebuild the image changes how it is woken, which it experiences directly.
+  return (before.imageId ?? null) !== (now.imageId ?? null) ? "环境变了。" : null;
 }
