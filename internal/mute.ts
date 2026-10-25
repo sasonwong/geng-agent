@@ -9,6 +9,23 @@ export interface MuteEntry {
 
 export type MuteMap = Record<string, MuteEntry>;
 
+/**
+ * Clearing a mute is a human's move: the agent must not be able to make itself
+ * deaf and then quietly undo the evidence. `target` omitted clears everything.
+ */
+export function clearMutes(file: string, target?: string): string[] {
+  const raw = readJson<MuteMap>(file, {});
+  if (!target) {
+    const keys = Object.keys(raw);
+    if (keys.length > 0) writeJson(file, {});
+    return keys;
+  }
+  if (!(target in raw)) return [];
+  delete raw[target];
+  writeJson(file, raw);
+  return [target];
+}
+
 export function readMutes(file: string, nowMs: number): MuteMap {
   const raw = readJson<MuteMap>(file, {});
   const active: MuteMap = {};

@@ -10,6 +10,7 @@ import { runGateway } from "../../internal/gateway.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
 import { loadPolicy } from "../../internal/policy.ts";
+import { clearMutes } from "../../internal/mute.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
@@ -22,6 +23,7 @@ const USAGE = `geng <command> [options]
                                      把不变量变成检查（--probe 起个容器真验挂载与出口，
                                      --restore-test 把最近一张快照恢复到临时目录再读回来）
   backup <instance> [--list]         立刻拍一张快照 / 列已有快照
+  unmute <instance> [--target <t>]   清掉静音（默认全清；--target dm / chat:<id> / *）
   restore <instance> [<id>] --yes    恢复到 backup/<instance>.restore-<时间>/（默认最近一张；
                                      没有 --yes 不动手；不直接覆盖 data/，自己拷回去）
   gateway                            跑消息搬运（需要 secrets/bots.json）
@@ -41,6 +43,7 @@ interface Args {
   list: boolean;
   yes: boolean;
   all: boolean;
+  target: string | null;
   rest: string[];
 }
 
@@ -55,6 +58,7 @@ function parse(argv: string[]): Args {
     list: false,
     yes: false,
     all: false,
+    target: null,
     rest: [],
   };
   const rest = argv.slice(1);
@@ -79,6 +83,10 @@ function parse(argv: string[]): Args {
       args.list = true;
     } else if (a === "--yes") {
       args.yes = true;
+    } else if (a === "--target") {
+      const v = rest[++i];
+      if (!v) throw new Error("--target 需要一个值");
+      args.target = v;
     } else if (a === "--all") {
       args.all = true;
     } else if (a === "-h" || a === "--help") {
@@ -218,6 +226,21 @@ async function main(): Promise<number> {
       console.log(whole.ok ? "内容完整。" : `缺 ${whole.missing.join("、")}`);
       console.log("确认没问题后，停掉 daemon，把里面的 data/<instance>/ 拷回去。");
       return whole.ok ? 0 : 1;
+    }
+
+    case "unmute": {
+      if (!args.instance) {
+        console.error("用法：geng unmute <instance> [--target dm|'chat:<id>'|'*']");
+        return 2;
+      }
+      const p = makePaths(args.root, args.instance);
+      const cleared = clearMutes(join(p.palimpsest, "mute.json"), args.target ?? undefined);
+      console.log(
+        cleared.length === 0
+          ? "本来就没有静音。"
+          : `已解除：${cleared.join("、")}（被它静音时攒下的消息仍在 inbox 里）`,
+      );
+      return 0;
     }
 
     case "gateway":
