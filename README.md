@@ -111,14 +111,20 @@ node cmd/geng/index.ts search
 这两个变量写在 `secrets/<instance>.env` 里（`--env-file` 注入）：
 
 ```
-GENG_SEARCH_URL=http://172.17.0.1:8787
+GENG_SEARCH_URL=http://<agent-net 的网关>:8787
 GENG_SEARCH_TOKEN=和上面 search.env 里那串一样
+```
+
+网关地址别写死，换台机器就变。查它：
+
+```bash
+docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
 ```
 
 两个注意点：
 
-- 容器在 `agent-net` 上，宿主网关是 **`172.17.0.1`**（默认桥接）而不是它自己的网关，
-  所以 `geng search` 要 `GENG_SEARCH_BIND=0.0.0.0:8787` 才会被容器够到
+- `geng search` 要 `GENG_SEARCH_BIND=0.0.0.0:8787`（或直接绑上面那个网关地址）才会被容器够到
+- 容器**只被允许**够到这一个地址上的这一个端口（见 `deploy/egress.sh`）
 - **没有 `GENG_SEARCH_URL` 时扩展自己就不注册**，`web_search` 根本不在工具列表里——
   这是故意的：工具不该存在但拒绝工作
 

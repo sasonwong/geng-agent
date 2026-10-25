@@ -175,7 +175,8 @@ const PROBE = [
     // the positive control: without it, "everything blocked" passes every check below
     'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
-    'if curl -s -m 3 -o /dev/null http://172.17.0.1:2375/version 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
+    // the real attack path is the host on our own gateway, not a fixed docker0 address
+    'GW=$(ip route 2>/dev/null | awk "/^default/{print \$3; exit}"); if [ -n "$GW" ] && curl -s -m 3 -o /dev/null "http://$GW:2375/version" 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
     "true",
   ].join("; "),
 ];

@@ -1,7 +1,7 @@
 FROM node:24-slim
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git \
+  && apt-get install -y --no-install-recommends ca-certificates curl git iproute2 \
   && rm -rf /var/lib/apt/lists/*
 
 # registry/retry are build args because a flaky proxy is the normal case
