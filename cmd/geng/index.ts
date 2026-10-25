@@ -7,6 +7,8 @@ import { initInstance } from "../../internal/init.ts";
 import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
 import { runGateway } from "../../internal/gateway.ts";
+import { getMe } from "../../internal/telegram.ts";
+import { readJson } from "../../internal/state.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
 import { loadPolicy } from "../../internal/policy.ts";
@@ -24,7 +26,7 @@ const USAGE = `geng <command> [options]
   backup <instance> [--list]         立刻拍一张快照 / 列已有快照
   restore <instance> [<id>] --yes    恢复到 backup/<instance>.restore-<时间>/（默认最近一张；
                                      没有 --yes 不动手；不直接覆盖 data/，自己拷回去）
-  gateway                            跑消息搬运（需要 secrets/bots.json）
+  gateway [--check]                  跑消息搬运（需要 secrets/bots.json）；--check 只验 token
   search                             跑搜索端点（需要 secrets/search.env）
 
 通用选项：
@@ -41,6 +43,7 @@ interface Args {
   list: boolean;
   yes: boolean;
   all: boolean;
+  check: boolean;
   rest: string[];
 }
 
@@ -55,6 +58,7 @@ function parse(argv: string[]): Args {
     list: false,
     yes: false,
     all: false,
+    check: false,
     rest: [],
   };
   const rest = argv.slice(1);
@@ -77,7 +81,9 @@ function parse(argv: string[]): Args {
       args.restoreTest = true;
     } else if (a === "--list") {
       args.list = true;
-    } else if (a === "--yes") {
+    } else if (a === "--check") {
+    args.check = true;
+  } else if (a === "--yes") {
       args.yes = true;
 
     } else if (a === "--all") {
@@ -221,9 +227,39 @@ async function main(): Promise<number> {
       return whole.ok ? 0 : 1;
     }
 
-    case "gateway":
+    case "gateway": {
+      if (args.check) {
+        const bots = readJson<Record<string, { token?: string; chat?: number }>>(
+          join(args.root, "secrets", "bots.json"),
+          {},
+        );
+        const names = Object.keys(bots);
+        if (names.length === 0) {
+          console.error(`没有 bot：先写 ${join(args.root, "secrets", "bots.json")}`);
+          return 2;
+        }
+        let bad = 0;
+        for (const name of names) {
+          const token = bots[name]?.token ?? "";
+          if (token === "") {
+            console.error(`FAIL ${name}: 没有 token`);
+            bad++;
+            continue;
+          }
+          try {
+            const me = await getMe(token);
+            const chat = bots[name]?.chat;
+            console.log(`ok   ${name.padEnd(10)} @${me.username}${chat ? `  chat=${chat}` : "  chat=未设（它给 bot 发第一条消息后自动记住）"}`);
+          } catch (err) {
+            console.error(`FAIL ${name}: ${(err as Error).message}`);
+            bad++;
+          }
+        }
+        return bad === 0 ? 0 : 1;
+      }
       await runGateway({ root: args.root });
       return 0;
+    }
 
     case "search": {
       const env = readSearchEnv(args.root);
