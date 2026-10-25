@@ -154,7 +154,10 @@ deploy/build.sh                # 需要代理时：DOCKER_BUILD_PROXY=http://127
 node cmd/geng/index.ts doctor alice --probe
 ```
 
-镜像里烤好：pi、pi-observational-memory、`say`/`mute`/`web_search`。不挂载，它改不了自己的工具。
+镜像里烤好：pi、`say`/`mute`/`web_search`。不挂载，它改不了自己的工具。
+
+不装记忆扩展：**每轮醒来是一个新会话**，上下文里只有唤醒纸，用完就丢。所以既不需要压缩，
+也没有"阈值到点自动遗忘"这种事。它的记忆是 palimpsest 里的文件，不是上下文。
 
 每个实例自己的一份 pi 配置在 `data/<instance>/pi/settings.json`（`geng init` 从
 `deploy/settings.json` 拷），**只读**挂到容器的 agent 目录：provider / model / thinking /

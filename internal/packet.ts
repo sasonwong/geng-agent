@@ -36,6 +36,8 @@ export interface PacketInput {
   searchLeft: number | null;
   /** Set when the image or the program changed since the last waking. */
   envChanged: string | null;
+  /** The last thing it said, because nothing else carries over between wakings. */
+  lastSaid: string | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -67,7 +69,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -101,6 +103,7 @@ export function buildPacket(input: PacketInput): string {
   );
 
   if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);
+  if (lastSaid) out.push(`你上次说完这句就没再说话了：「${excerpt(lastSaid, 200)}」`);
 
   // the first page must not contradict itself: on birth there is no counting yet
   if (waking > 1) out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);

@@ -38,6 +38,7 @@ function fixture(): {
     policyLine: "defaultWakeMinutes=30",
     searchLeft: 12,
     envChanged: null,
+    lastSaid: null,
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
 }
@@ -95,6 +96,13 @@ test("open loops are counted and pointed at, not pasted", () => {
   assert.match(text, /未闭合的事：2 条，在 \/state\/open-loops\.json。/);
   // the title is for the agent to dig out, not for the daemon to summarize
   assert.doesNotMatch(text, /弄清一个问题/);
+});
+
+test("it is told how it left things, since nothing else carries over", () => {
+  const { input } = fixture();
+  const text = buildPacket(input({ lastSaid: "先去看 cgroup，然后写下来。" }));
+  assert.match(text, /你上次说完这句就没再说话了：「先去看 cgroup，然后写下来。」/);
+  assert.doesNotMatch(buildPacket(input({ lastSaid: null })), /没再说话/);
 });
 
 test("a long gap is stated as a fact, not an excuse", () => {

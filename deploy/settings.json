@@ -3,16 +3,5 @@
   "defaultProvider": "opencode-go",
   "defaultModel": "deepseek-v4.1-flash",
   "defaultThinkingLevel": "low",
-  "packages": [
-    "npm:pi-observational-memory"
-  ],
-  "observational-memory": {
-    "compactAfterTokensMode": "calibrated",
-    "compactAfterTokens": 200000,
-    "model": {
-      "provider": "opencode-go",
-      "id": "deepseek-v4.1-flash",
-      "thinking": "low"
-    }
-  }
+  "packages": []
 }

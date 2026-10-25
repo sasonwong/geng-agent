@@ -44,38 +44,36 @@ test("a good waking resets everything", () => {
   assert.equal(next.level, 0);
 });
 
-test("consecutive failures climb 1 → 3 → 4 → 5 → 6", () => {
+test("consecutive failures climb 1 → 4 and then stay parked", () => {
   let e = FRESH;
   const levels: number[] = [];
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     e = advance(e, "timeout");
     levels.push(e.level);
   }
-  assert.deepEqual(levels, [1, 3, 4, 5, 6]);
-  assert.equal(e.streak, 5);
+  assert.deepEqual(levels, [1, 2, 3, 4, 4, 4]);
+  assert.equal(e.streak, 6);
 });
 
 test("plans only change the next waking, and each level differs", () => {
   const hint = (level: number) => planFor({ ...FRESH, level, symptom: "timeout", streak: level });
   assert.equal(hint(0).hint, null);
 
-  assert.equal(hint(1).newSession, false);
   assert.match(hint(1).hint ?? "", /上一轮超时/);
+  assert.equal(hint(1).backoff, 1);
+  assert.equal(hint(1).parked, false);
 
-  assert.equal(hint(3).newSession, true);
-  assert.match(hint(3).hint ?? "", /上一轮超时/);
-
-  assert.match(hint(4).hint ?? "", /上一轮超时/);
-
-  assert.equal(hint(5).backoff, 3);
-  assert.match(hint(6).hint ?? "", /连着 6 轮没有结果/);
-
-  assert.equal(hint(6).parked, true);
+  // waiting longer is the cheapest thing that is left once context is always fresh
+  assert.equal(hint(2).backoff, 2);
+  assert.equal(hint(3).backoff, 3);
+  assert.match(hint(4).hint ?? "", /连着 4 轮没有结果/);
+  assert.equal(hint(4).parked, true);
 });
 
-test("the first level keeps the same session", () => {
+test("the first failure only tells it what happened", () => {
   const e = advance(FRESH, "repeat", { repeat: { name: "bash", count: 3 } });
   assert.equal(e.level, 1);
   assert.equal(e.detail, "bash 同样的参数重复了 3 次");
-  assert.equal(planFor(e).newSession, false);
+  assert.equal(planFor(e).parked, false);
+  assert.equal(planFor(e).backoff, 1);
 });

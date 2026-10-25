@@ -16,8 +16,8 @@ function fixture(): ReturnType<typeof makePaths> {
 test("meta reads what the daemon wrote, not an older layout", () => {
   const paths = fixture();
   assert.deepEqual(readMeta(paths), {});
-  writeMeta(paths, { lastWakeMs: 1_000, wakings: 3, sessionGen: 1 });
-  assert.deepEqual(readMeta(paths), { lastWakeMs: 1_000, wakings: 3, sessionGen: 1 });
+  writeMeta(paths, { lastWakeMs: 1_000, wakings: 3, lastSaid: "先去看 cgroup" });
+  assert.deepEqual(readMeta(paths), { lastWakeMs: 1_000, wakings: 3, lastSaid: "先去看 cgroup" });
 });
 
 test("wake history keeps only the last 24 hours", () => {

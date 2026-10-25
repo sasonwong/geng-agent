@@ -4,7 +4,7 @@ import { SYMPTOM_LABEL, type Symptom } from "./symptoms.ts";
 import { readJson, writeJson } from "./state.ts";
 
 export interface Escalation {
-  /** 0 = fine. 1..6 are the repair levels. */
+  /** 0 = fine. 1..4 are the repair levels. */
   level: number;
   /** Consecutive failed wakings. */
   streak: number;
@@ -14,8 +14,6 @@ export interface Escalation {
 }
 
 export interface Plan {
-  /** Start a fresh session instead of continuing this one. */
-  newSession: boolean;
   /** A [观察] block for the wake packet, or null. */
   hint: string | null;
   /** Extra sleep multiplier applied to the next alarm. */
@@ -42,50 +40,28 @@ export function saveEscalation(paths: Paths, e: Escalation): void {
 }
 
 /**
- * The next waking's conditions. Levels 1 and 2 (feed it its footprints, force a
- * compaction) happen inside a waking and are not planned here; what is left is
- * how the *next* waking differs from this one.
+ * The next waking's conditions. Every waking already starts from a clean context, so
+ * "start over" is not a repair any more — what is left is: tell it what happened, then
+ * wait longer, then give up, then stop waking it on a timer at all.
  */
 export function planFor(e: Escalation): Plan {
   const label = e.symptom ? SYMPTOM_LABEL[e.symptom] : "上一轮";
+  const hint = `上一轮${label}：${e.detail}`;
   switch (e.level) {
     case 1:
-      return {
-        newSession: false,
-        hint: `上一轮${label}：${e.detail}`,
-        backoff: 1,
-        parked: false,
-      };
+      return { hint, backoff: 1, parked: false };
+    case 2:
+      return { hint, backoff: 2, parked: false };
     case 3:
-      return {
-        newSession: true,
-        hint: `上一轮${label}：${e.detail}`,
-        backoff: 1,
-        parked: false,
-      };
+      return { hint, backoff: 3, parked: false };
     case 4:
       return {
-        newSession: true,
-        hint: `上一轮${label}：${e.detail}`,
-        backoff: 1,
-        parked: false,
-      };
-    case 5:
-      return {
-        newSession: false,
-        hint: `上一轮${label}：${e.detail}`,
-        backoff: 3,
-        parked: false,
-      };
-    case 6:
-      return {
-        newSession: false,
         hint: `连着 ${e.streak} 轮没有结果，定时唤醒已经停了。`,
         backoff: 0,
         parked: true,
       };
     default:
-      return { newSession: false, hint: null, backoff: 1, parked: false };
+      return { hint: null, backoff: 1, parked: false };
   }
 }
 
@@ -106,9 +82,10 @@ export function advance(
   if (symptom === "ok") return { ...FRESH, updatedAt: new Date().toISOString() };
 
   const streak = e.streak + 1;
-  // 1 -> feed it footprints, 2 -> fresh session, 3 -> two options, 4 -> give up,
-  // 5+ -> park. Level 2 never appears here: forcing a compaction happens in-cycle.
-  const level = [1, 3, 4, 5, 6][Math.min(streak, 5) - 1] as number;
+  // 1 -> tell it what happened, 2 -> wait longer, 3 -> give up and back off,
+  // 4+ -> stop waking it on a timer. Forcing a compaction mid-cycle is still level 2
+  // of the repair ladder, but it happens inside a waking rather than between them.
+  const level = Math.min(streak, 4);
   return {
     level,
     streak,

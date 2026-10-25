@@ -236,6 +236,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       workPath,
       inbox,
       mutes: readMutes(paths.mute, nowMs),
+      lastSaid: meta.lastSaid ?? null,
       crashed,
       longGap,
       hint: plan.hint,
@@ -251,8 +252,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       return;
     }
 
-    const sessionGen = plan.newSession ? (meta.sessionGen ?? 0) + 1 : (meta.sessionGen ?? 0);
-    const sessionId = sessionGen === 0 ? `geng-${paths.instance}` : `geng-${paths.instance}-${sessionGen}`;
+    // One waking, one session: nothing carries over in context, so nothing has to be
+    // compacted either. The id is derived from the count, so a crashed waking that is
+    // re-run continues the same file instead of starting a second one.
+    const sessionId = `geng-${paths.instance}-${String(waking).padStart(4, "0")}`;
 
     writeJson(paths.intent, {
       startedAt: new Date(nowMs).toISOString(),
@@ -263,7 +266,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       inboxIds: inbox.map((m) => m.id),
     });
     // spread the existing record: writing a literal here silently dropped `spent`
-    meta = { ...meta, lastWakeMs: nowMs, wakings: waking, sessionGen, env: currentEnv };
+    meta = { ...meta, lastWakeMs: nowMs, wakings: waking, env: currentEnv };
     writeMeta(paths, meta);
     recordWake(paths, nowMs);
 
@@ -287,6 +290,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     if (cumulative) {
       meta = {
         ...meta,
+        lastSaid: result.finalText.trim() === "" ? (meta.lastSaid ?? null) : result.finalText,
         spent: {
           tokens: cumulative.tokens ?? before.tokens ?? 0,
           cost: cumulative.cost ?? before.cost ?? 0,

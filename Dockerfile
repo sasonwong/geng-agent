@@ -11,9 +11,10 @@ RUN npm config set registry "$NPM_REGISTRY" \
   && npm config set fetch-retry-maxtimeout 120000 \
   && npm i -g --fetch-retries=5 --fetch-retry-maxtimeout=120000 @earendil-works/pi-coding-agent
 
+# No memory extension on purpose: every waking is its own session, so there is nothing
+# to compact and nothing to carry. Its memory is the palimpsest, not the context.
 ENV HOME=/home/agent
 RUN mkdir -p /home/agent/.pi/agent/sessions /home/agent/.pi/agent/extensions \
-  && pi install npm:pi-observational-memory \
   && chmod -R 0777 /home/agent
 
 # say / mute / web_search live outside the agent's home and are loaded with -e, so

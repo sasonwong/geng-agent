@@ -23,7 +23,7 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 
 **运行时依赖为零。** 想加一个包之前，先确认它不是三十行代码能解决的事
 （`docker` 走 `spawn`，`telegram` 走 `fetch`，锁走 `flock`，测试走 `node:test`）。
-`pi` 和 `pi-observational-memory` 装在容器镜像里，不算本仓库的依赖。
+`pi` 装在容器镜像里，不算本仓库的依赖。记忆扩展不装：一轮一个会话。
 
 ## 测试
 

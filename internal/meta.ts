@@ -17,7 +17,8 @@ export interface Env {
 export interface Meta {
   lastWakeMs?: number;
   wakings?: number;
-  sessionGen?: number;
+  /** The last thing it said, so a fresh-context waking knows how it left things. */
+  lastSaid?: string | null;
   env?: Env;
   /**
    * The session's running totals as of the last waking. pi reports them cumulatively for
