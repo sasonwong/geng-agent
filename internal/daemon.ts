@@ -9,6 +9,8 @@ import { formatDuration, readWaiting, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
+import { ensureGatewayDirs, writeOps } from "./mute.ts";
+import { applyProposal, policySummary } from "./proposal.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
 import { advance, loadEscalation, planFor, saveEscalation, type Escalation, type Plan } from "./escalation.ts";
@@ -46,6 +48,14 @@ function requiredDirs(p: Paths): string[] {
     p.outbox,
     p.acks,
   ];
+}
+
+function pendingLow(p: Paths): number {
+  try {
+    return readdirSync(p.inboxLow).filter((f) => f.endsWith(".json")).length;
+  } catch {
+    return 0;
+  }
 }
 
 function inboxPending(p: Paths): boolean {
@@ -131,7 +141,19 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const paths = makePaths(o.root, o.instance);
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   ensureDirs(requiredDirs(paths));
-  const policy: Policy = loadPolicy(paths.policy);
+  if (!o.dry) {
+    const proposal = applyProposal(paths);
+    if (proposal) {
+      const lines = [
+        ...proposal.applied.map((a) => `${a.key} ${String(a.from)} → ${a.to}`),
+        ...proposal.rejected.map((r) => `${r.key} 没采用（${r.reason}）`),
+      ];
+      if (lines.length > 0) {
+        writeOps(ensureGatewayDirs(paths.root).ops, `daemon@${paths.instance}`, `改了运行参数：${lines.join("；")}`);
+      }
+    }
+  }
+  let policy: Policy = loadPolicy(paths.policy);
 
   let releaseLock: (() => void) | null = null;
   if (!o.dry) {
@@ -154,10 +176,12 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
   }
 
+  const { ops } = ensureGatewayDirs(paths.root);
   const statePath = policy.runner === "docker" ? "/state" : paths.palimpsest;
   const workPath = policy.runner === "docker" ? "/work" : paths.workspace;
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
   let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
+  if (crashed) writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
   let escalation: Escalation = loadEscalation(paths);
 
   for (;;) {
@@ -215,8 +239,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       crashed,
       longGap,
       hint: plan.hint,
+      lowPending: pendingLow(paths),
       wakes24h: wakes24h + 1,
       parked: plan.parked,
+      policyLine: policySummary(policy),
     });
 
     if (o.dry) {
@@ -280,6 +306,13 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       appendLine(
         join(paths.usage, "symptoms.log"),
         `${new Date().toISOString()} ${symptom} lvl=${escalation.level} ${escalation.detail}`,
+      );
+    }
+    if (escalation.level >= 5) {
+      writeOps(
+        ops,
+        `daemon@${paths.instance}`,
+        `连续 ${escalation.streak} 轮没有结果（${escalation.detail}），下一轮按第 ${escalation.level} 档处理。`,
       );
     }
     if (escalation.level >= 3) {

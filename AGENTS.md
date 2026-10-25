@@ -33,6 +33,11 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 `waiting.json` 的解析。要加测试时按这个标准挑，别给 getter 写测试。
 验收标准不是覆盖率，是"连跑一周不自燃"。
 
+## 容器里的扩展
+
+`image/extensions/*.ts` 在镜像里被拷进 `~/.pi/agent/extensions/`，不挂载 ——
+它不该能改自己和人对谈用的工具。本地 runner 看不到这些扩展，这是已知差异。
+
 ## 边界
 
 - **daemon 里不许出现需要读懂自然语言的分支。** 一旦发现自己在"如果日志里说它放弃了"，说明信号选错了，换个能 `wc -l` 出来的

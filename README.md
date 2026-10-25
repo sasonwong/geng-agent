@@ -38,13 +38,52 @@ node cmd/geng/index.ts daemon --instance alice          # 一直跑
 
 ### 找人说话
 
-把一个 JSON 丢进 `data/<instance>/inbox/`：
+最省事的办法是手写文件：
 
 ```bash
-echo '{"text":"在吗","from":"telegram:@you"}' > data/alice/inbox/001.json
+echo '{"text":"在吗","from":"telegram:@you"}' > data/alice/inbox/001.json      # 会叫醒它
+echo '{"text":"群里的一句闲话"}'    > data/alice/inbox/low/001.json            # 不叫醒，等它自己看
 ```
 
-下一轮醒来（或者它正睡着时被轮询发现）就会看到。gateway 属于阶段 2，现在手写文件即可。
+接上 Telegram 之后由 gateway 写同样的文件。
+
+### 通道
+
+`secrets/bots.json`（一实例一个 bot，`token` 就是路由键）：
+
+```json
+{
+  "ops":   { "token": "123456:AAA", "chat": 123456789 },
+  "alice": { "token": "234567:BBB", "listen": "all" },
+  "bob":   { "token": "345678:CCC", "listen": "mentions" }
+}
+```
+
+```bash
+node cmd/geng/index.ts gateway      # 收消息写 inbox，把 outbox 发出去
+```
+
+- `ops` 是运维频道；daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀
+- `chat` 可以省略，gateway 会记住第一个给它发消息的会话
+- 投递分两档：**直接对它说话（私聊 / @ / 回复）会叫醒它，群里的闲话只进 `inbox/low`**
+- 它自己可以 `mute` 某个来源；但直接对它说话永远穿透静音
+
+### 搜索
+
+搜索的 key 不在容器里。宿主上跑一个只认搜索的端点：
+
+```bash
+# secrets/search.env
+GENG_SEARCH_TOKEN=随手编一串
+DEEPSEEK_API_KEY=sk-...
+GENG_SEARCH_BIND=0.0.0.0:8787
+GENG_SEARCH_DAILY=200
+
+node cmd/geng/index.ts search
+```
+
+容器用 `GENG_SEARCH_URL` + `GENG_SEARCH_TOKEN` 得到 `web_search` / `web_fetch` 两个工具。
+限额写在宿主这边，容器改不了；用完时工具会说"今天的搜索用完了"。
 
 ## 目录
 
@@ -59,6 +98,19 @@ deploy/    SYSTEM.md  policy.json  geng@.service  egress.sh
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore。
+
+### 它可以改自己的运行参数
+
+写 `data/<instance>/palimpsest/policy.proposal.json`，下次启动时被检查。只有这几项能改：
+
+| 能改 | 范围 |
+|---|---|
+| `cycle.defaultWakeMinutes` | 1–720 |
+| `cycle.minWakeMinutes` | 1–120 |
+| `cycle.repeatThreshold` | 2–20 |
+| `packet.maxBytes` | 1024–32768 |
+
+runner、容器限额、网络、一轮的超时**不在谈判范围**——那是框，不是设置。旧 policy 会存进 `meta/policy.history/`。
 
 ## 开发套件
 

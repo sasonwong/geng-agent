@@ -27,6 +27,10 @@ export interface PacketInput {
   wakes24h: number;
   /** Timer wakes are off; only a knock gets through. */
   parked: boolean;
+  /** Ambient messages waiting in inbox/low, which did not wake it. */
+  lowPending: number;
+  /** The settings it is allowed to renegotiate, shown so it can renegotiate them. */
+  policyLine: string;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -66,7 +70,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
-  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked } = input;
+  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -109,6 +113,9 @@ export function buildPacket(input: PacketInput): string {
   out.push("", "最近几轮:", ...(recent.length > 0 ? recent : ["（这是第一轮）"]));
 
   if (inbox.length > 0) out.push("", ...renderInbox(inbox));
+  if (lowPending > 0) {
+    out.push("", `还有 ${lowPending} 条群里的消息在 ${statePath} 旁边的 inbox/low 里等你，它们没有叫醒你。`);
+  }
 
   if (hint) {
     out.push("", "[观察]", hint);
@@ -125,7 +132,11 @@ export function buildPacket(input: PacketInput): string {
     out.push("如果你决定做点什么，先写下你是谁，以及你为什么想做这件事。");
   }
 
-  out.push("", `走之前，在 ${statePath}/waiting.json 写下你下次什么时候醒、为什么：`);
+  out.push("", `你现在的运行参数：${policyLine}`);
+  out.push(`想改的话，把 {"cycle":{"defaultWakeMinutes":30}} 这样的文件写到 ${statePath}/policy.proposal.json，下次醒来前会被检查。`);
+  out.push("");
+
+  out.push(`走之前，在 ${statePath}/waiting.json 写下你下次什么时候醒、为什么：`);
   out.push('  { "wake": { "after": "20m" }, "why": "为什么" }');
   out.push('  { "wake": { "at": "2026-03-02T09:15:00Z" }, "why": "为什么" }');
   out.push("如果你不想再醒来，写 null —— 但先说清为什么。");

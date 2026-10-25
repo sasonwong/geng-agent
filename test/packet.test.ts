@@ -30,6 +30,8 @@ function fixture(): { root: string; input: (over: Partial<PacketInput>) => Packe
     hint: null,
     wakes24h: 1,
     parked: false,
+    lowPending: 0,
+    policyLine: "defaultWakeMinutes=30",
   };
   return { root, input: (over) => ({ ...base, ...over }) };
 }

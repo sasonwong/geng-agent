@@ -6,6 +6,8 @@ import { runDoctorWithProbe } from "../../internal/doctor.ts";
 import { initInstance } from "../../internal/init.ts";
 import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
+import { runGateway } from "../../internal/gateway.ts";
+import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
@@ -15,7 +17,8 @@ const USAGE = `geng <command> [options]
   daemon --instance <instance>       一直跑（调试用 geng-dev，见 AGENTS.md）
   status [<instance>|--all]          一屏看状态
   doctor <instance> [--fix] [--probe] 把不变量变成检查（--probe 起个容器真验挂载与出口）
-  gateway                            阶段 2，未实现
+  gateway                            跑消息搬运（需要 secrets/bots.json）
+  search                             跑搜索端点（需要 secrets/search.env）
 
 通用选项：
   --root <path>                      仓库根目录（默认：本仓库）
@@ -142,8 +145,20 @@ async function main(): Promise<number> {
     }
 
     case "gateway":
-      console.error("gateway 属于阶段 2，还没写。");
-      return 2;
+      await runGateway({ root: args.root });
+      return 0;
+
+    case "search": {
+      const env = readSearchEnv(args.root);
+      if (!env) {
+        console.error(
+          "没有搜索凭据：写 secrets/search.env（GENG_SEARCH_TOKEN、DEEPSEEK_API_KEY，可选 GENG_SEARCH_BIND、GENG_SEARCH_DAILY）",
+        );
+        return 2;
+      }
+      await startSearchServer({ root: args.root, env });
+      return 0;
+    }
 
     default:
       console.error(`未知命令 ${args.cmd}`);

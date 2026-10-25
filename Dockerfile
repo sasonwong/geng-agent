@@ -7,12 +7,14 @@ RUN apt-get update \
 RUN npm i -g @earendil-works/pi-coding-agent
 
 ENV HOME=/home/agent
-RUN mkdir -p /home/agent/.pi/agent/sessions \
+RUN mkdir -p /home/agent/.pi/agent/sessions /home/agent/.pi/agent/extensions \
   && pi install npm:pi-observational-memory \
   && chmod -R 0777 /home/agent
-# shortcut: /home/agent is world-writable so a non-root uid can write sessions.
-# The agent can therefore rewrite its own extensions; when that matters, split the
-# npm/ directory onto a read-only mount.
+
+# say / mute / web_search are baked in, not mounted: the agent must not be able to
+# rewrite the tools it talks to people with.
+COPY image/extensions/ /home/agent/.pi/agent/extensions/
+RUN chmod -R a+r /home/agent/.pi/agent/extensions
 
 WORKDIR /work
 ENTRYPOINT []
