@@ -1,9 +1,13 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
+import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
+import { formatDuration } from "./schedule.ts";
+import { readJson } from "./state.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
-import { loadPolicy } from "./policy.ts";
+import { loadPolicy, type Policy } from "./policy.ts";
 import { repairTail } from "./session.ts";
 
 export interface Check {
@@ -217,9 +221,9 @@ export function runDoctor(
   instance: string,
   fix: boolean,
   withProbe: boolean,
-  probeResult: Check[] = [],
+  extra: Check[] = [],
 ): number {
-  const checks = [...checkInstance(root, instance, fix), ...(withProbe ? probeResult : [])];
+  const checks = [...checkInstance(root, instance, fix), ...extra];
   let failed = 0;
   for (const c of checks) {
     const mark = c.ok ? "ok  " : c.warnOnly ? "warn" : "FAIL";
@@ -229,12 +233,73 @@ export function runDoctor(
   return failed === 0 ? 0 : 1;
 }
 
-export async function runDoctorWithProbe(
-  root: string,
-  instance: string,
-  fix: boolean,
-  withProbe: boolean,
-): Promise<number> {
-  const probeResult = withProbe ? await probe(root, instance) : [];
-  return runDoctor(root, instance, fix, withProbe, probeResult);
+export interface DoctorOptions {
+  root: string;
+  instance: string;
+  fix: boolean;
+  probe: boolean;
+  restoreTest: boolean;
+}
+
+export async function runDoctorWithProbe(o: DoctorOptions): Promise<number> {
+  const extra: Check[] = o.probe ? await probe(o.root, o.instance) : [];
+  extra.push(...(await backupChecks(o.root, o.instance, o.restoreTest)));
+  return runDoctor(o.root, o.instance, o.fix, o.probe, extra);
+}
+
+async function backupChecks(root: string, instance: string, restoreTest: boolean): Promise<Check[]> {
+  const p = makePaths(root, instance);
+  const checks: Check[] = [];
+  let policy: Policy;
+  try {
+    policy = loadPolicy(p.policy);
+  } catch {
+    return checks;
+  }
+  if (!policy.backup.enabled) {
+    checks.push({ name: "备份", ok: false, warnOnly: true, detail: "policy 里关掉了" });
+    return checks;
+  }
+  if (!(await rusticAvailable())) {
+    checks.push({ name: "备份", ok: false, warnOnly: true, detail: "没有 rustic，每轮自动跳过" });
+    return checks;
+  }
+
+  const snapshots = await listSnapshots(p);
+  if (snapshots.length === 0) {
+    checks.push({ name: "备份", ok: false, warnOnly: true, detail: "还没有快照" });
+    return checks;
+  }
+  const latest = snapshots[snapshots.length - 1];
+  const ageMs = Date.now() - Date.parse(latest?.time ?? "");
+  checks.push({
+    name: "备份",
+    ok: ageMs < 24 * 60 * 60 * 1000,
+    warnOnly: true,
+    detail: `${snapshots.length} 张，最近一张 ${formatDuration(ageMs)} 前（${latest?.id.slice(0, 8)}，${latest?.files} 个文件）`,
+  });
+
+  const deploy = readJson<{ daemonVersion?: string }>(join(p.meta, "deploy.json"), {});
+  const pkg = readJson<{ version?: string }>(join(root, "package.json"), {});
+  if (deploy.daemonVersion && pkg.version && deploy.daemonVersion !== pkg.version) {
+    checks.push({
+      name: "备份与当前版本",
+      ok: false,
+      warnOnly: true,
+      detail: `快照由 ${deploy.daemonVersion} 写下，现在是 ${pkg.version}`,
+    });
+  }
+
+  if (restoreTest) {
+    const target = mkdtempSync(join(tmpdir(), "geng-restore-"));
+    const result = await restore({ paths: p, target });
+    const whole = result.ok ? restoredLooksWhole(target) : { ok: false, missing: [result.detail] };
+    rmSync(target, { recursive: true, force: true });
+    checks.push({
+      name: "恢复演练",
+      ok: whole.ok,
+      detail: whole.ok ? "最近一张能读回来" : `缺 ${whole.missing.join("、")}`,
+    });
+  }
+  return checks;
 }

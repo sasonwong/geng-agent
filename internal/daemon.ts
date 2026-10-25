@@ -11,6 +11,7 @@ import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
+import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
@@ -97,6 +98,7 @@ function logLine(
   level: number,
   inboxCount: number,
   interventions: string[],
+  backup: BackupOutcome | null,
 ): string {
   const parts = [
     new Date().toISOString(),
@@ -116,6 +118,7 @@ function logLine(
   }
   parts.push(`inbox=${inboxCount}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
+  if (backup) parts.push(`backup=${backup.status}${backup.detail ? `(${backup.detail})` : ""}`);
   return parts.join(" ");
 }
 
@@ -266,6 +269,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     escalation = advance(escalation, symptom, result);
     saveEscalation(paths, escalation);
 
+    const backup = await maybeBackup({ paths, policy, nowMs: Date.now() });
     const line = logLine(
       waking,
       reason,
@@ -274,6 +278,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       escalation.level,
       inbox.length,
       result.interventions,
+      backup,
     );
     appendLine(paths.daemonLog, line);
     log(line);

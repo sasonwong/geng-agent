@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { runDaemon } from "../../internal/daemon.ts";
 import { ExpectedError } from "../../internal/errors.ts";
 import { runDoctorWithProbe } from "../../internal/doctor.ts";
@@ -8,6 +8,8 @@ import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
 import { runGateway } from "../../internal/gateway.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
+import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
+import { loadPolicy } from "../../internal/policy.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
@@ -16,7 +18,12 @@ const USAGE = `geng <command> [options]
   init <instance>                    建目录、落 policy、生成 secrets 模板
   daemon --instance <instance>       一直跑（调试用 geng-dev，见 AGENTS.md）
   status [<instance>|--all]          一屏看状态
-  doctor <instance> [--fix] [--probe] 把不变量变成检查（--probe 起个容器真验挂载与出口）
+  doctor <instance> [--fix] [--probe] [--restore-test]
+                                     把不变量变成检查（--probe 起个容器真验挂载与出口，
+                                     --restore-test 把最近一张快照恢复到临时目录再读回来）
+  backup <instance> [--list]         立刻拍一张快照 / 列已有快照
+  restore <instance> [<id>] --yes    恢复到 backup/<instance>.restore-<时间>/（默认最近一张；
+                                     没有 --yes 不动手；不直接覆盖 data/，自己拷回去）
   gateway                            跑消息搬运（需要 secrets/bots.json）
   search                             跑搜索端点（需要 secrets/search.env）
 
@@ -30,7 +37,11 @@ interface Args {
   root: string;
   fix: boolean;
   probe: boolean;
+  restoreTest: boolean;
+  list: boolean;
+  yes: boolean;
   all: boolean;
+  rest: string[];
 }
 
 function parse(argv: string[]): Args {
@@ -40,7 +51,11 @@ function parse(argv: string[]): Args {
     root: REPO_ROOT,
     fix: false,
     probe: false,
+    restoreTest: false,
+    list: false,
+    yes: false,
     all: false,
+    rest: [],
   };
   const rest = argv.slice(1);
   const positional: string[] = [];
@@ -58,6 +73,12 @@ function parse(argv: string[]): Args {
       args.fix = true;
     } else if (a === "--probe") {
       args.probe = true;
+    } else if (a === "--restore-test") {
+      args.restoreTest = true;
+    } else if (a === "--list") {
+      args.list = true;
+    } else if (a === "--yes") {
+      args.yes = true;
     } else if (a === "--all") {
       args.all = true;
     } else if (a === "-h" || a === "--help") {
@@ -69,6 +90,7 @@ function parse(argv: string[]): Args {
     }
   }
   if (args.instance === null && positional.length > 0) args.instance = positional[0] as string;
+  args.rest = positional;
   return args;
 }
 
@@ -141,7 +163,61 @@ async function main(): Promise<number> {
         console.error("用法：geng doctor <instance> [--fix]");
         return 2;
       }
-      return await runDoctorWithProbe(args.root, args.instance, args.fix, args.probe);
+      return await runDoctorWithProbe({
+        root: args.root,
+        instance: args.instance,
+        fix: args.fix,
+        probe: args.probe,
+        restoreTest: args.restoreTest,
+      });
+    }
+
+    case "backup": {
+      if (!args.instance) {
+        console.error("用法：geng backup <instance> [--list]");
+        return 2;
+      }
+      const p = makePaths(args.root, args.instance);
+      if (args.list) {
+        const snapshots = await listSnapshots(p);
+        const policy = loadPolicy(p.policy);
+        if (snapshots.length === 0) {
+          console.log(`没有快照（仓库 ${backupRepo(p)}，备份${policy.backup.enabled ? "开着" : "关着"}）`);
+          return 0;
+        }
+        for (const s of snapshots.slice(-20)) {
+          console.log(`${s.id.slice(0, 8)}  ${s.time}  ${s.files} 个文件`);
+        }
+        console.log(`${snapshots.length} 张`);
+        return 0;
+      }
+      const outcome = await maybeBackup({ paths: p, policy: loadPolicy(p.policy), nowMs: Date.now() });
+      console.log(`${outcome.status}${outcome.detail ? ` ${outcome.detail}` : ""}${outcome.ms ? ` · ${outcome.ms}ms` : ""}`);
+      return outcome.status === "fail" ? 1 : 0;
+    }
+
+    case "restore": {
+      if (!args.instance) {
+        console.error("用法：geng restore <instance> [<snapshot-id>] --yes");
+        return 2;
+      }
+      const p = makePaths(args.root, args.instance);
+      if (!args.yes) {
+        console.error("恢复会把快照解到 backup/ 下的一份新目录里。确认的话加 --yes。");
+        return 2;
+      }
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const target = join(args.root, "backup", `${args.instance}.restore-${stamp}`);
+      const result = await restore({ paths: p, snapshot: args.rest[1], target });
+      if (!result.ok) {
+        console.error(`失败：${result.detail}`);
+        return 1;
+      }
+      const whole = restoredLooksWhole(target);
+      console.log(`恢复到 ${target}`);
+      console.log(whole.ok ? "内容完整。" : `缺 ${whole.missing.join("、")}`);
+      console.log("确认没问题后，停掉 daemon，把里面的 data/<instance>/ 拷回去。");
+      return whole.ok ? 0 : 1;
     }
 
     case "gateway":

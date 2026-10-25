@@ -99,6 +99,23 @@ deploy/    SYSTEM.md  policy.json  geng@.service  egress.sh
 
 `data/`、`backup/`、`secrets/` 全部 gitignore。
 
+### 备份
+
+一次清醒一张快照，用 [rustic](https://rustic.cli.rs/)。`geng init` 会生成
+`secrets/rustic.env`（`RUSTIC_PASSWORD`）——**丢了它快照就没了**。
+
+```bash
+node cmd/geng/index.ts backup alice           # 立刻拍一张
+node cmd/geng/index.ts backup alice --list    # 列已有快照
+node cmd/geng/index.ts restore alice --yes    # 解到 backup/alice.restore-<时间>/
+node cmd/geng/index.ts doctor alice --restore-test   # 真的读回来一次
+```
+
+- 没有 `rustic`、没有密码、或者 `policy.json` 里 `backup.enabled: false` → 跳过，不算失败
+- 什么都没变就不拍（一轮闲置不占时间线上的一格）
+- 保留：最近 2000 张 / 每日 90 / 每周 52 / 每月 24，一天整理一次
+- 恢复**不覆盖 `data/`**，解到旁边的新目录，你看过再拷回去
+
 ### 它可以改自己的运行参数
 
 写 `data/<instance>/palimpsest/policy.proposal.json`，下次启动时被检查。只有这几项能改：

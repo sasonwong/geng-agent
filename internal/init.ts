@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { makePaths } from "./paths.ts";
@@ -40,6 +41,15 @@ export function initInstance(root: string, instance: string): void {
     writeFileSync(p.secrets, SECRETS_TEMPLATE, { mode: 0o600 });
   }
   chmodSync(p.secrets, 0o600);
+
+  const rusticEnv = join(root, "secrets", "rustic.env");
+  mkdirSync(join(root, "backup"), { recursive: true });
+  if (!existsSync(rusticEnv)) {
+    writeFileSync(rusticEnv, `# geng: rustic repository password. Lose this and the snapshots are gone.\nRUSTIC_PASSWORD=${randomBytes(18).toString("base64url")}\n`, {
+      mode: 0o600,
+    });
+  }
+  chmodSync(rusticEnv, 0o600);
 
   // Deliberately absent: identity.md, open-loops.json, waiting.json.
   // If any of these exist, the first waking is not a birth.

@@ -6,7 +6,7 @@
 import { resolve } from "node:path";
 import { runDaemon } from "../../internal/daemon.ts";
 import { writeFakeState } from "../../internal/dev/fake.ts";
-import { lockHeld } from "../../internal/dev/lock.ts";
+import { lockHeld } from "../../internal/lock.ts";
 import { makePaths } from "../../internal/paths.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
