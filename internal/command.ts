@@ -75,7 +75,20 @@ export function buildCommand(
     if (policy.container.network) args.push("--network", policy.container.network);
     // secrets are injected, never mounted
     if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
-    args.push(policy.container.image, ...(tail ?? ["pi", "--mode", "rpc", "--session-id", sessionId]));
+    args.push(
+      policy.container.image,
+      ...(tail ?? [
+        "pi",
+        "--mode",
+        "rpc",
+        "--session-id",
+        sessionId,
+        "-e",
+        "/opt/geng/extensions/say-mute.ts",
+        "-e",
+        "/opt/geng/extensions/websearch.ts",
+      ]),
+    );
     return { cmd: "docker", args, env: process.env, cwd: paths.workspace };
   }
 

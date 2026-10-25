@@ -16,10 +16,11 @@ RUN mkdir -p /home/agent/.pi/agent/sessions /home/agent/.pi/agent/extensions \
   && pi install npm:pi-observational-memory \
   && chmod -R 0777 /home/agent
 
-# say / mute / web_search are baked in, not mounted: the agent must not be able to
-# rewrite the tools it talks to people with.
-COPY image/extensions/ /home/agent/.pi/agent/extensions/
-RUN chmod -R a+r /home/agent/.pi/agent/extensions
+# say / mute / web_search live outside the agent's home and are loaded with -e, so
+# neither writing nor deleting them is possible: chmod on the files alone would not
+# stop `rm -rf`, because the directory above them is writable.
+COPY image/extensions/ /opt/geng/extensions/
+RUN chown -R root:root /opt/geng/extensions && chmod -R 0555 /opt/geng/extensions
 
 WORKDIR /work
 ENTRYPOINT []
