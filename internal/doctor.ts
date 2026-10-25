@@ -172,6 +172,8 @@ const PROBE = [
   "-c",
   [
     'if (echo x >> /state/policy.json) 2>/dev/null; then echo POLICY_WRITABLE; else echo POLICY_READONLY; fi',
+    // the positive control: without it, "everything blocked" passes every check below
+    'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
     'if curl -s -m 3 -o /dev/null http://172.17.0.1:2375/version 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
     "true",
@@ -209,6 +211,13 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     p.on("close", () => resolve(text));
   });
 
+  checks.push({
+    name: "容器能上网",
+    ok: out.includes("EGRESS_OK"),
+    detail: out.includes("EGRESS_DEAD")
+      ? "容器连不上 opencode.ai —— 出口规则把 80/443 也拦了"
+      : "通",
+  });
   checks.push({
     name: "policy.json 只读",
     ok: out.includes("POLICY_READONLY"),
