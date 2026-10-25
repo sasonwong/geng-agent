@@ -105,6 +105,16 @@ test("it is told how it left things, since nothing else carries over", () => {
   assert.doesNotMatch(buildPacket(input({ lastSaid: null })), /没再说话/);
 });
 
+test("open loops are counted whatever shape it wrote", () => {
+  const { input, paths } = fixture();
+  writeText(paths.openLoops, JSON.stringify({ loops: [{ title: "a" }, { title: "b" }] }));
+  assert.match(buildPacket(input({})), /未闭合的事：2 条/);
+  writeText(paths.openLoops, JSON.stringify([{ title: "a" }]));
+  assert.match(buildPacket(input({})), /未闭合的事：1 条/);
+  writeText(paths.openLoops, JSON.stringify({ loops: [] }));
+  assert.match(buildPacket(input({})), /没有未闭合的事/);
+});
+
 test("a long gap is stated as a fact, not an excuse", () => {
   const { input } = fixture();
   assert.match(buildPacket(input({ longGap: true })), /机器可能停过/);

@@ -48,10 +48,15 @@ interface OpenLoop {
   state?: string;
 }
 
-/** How many, not what — the page points, the agent reads. */
+/**
+ * How many, not what — the page points, the agent reads. The file is the agent's, so the
+ * shape is whatever it wrote: a bare array, or an object holding one.
+ */
 function countLoops(paths: Paths): number {
-  const loops = readJson<OpenLoop[]>(paths.openLoops, []);
-  return Array.isArray(loops) ? loops.length : 0;
+  const raw = readJson<unknown>(paths.openLoops, null);
+  if (Array.isArray(raw)) return raw.length;
+  const wrapped = raw as { loops?: unknown } | null;
+  return Array.isArray(wrapped?.loops) ? wrapped.loops.length : 0;
 }
 
 function renderMutes(mutes: Record<string, { until?: string | null }>): string | null {
