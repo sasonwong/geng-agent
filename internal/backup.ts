@@ -130,6 +130,34 @@ export interface Snapshot {
   files: number;
 }
 
+/** rustic emits two different group shapes across releases; flatten both. */
+export function parseSnapshots(text: string): Snapshot[] {
+  type Entry = {
+    id?: string;
+    time?: string;
+    summary?: { files_new?: number; total_files_processed?: number };
+  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const flat = parsed.flatMap((g: unknown): Entry[] => {
+    if (Array.isArray(g)) return (g[1] as Entry[]) ?? []; // rustic 0.7: [[group, [snaps]]]
+    const grouped = (g as { snapshots?: Entry[] }).snapshots; // rustic 0.11: [{group_key, snapshots}]
+    return grouped ?? [g as Entry];
+  });
+  return flat
+    .filter((s) => typeof s.id === "string")
+    .map((s) => ({
+      id: s.id as string,
+      time: s.time ?? "",
+      files: s.summary?.total_files_processed ?? s.summary?.files_new ?? 0,
+    }));
+}
+
 export async function listSnapshots(paths: Paths): Promise<Snapshot[]> {
   const password = readPassword(paths.root);
   if (!password) return [];
@@ -139,26 +167,7 @@ export async function listSnapshots(paths: Paths): Promise<Snapshot[]> {
     60_000,
   );
   if (result.code !== 0) return [];
-  try {
-    type Entry = {
-      id?: string;
-      time?: string;
-      summary?: { files_new?: number; total_files_processed?: number };
-    };
-    const parsed = JSON.parse(result.stdout) as Array<Entry & { snapshots?: Entry[] }>;
-    if (!Array.isArray(parsed)) return [];
-    // rustic groups snapshots by host/label/paths; we only ever have one group
-    const flat = parsed.flatMap((g) => g.snapshots ?? [g]);
-    return flat
-      .filter((s) => typeof s.id === "string")
-      .map((s) => ({
-        id: s.id as string,
-        time: s.time ?? "",
-        files: s.summary?.total_files_processed ?? s.summary?.files_new ?? 0,
-      }));
-  } catch {
-    return [];
-  }
+  return parseSnapshots(result.stdout);
 }
 
 export interface BackupOptions {

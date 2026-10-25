@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths } from "../internal/paths.ts";
 import { defaultPolicy } from "../internal/policy.ts";
-import { maybeBackup, backupRepo, restore, restoredLooksWhole } from "../internal/backup.ts";
+import { maybeBackup, backupRepo, parseSnapshots, restore, restoredLooksWhole } from "../internal/backup.ts";
 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -63,4 +63,18 @@ test("an empty or partial restore is reported, not passed", () => {
   const result = restoredLooksWhole(target);
   assert.equal(result.ok, false);
   assert.deepEqual(result.missing, ["palimpsest/"]);
+});
+
+test("both rustic snapshot JSON shapes parse", () => {
+  const entry = {
+    id: "0000000000000000000000000000000000000000000000000000000000000000",
+    time: "2026-01-01T00:00:00Z",
+    summary: { total_files_processed: 7 },
+  };
+  const old = parseSnapshots(JSON.stringify([[{ hostname: "demo" }, [entry]]]));
+  const newer = parseSnapshots(JSON.stringify([{ group_key: { hostname: "demo" }, snapshots: [entry] }]));
+  assert.deepEqual(old, newer);
+  assert.equal(old[0]?.id, entry.id);
+  assert.equal(old[0]?.files, 7);
+  assert.deepEqual(parseSnapshots("not json"), []);
 });
