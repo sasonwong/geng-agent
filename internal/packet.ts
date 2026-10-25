@@ -125,7 +125,9 @@ export function buildPacket(input: PacketInput): string {
   const out: string[] = [];
 
   if (hasIdentity) {
-    out.push(excerpt(identity, 2000));
+    // labelled, or the page opens with the agent's own heading and reads as if it wrote
+    // this whole thing just now
+    out.push(`你上次醒来时写下的 ${statePath}/identity.md：`, "", excerpt(identity, 2000), "");
   } else if (waking <= 1) {
     out.push("这是你第一次醒来。");
   } else {

@@ -66,12 +66,13 @@ test("birth packet keeps counting when the identity is still missing", () => {
   assert.match(text, /你第 7 次醒来，你还没有写过你是谁/);
 });
 
-test("a written identity replaces the birth framing", () => {
+test("a written identity replaces the birth framing, and is labelled", () => {
   const { input } = fixture();
   const i = input({});
-  writeText(i.paths.identity, "我是 alice。");
+  writeText(i.paths.identity, "# 我是谁\n我是 alice。");
   const text = buildPacket(i);
-  assert.match(text, /^我是 alice。/);
+  // without the label the page opens with its own heading and reads as if it just wrote it
+  assert.match(text, /^你上次醒来时写下的 \/state\/identity\.md：\n\n# 我是谁\n我是 alice。/);
   assert.doesNotMatch(text, /先写下你是谁/);
   assert.match(text, /你可以什么都不做/);
 });
