@@ -51,6 +51,8 @@ function today(): string {
 interface Quota {
   day?: string;
   count?: number;
+  /** Written by the running server: the limit it is actually enforcing. */
+  limit?: number;
 }
 
 const UPSTREAM = "https://api.deepseek.com/v1/tools";
@@ -67,8 +69,8 @@ export function searchConfigured(instanceEnvFile: string): boolean {
 export function searchQuota(root: string, instanceEnvFile: string): { limit: number; left: number } | null {
   if (!searchConfigured(instanceEnvFile)) return null;
   const file = parseEnvFile(join(root, "secrets", "search.env"));
-  const limit = Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200);
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
+  const limit = q.limit ?? Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200);
   const used = q.day === today() ? (q.count ?? 0) : 0;
   return { limit, left: Math.max(0, limit - used) };
 }
@@ -84,11 +86,15 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
   const quotaFile = join(ops, "usage", "search.json");
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
 
+  // The limit this process enforces, written down so the packet reports the same
+  // number the server actually applies — restarting is what makes a new limit real.
+  writeJson(quotaFile, { ...readJson<Quota>(quotaFile, {}), limit: o.env.dailyLimit });
+
   const spend = (): { ok: boolean; remaining: number } => {
     const q = readJson<Quota>(quotaFile, {});
     const count = q.day === today() ? (q.count ?? 0) : 0;
     if (count >= o.env.dailyLimit) return { ok: false, remaining: 0 };
-    writeJson(quotaFile, { day: today(), count: count + 1 });
+    writeJson(quotaFile, { day: today(), count: count + 1, limit: o.env.dailyLimit });
     return { ok: true, remaining: o.env.dailyLimit - count - 1 };
   };
 
