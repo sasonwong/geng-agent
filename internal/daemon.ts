@@ -10,6 +10,7 @@ import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, writeOps } from "./mute.ts";
+import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
@@ -17,7 +18,6 @@ import { advance, loadEscalation, planFor, saveEscalation, type Escalation, type
 
 const POLL_MS = 5_000;
 const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
-const DAY_MS = 24 * 3_600_000;
 
 export interface DaemonOptions {
   root: string;
@@ -25,12 +25,6 @@ export interface DaemonOptions {
   once?: boolean;
   dry?: boolean;
   log?: (line: string) => void;
-}
-
-interface Meta {
-  lastWakeMs?: number;
-  wakings?: number;
-  sessionGen?: number;
 }
 
 function requiredDirs(p: Paths): string[] {
@@ -93,18 +87,6 @@ function recoverIntent(paths: Paths): boolean {
     rmSync(paths.intent, { force: true });
   }
   return true;
-}
-
-function readMeta(paths: Paths): Meta {
-  return readJson<Meta>(join(paths.meta, "state.json"), {});
-}
-
-function recordWake(paths: Paths, nowMs: number): number {
-  const file = join(paths.meta, "wakes.json");
-  const all = readJson<number[]>(file, []).filter((t) => nowMs - t < DAY_MS);
-  all.push(nowMs);
-  writeJson(file, all);
-  return all.length;
 }
 
 function logLine(

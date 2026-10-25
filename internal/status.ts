@@ -5,6 +5,7 @@ import { makePaths } from "./paths.ts";
 import { loadPolicy } from "./policy.ts";
 import { formatDuration, readWaiting } from "./schedule.ts";
 import { readJson, readText } from "./state.ts";
+import { readMeta, readWakes } from "./meta.ts";
 
 function bytes(n: number): string {
   return n < 1024 ? `${n}B` : `${(n / 1024).toFixed(1)}KB`;
@@ -20,11 +21,11 @@ function countJson(dir: string): number {
 
 export function statusLine(root: string, instance: string): string {
   const p = makePaths(root, instance);
-  const last = readJson<{ atMs?: number }>(join(p.meta, "lastwake.json"), {});
+  const meta = readMeta(p);
   const wait = readWaiting(p.waiting, Date.now());
   const policy = loadPolicy(p.policy);
   const now = Date.now();
-  const sinceLast = typeof last.atMs === "number" ? formatDuration(now - last.atMs) : "从未";
+  const sinceLast = typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) : "从未";
   const next = wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) : "未设定";
   const pending = countJson(p.inbox);
   return `${instance.padEnd(12)} 上次=${sinceLast.padEnd(7)} 下次=${next.padEnd(7)} 收件=${String(pending).padEnd(3)} runner=${policy.runner}`;
@@ -34,7 +35,8 @@ export function printStatus(root: string, instance: string): void {
   const p = makePaths(root, instance);
   const policy = loadPolicy(p.policy);
   const now = Date.now();
-  const last = readJson<{ atMs?: number }>(join(p.meta, "lastwake.json"), {});
+  const meta = readMeta(p);
+  const wakes = readWakes(p, now);
   const wait = readWaiting(p.waiting, Date.now());
 
   const identity = readText(p.identity);
@@ -46,7 +48,8 @@ export function printStatus(root: string, instance: string): void {
   const rows: string[] = [
     p.instance,
     `  runner      ${policy.runner}`,
-    `  上次醒来    ${typeof last.atMs === "number" ? formatDuration(now - last.atMs) + " 前" : "从未"}`,
+    `  上次醒来    ${typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) + " 前" : "从未"}`,
+    `  第几次      ${meta.wakings ?? 0}（24 小时内 ${wakes.length} 次）`,
     `  下次醒来    ${wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) + " 后" : "未设定"}${wait?.why ? "  ·  " + wait.why : ""}`,
     `  收件        ${countJson(p.inbox)} 条待处理`,
     `  identity    ${identity ? bytes(Buffer.byteLength(identity, "utf8")) : "（未写）"}`,
