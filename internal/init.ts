@@ -22,6 +22,7 @@ export function initInstance(root: string, instance: string): void {
     p.meta,
     p.inbox,
     p.inboxSeen,
+    p.inboxLow,
     p.outbox,
     p.acks,
   ]) {
