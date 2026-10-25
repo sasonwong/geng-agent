@@ -55,11 +55,18 @@ interface Quota {
 
 const UPSTREAM = "https://api.deepseek.com/v1/tools";
 
+/**
+ * Whether *this container* has the tool: the extension only registers when the
+ * instance env carries a URL. The host having a search.env means nothing to it.
+ */
+export function searchConfigured(instanceEnvFile: string): boolean {
+  return (parseEnvFile(instanceEnvFile).GENG_SEARCH_URL ?? "") !== "";
+}
+
 /** How much searching is left today — the agent has to know to weigh it. */
-export function searchQuota(root: string): { limit: number; left: number } | null {
+export function searchQuota(root: string, instanceEnvFile: string): { limit: number; left: number } | null {
+  if (!searchConfigured(instanceEnvFile)) return null;
   const file = parseEnvFile(join(root, "secrets", "search.env"));
-  const configured = Object.keys(file).length > 0 || (process.env.GENG_SEARCH_TOKEN ?? "") !== "";
-  if (!configured) return null;
   const limit = Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200);
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
   const used = q.day === today() ? (q.count ?? 0) : 0;

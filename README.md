@@ -98,13 +98,13 @@ unit 里已经带 `NODE_USE_ENV_PROXY=1`：node 的 `fetch` 默认不认 `HTTP(S
 搜索的 key 不在容器里。宿主上跑一个只认搜索的端点：
 
 ```bash
-# secrets/search.env
-GENG_SEARCH_TOKEN=随手编一串
-DEEPSEEK_API_KEY=sk-...
+# secrets/search.env        chmod 600，和 <instance>.env 同一个目录
+GENG_SEARCH_TOKEN=$(openssl rand -hex 16)      # 容器拿这串，也只能拿这串
+DEEPSEEK_API_KEY=sk-...                        # search 是单独计费的端点，chat 的 key 不一定能用
 GENG_SEARCH_BIND=0.0.0.0:8787
 GENG_SEARCH_DAILY=200
 
-node cmd/geng/index.ts search
+node cmd/geng/index.ts search                  # 前台；常驻用 deploy/geng-search.service
 ```
 
 容器用 `GENG_SEARCH_URL` + `GENG_SEARCH_TOKEN` 得到 `web_search` / `web_fetch` 两个工具。
@@ -124,6 +124,8 @@ docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
 两个注意点：
 
 - `geng search` 要 `GENG_SEARCH_BIND=0.0.0.0:8787`（或直接绑上面那个网关地址）才会被容器够到
+- **加进 `<instance>.env` 之后不用重建镜像也不用重启 daemon**：下一轮醒来是个新容器，
+  环境变量是那时读的，工具直接出现在列表里，纸上还会多一行 `环境变了。`
 - 容器**只被允许**够到这一个地址上的这一个端口（见 `deploy/egress.sh`）
 - **没有 `GENG_SEARCH_URL` 时扩展自己就不注册**，`web_search` 根本不在工具列表里——
   这是故意的：工具不该存在但拒绝工作

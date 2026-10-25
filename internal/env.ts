@@ -34,5 +34,7 @@ export function describeEnvChange(before: Env | undefined, now: Env): string | n
   if (!before) return null; // first waking: nothing to compare against
   // Only the image matters: it is what carries the tool list. A program update that
   // does not rebuild the image changes how it is woken, which it experiences directly.
-  return (before.imageId ?? null) !== (now.imageId ?? null) ? "环境变了。" : null;
+  const image = (before.imageId ?? null) !== (now.imageId ?? null);
+  const tools = (before.search ?? false) !== (now.search ?? false);
+  return image || tools ? "环境变了。" : null;
 }

@@ -10,6 +10,8 @@ import { readJson, writeJson } from "./state.ts";
 export interface Env {
   imageId?: string | null;
   version?: string | null;
+  /** Whether the search tool exists for this container, which the env file decides. */
+  search?: boolean;
 }
 
 export interface Meta {

@@ -13,7 +13,7 @@ import { ensureGatewayDirs, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
-import { searchQuota } from "./search.ts";
+import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
@@ -143,7 +143,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
   // Every waking starts a fresh container from the image tag, so a rebuilt image is
   // picked up by itself — but nothing would tell it that its world changed.
-  const currentEnv = { imageId: await imageId(policy), version: packageVersion(paths.root) };
+  const currentEnv = {
+    imageId: await imageId(policy),
+    version: packageVersion(paths.root),
+    search: searchConfigured(paths.secrets),
+  };
   const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);
 
   let releaseLock: (() => void) | null = null;
@@ -235,7 +239,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       wakes24h: wakes24h + 1,
       parked: plan.parked,
       policyLine: policySummary(policy),
-      searchLeft: searchQuota(paths.root)?.left ?? null,
+      searchLeft: searchQuota(paths.root, paths.secrets)?.left ?? null,
     });
 
     if (o.dry) {

@@ -1,0 +1,16 @@
+[Unit]
+Description=geng search endpoint (quota lives here, not in the container)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+EnvironmentFile=-@ROOT@/secrets/search.env
+ExecStart=@NODE@ @ROOT@/cmd/geng/index.ts search
+Restart=always
+RestartSec=10
+TimeoutStopSec=20
+KillMode=mixed
+
+[Install]
+WantedBy=default.target
