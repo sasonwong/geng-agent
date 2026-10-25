@@ -25,7 +25,6 @@ export function initInstance(root: string, instance: string): void {
     p.inboxSeen,
     p.inboxLow,
     p.outbox,
-    p.acks,
     p.piDir,
   ]) {
     mkdirSync(d, { recursive: true });

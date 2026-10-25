@@ -15,7 +15,6 @@ export interface Paths {
   inboxSeen: string;
   inboxLow: string;
   outbox: string;
-  acks: string;
   daemonLog: string;
   policy: string;
   identity: string;
@@ -56,7 +55,6 @@ export function makePaths(root: string, instance: string): Paths {
     inboxSeen: join(inbox, "seen"),
     inboxLow: join(inbox, "low"),
     outbox,
-    acks: join(outbox, "acks"),
     daemonLog: join(data, "daemon.log"),
     policy: join(palimpsest, "policy.json"),
     identity: join(palimpsest, "identity.md"),

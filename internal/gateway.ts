@@ -220,17 +220,3 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   void sweep();
   await Promise.all(keys.map((key) => poll(key)));
 }
-
-/** The daemon reads this to know whether its instance is in a public or a quiet channel. */
-export function botListen(root: string, instance: string): "all" | "mentions" {
-  const bots = readJson<Record<string, BotConfig>>(join(root, "secrets", "bots.json"), {});
-  return bots[instance]?.listen ?? "all";
-}
-
-export function loadPolicyFor(root: string, p: Paths) {
-  try {
-    return loadPolicy(p.policy);
-  } catch {
-    return loadPolicy(join(root, "deploy", "policy.json"));
-  }
-}

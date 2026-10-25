@@ -115,10 +115,6 @@ function flatten(obj: unknown, prefix = ""): Record<string, unknown> {
   return out;
 }
 
-export function proposalFile(paths: Paths): string {
-  return join(paths.palimpsest, "policy.proposal.json");
-}
-
 export function policySummary(p: Policy): string {
   return [
     `defaultWakeMinutes=${p.cycle.defaultWakeMinutes}`,

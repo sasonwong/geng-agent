@@ -42,7 +42,6 @@ function requiredDirs(p: Paths): string[] {
     p.inboxSeen,
     p.inboxLow,
     p.outbox,
-    p.acks,
   ];
 }
 
