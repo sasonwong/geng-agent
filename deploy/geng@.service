@@ -1,0 +1,18 @@
+[Unit]
+Description=geng daemon (%i)
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+EnvironmentFile=-@ROOT@/secrets/%i.env
+# flock is the lock: the kernel owns it, the daemon does not.
+ExecStart=/usr/bin/flock -w 5 @ROOT@/data/%i/daemon.lock \
+          /usr/bin/env node @ROOT@/cmd/geng/index.ts daemon --instance %i --root @ROOT@
+Restart=always
+RestartSec=10
+# Must exceed our own shutdown grace, and stay far below one cycle's timeout.
+TimeoutStopSec=45
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

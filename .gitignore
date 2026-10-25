@@ -1,0 +1,7 @@
+# instance lives — never in git
+/data/
+/backup/
+/secrets/
+
+/node_modules/
+*.log

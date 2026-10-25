@@ -1,0 +1,30 @@
+{
+  "name": "geng-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A wake-packet daemon: pi runs in a container, the daemon only executes the alarms the agent sets for itself.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "geng": "./cmd/geng/index.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test",
+    "dev": "node cmd/geng-dev/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.8.0"
+  },
+  "files": [
+    "cmd/geng/",
+    "internal/",
+    "!internal/dev/",
+    "deploy/",
+    "docs/design/",
+    "README.md"
+  ]
+}
