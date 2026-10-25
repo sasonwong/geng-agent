@@ -129,6 +129,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const paths = makePaths(o.root, o.instance);
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   ensureDirs(requiredDirs(paths));
+  // it is mounted read-only into the container, and docker materialises a missing
+  // host path as a directory — after which appending a line is EISDIR forever
+  if (!existsSync(paths.daemonLog)) writeText(paths.daemonLog, "");
   if (!o.dry) {
     const proposal = applyProposal(paths);
     if (proposal) {

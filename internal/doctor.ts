@@ -112,6 +112,27 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     warnOnly: true,
   });
 
+  // A directory here is not a cosmetic problem: docker materialises a missing bind-mount
+  // target as a directory, and then every line the daemon appends fails with EISDIR.
+  const logIsFile = (() => {
+    try {
+      return statSync(p.daemonLog).isFile();
+    } catch {
+      return null;
+    }
+  })();
+  checks.push({
+    name: "daemon.log 是文件",
+    ok: logIsFile !== false,
+    detail:
+      logIsFile === false
+        ? "它是个目录：容器挂载时自动创建的，删掉再跑一次 init"
+        : logIsFile === null
+          ? "还没有"
+          : "是",
+    warnOnly: logIsFile === null,
+  });
+
   const logAge = (() => {
     try {
       return Date.now() - statSync(p.daemonLog).mtimeMs;

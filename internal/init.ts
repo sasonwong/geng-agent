@@ -30,6 +30,10 @@ export function initInstance(root: string, instance: string): void {
     mkdirSync(d, { recursive: true });
   }
 
+  // daemon.log is bind-mounted into the container: docker creates a *directory* for a
+  // missing host path, and then every line the daemon tries to append fails with EISDIR.
+  if (!existsSync(p.daemonLog)) writeFileSync(p.daemonLog, "");
+
   const policyTemplate = join(root, "deploy", "policy.json");
   if (!existsSync(p.policy) && existsSync(policyTemplate)) {
     mkdirSync(dirname(p.policy), { recursive: true });
