@@ -62,6 +62,9 @@ export function buildCommand(
       `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
       "-v",
       `${paths.palimpsest}:/state`,
+      // the say/mute extension writes /state/outbox; the gateway reads data/<inst>/outbox
+      "-v",
+      `${paths.outbox}:/state/outbox`,
       "-v",
       `${paths.palimpsest}/policy.json:/state/policy.json:ro`,
       "-v",
