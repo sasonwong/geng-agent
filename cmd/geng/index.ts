@@ -162,7 +162,7 @@ async function main(): Promise<number> {
         for (const i of all) console.log(statusLine(args.root, i));
         return 0;
       }
-      printStatus(args.root, args.instance);
+      await printStatus(args.root, args.instance);
       return 0;
     }
 
