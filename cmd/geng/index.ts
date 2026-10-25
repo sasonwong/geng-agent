@@ -269,7 +269,16 @@ async function main(): Promise<number> {
         );
         return 2;
       }
-      await startSearchServer({ root: args.root, env });
+      const server = await startSearchServer({ root: args.root, env });
+      // a listening server is not a reason to keep running: main() ends in
+      // process.exit, which would close the port a second after it opened
+      const stop = () => {
+        server.close();
+        process.exit(0);
+      };
+      process.on("SIGTERM", stop);
+      process.on("SIGINT", stop);
+      await new Promise<void>(() => {});
       return 0;
     }
 
