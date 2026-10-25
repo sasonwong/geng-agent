@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths } from "../internal/paths.ts";
-import { DAY_MS, readMeta, readWakes, recordWake, writeMeta } from "../internal/meta.ts";
+import { DAY_MS, readMeta, readWakes, recordWake, spentThisCycle, writeMeta } from "../internal/meta.ts";
 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -28,4 +28,14 @@ test("wake history keeps only the last 24 hours", () => {
   const count = recordWake(paths, now);
   assert.equal(count, 2);
   assert.equal(readWakes(paths, now).length, 2);
+});
+
+test("per-cycle spend is the difference, because pi counts for the whole session", () => {
+  const before = { tokens: 1_000_000, cost: 0.02 };
+  const cycle = spentThisCycle(before, { tokens: 1_040_000, cost: 0.0208 });
+  assert.equal(cycle?.tokens, 40_000);
+  assert.ok(Math.abs((cycle?.cost ?? 0) - 0.0008) < 1e-9);
+  // a fresh session starts again from zero: that is not a refund
+  assert.deepEqual(spentThisCycle(before, { tokens: 12_000, cost: 0.0002 }), { tokens: 0, cost: 0 });
+  assert.equal(spentThisCycle(before, null), null);
 });

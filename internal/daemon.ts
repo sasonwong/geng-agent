@@ -10,7 +10,7 @@ import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
-import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
+import { DAY_MS, readMeta, recordWake, spentThisCycle, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
@@ -100,6 +100,7 @@ function logLine(
   inboxCount: number,
   interventions: string[],
   backup: BackupOutcome | null,
+  spent: { tokens: number; cost: number } | null,
 ): string {
   const parts = [
     new Date().toISOString(),
@@ -112,8 +113,8 @@ function logLine(
     parts.push(
       `dur=${formatDuration(r.durationMs)}`,
       `tools=${r.toolCalls.length}`,
-      `tokens=${r.stats?.tokens ?? "-"}`,
-      `cost=${r.stats?.cost?.toFixed(4) ?? "-"}`,
+      `tokens=${spent ? spent.tokens : "-"}`,
+      `cost=${spent ? spent.cost.toFixed(4) : "-"}`,
       `timedout=${r.timedOut ? "yes" : "no"}`,
       `ctx=${r.stats?.contextPercent != null ? `${r.stats.contextPercent}%` : "-"}`,
     );
@@ -181,7 +182,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   let escalation: Escalation = loadEscalation(paths);
 
   for (;;) {
-    const meta = readMeta(paths);
+    let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
@@ -261,12 +262,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       sessionId,
       inboxIds: inbox.map((m) => m.id),
     });
-    writeJson(join(paths.meta, "state.json"), {
-      lastWakeMs: nowMs,
-      wakings: waking,
-      sessionGen,
-      env: currentEnv,
-    });
+    // spread the existing record: writing a literal here silently dropped `spent`
+    meta = { ...meta, lastWakeMs: nowMs, wakings: waking, sessionGen, env: currentEnv };
+    writeMeta(paths, meta);
     recordWake(paths, nowMs);
 
     const result = await runWaking({
@@ -280,6 +278,22 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
     rmSync(paths.intent, { force: true });
     crashed = false;
+
+    // pi counts for the whole session, and this session is resumed every waking:
+    // what this cycle cost is the difference, never the total.
+    const cumulative = result.stats;
+    const before = meta.spent ?? {};
+    const spent = spentThisCycle(before, cumulative);
+    if (cumulative) {
+      meta = {
+        ...meta,
+        spent: {
+          tokens: cumulative.tokens ?? before.tokens ?? 0,
+          cost: cumulative.cost ?? before.cost ?? 0,
+        },
+      };
+      writeMeta(paths, meta);
+    }
 
     const symptom = classify(result);
     // Only a wake that ran to the end has read them. Anything else leaves the messages
@@ -300,6 +314,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       inbox.length,
       result.interventions,
       backup,
+      spent,
     );
     appendLine(paths.daemonLog, line);
     log(line);
