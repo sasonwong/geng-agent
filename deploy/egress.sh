@@ -19,9 +19,16 @@ fi
 
 BR="br-$(docker network inspect -f '{{.Id}}' "$BRIDGE" | cut -c1-12)"
 
-# append once; -C keeps a re-run from stacking duplicates
+# Re-runs must not stack duplicates *and* must keep the order below, so the rules
+# this script owns are rebuilt from scratch instead of appended again.
+while :; do
+  line=$(iptables -S DOCKER-USER | grep -n -- "-i $BR" | head -1 | cut -d: -f1)
+  [ -z "$line" ] && break
+  iptables -D DOCKER-USER $((line - 1))
+done
+
 add() {
-  iptables -C DOCKER-USER -i "$BR" "$@" 2>/dev/null || iptables -A DOCKER-USER -i "$BR" "$@"
+  iptables -A DOCKER-USER -i "$BR" "$@"
 }
 
 # The one private address the container may reach: the search endpoint on this
