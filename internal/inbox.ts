@@ -1,4 +1,4 @@
-import { readdirSync, renameSync, rmSync } from "node:fs";
+import { readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { readJson } from "./state.ts";
 
@@ -9,40 +9,57 @@ export interface InboxMsg {
   at?: string;
 }
 
-/**
- * Drain inbox/*.json, moving each file into seen/ before returning it.
- * Anything unparseable is quarantined as *.bad and skipped: one broken
- * message must never block the whole waking.
- */
-export function takeInbox(dir: string, seenDir: string): InboxMsg[] {
-  let files: string[];
+function parseFile(dir: string, name: string): InboxMsg | null {
+  const msg = readJson<InboxMsg | null>(join(dir, name), null);
+  if (!msg || typeof msg.text !== "string" || msg.text.trim() === "") return null;
+  return {
+    id: typeof msg.id === "string" ? msg.id : name.replace(/\.json$/, ""),
+    text: msg.text,
+    from: msg.from,
+    at: msg.at,
+  };
+}
+
+function jsonFiles(dir: string): string[] {
   try {
-    files = readdirSync(dir).filter((f) => f.endsWith(".json"));
+    return readdirSync(dir).filter((f) => f.endsWith(".json")).sort();
   } catch {
     return [];
   }
-  files.sort();
+}
+
+/** Read without consuming — for previews, which must not eat the messages. */
+export function peekInbox(dir: string): InboxMsg[] {
   const out: InboxMsg[] = [];
-  for (const f of files) {
-    const full = join(dir, f);
-    const msg = readJson<InboxMsg | null>(full, null);
+  for (const f of jsonFiles(dir)) {
+    const msg = parseFile(dir, f);
+    if (msg) out.push(msg);
+  }
+  return out;
+}
+
+/**
+ * Drain inbox/*.json, moving each file into seen/ before returning it.
+ * Anything unparseable is quarantined as *.bad: one broken message must never
+ * block a whole waking.
+ */
+export function takeInbox(dir: string, seenDir: string): InboxMsg[] {
+  const out: InboxMsg[] = [];
+  for (const f of jsonFiles(dir)) {
+    const msg = parseFile(dir, f);
     const target = join(seenDir, f);
     try {
-      renameSync(full, target);
+      renameSync(join(dir, f), target);
     } catch {
-      rmSync(full, { force: true });
+      // if the move fails the message stays put and is retried next waking
     }
-    if (msg && typeof msg.text === "string" && msg.text.trim() !== "") {
-      out.push({
-        id: typeof msg.id === "string" ? msg.id : f.replace(/\.json$/, ""),
-        text: msg.text,
-        from: msg.from,
-        at: msg.at,
-      });
-    } else if (msg !== null) {
-      renameSync(target, `${target}.bad`);
-    } else {
-      renameSync(target, `${target}.bad`);
+    if (msg) out.push(msg);
+    else {
+      try {
+        renameSync(target, `${target}.bad`);
+      } catch {
+        // nothing to quarantine
+      }
     }
   }
   return out;

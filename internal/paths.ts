@@ -21,6 +21,7 @@ export interface Paths {
   openLoops: string;
   waiting: string;
   waitingConsumed: string;
+  intent: string;
   journal: string;
   journalIndex: string;
   secrets: string;
@@ -58,6 +59,7 @@ export function makePaths(root: string, instance: string): Paths {
     openLoops: join(palimpsest, "open-loops.json"),
     waiting: join(palimpsest, "waiting.json"),
     waitingConsumed: join(palimpsest, "waiting.consumed.json"),
+    intent: join(palimpsest, "intent.json"),
     journal,
     journalIndex: join(journal, "INDEX.md"),
     secrets: join(r, "secrets", `${instance}.env`),

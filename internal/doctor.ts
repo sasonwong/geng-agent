@@ -39,6 +39,15 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 
   if (policy.runner === "docker") {
     checks.push({ name: "docker", ok: hasCmd("docker"), detail: "run 需要 docker 可执行" });
+    checks.push({
+      name: "出口网络",
+      ok: policy.container.network !== null,
+      detail:
+        policy.container.network === null
+          ? "container.network 是 null，容器会落在默认桥接上，egress.sh 无从生效"
+          : policy.container.network,
+      warnOnly: true,
+    });
   } else {
     checks.push({ name: "pi 可执行", ok: hasCmd("pi"), detail: "local runner 直接调用 pi" });
   }

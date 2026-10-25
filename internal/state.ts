@@ -60,6 +60,16 @@ export function exists(file: string): boolean {
   return existsSync(file);
 }
 
+/** Last n non-empty lines, for showing the agent its own mechanical history. */
+export function readTail(file: string, n: number): string[] {
+  const text = readText(file);
+  if (!text) return [];
+  return text
+    .split("\n")
+    .filter((l) => l.trim() !== "")
+    .slice(-n);
+}
+
 export function excerpt(text: string | null, maxChars: number): string {
   if (!text) return "";
   const t = text.trim();

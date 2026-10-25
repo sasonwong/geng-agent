@@ -62,7 +62,7 @@
 | `identity.md` | 它 | 硬上限 1~2KB |
 | `open-loops.json` | 它 | 带年龄 |
 | `waiting.json` | 它 | 下次什么时候醒 + 为什么 |
-| `journal/` | 它 | `INDEX.md` 由 daemon 只追加一行 |
+| `journal/` | 它 | 索引也是它自己的 |
 | `intent.json` `world.json` | daemon | write-ahead / 世界快照 |
 | `policy.json` | 人 | 容器里单文件只读 |
 
@@ -73,14 +73,17 @@
 每次醒来，daemon 组装一张纸塞进 prompt。组成：
 
 ```
-identity.md 原文
-现在几点、距上次多久
+identity.md 原文（没有就写"这是你第 N 次醒来，你还没有写过你是谁"）
+现在几点、距上次多久（空档异常长时直说"机器可能停过"）
+你的东西在哪：identity / open-loops / waiting / journal / workspace
 它上次说在等什么
 没闭合的事（标题 + 搁了多久）
-journal INDEX 的最近几行
+最近几轮（daemon.log 的最后几行，机械记录，不摘要）
 有人在跟你说话（如果有）
+上一轮没过完就断了（如果有）
 唤醒原因：定时 / 有人敲门 / 兜底
 现在没人在跟你说话。
+你可以什么都不做，那不算失败。
 ```
 
 规矩：**全是事实，唯一祈使句是最后那句**。修复用的"喂脚印"段作为附件追加，标 `[观察]`，
@@ -88,6 +91,10 @@ journal INDEX 的最近几行
 
 **退化路径**：它什么都没写时，从 session 贴最后几条原始消息（截断，不摘要）。daemon 不读自然语言，
 所以只截断、不理解。地基是 harness 自动写的 session，不是它愿不愿意写。
+
+**索引归它。** 早先想让 daemon 帮它追加 `journal/INDEX.md`，但 daemon 写不出一句有意义的话，
+只会把 daemon.log 抄一遍。所以索引是它自己的，daemon 只把 `daemon.log` 的最后几行贴进唤醒纸 ——
+那是"最近几轮发生了什么"里唯一机械可靠的部分。
 
 ## 5. daemon
 

@@ -1,6 +1,6 @@
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
-import { excerpt, readJson, readText } from "./state.ts";
+import { excerpt, readJson, readTail, readText } from "./state.ts";
 import { formatDuration } from "./schedule.ts";
 
 export type WakeReason = "timer" | "knock" | "nudge";
@@ -9,12 +9,20 @@ export interface PacketInput {
   paths: Paths;
   nowMs: number;
   reason: WakeReason;
+  /** What it said it was waiting for, carried over from the consumed waiting.json. */
   waitWhy: string | null;
   lastWakeMs: number | null;
+  /** 1-based: how many times this instance has woken. */
+  waking: number;
   /** Where the agent sees the palimpsest: /state in docker, an absolute path for the local runner. */
   statePath: string;
+  workPath: string;
   inbox: InboxMsg[];
   maxBytes: number;
+  /** The previous waking died mid-flight. */
+  crashed: boolean;
+  /** More time passed than any alarm explains — the machine was probably suspended. */
+  longGap: boolean;
 }
 
 interface OpenLoop {
@@ -26,30 +34,19 @@ interface OpenLoop {
 function renderOpenLoops(paths: Paths, nowMs: number): string[] {
   const loops = readJson<OpenLoop[]>(paths.openLoops, []);
   if (!Array.isArray(loops) || loops.length === 0) return ["（没有未闭合的事）"];
-  const lines: string[] = [];
-  for (const l of loops.slice(0, 12)) {
+  return loops.slice(0, 12).map((l) => {
     const title = typeof l.title === "string" ? l.title : JSON.stringify(l);
     const since = typeof l.since === "string" ? Date.parse(l.since) : NaN;
     const age = Number.isNaN(since) ? "" : ` · 搁了 ${formatDuration(nowMs - since)}`;
     const state = typeof l.state === "string" ? ` · ${l.state}` : "";
-    lines.push(`- ${title}${age}${state}`);
-  }
-  return lines;
-}
-
-function renderIndex(paths: Paths): string[] {
-  const text = readText(paths.journalIndex);
-  if (!text || text.trim() === "") return ["（还没有日记）"];
-  const lines = text.trim().split("\n");
-  return lines.slice(-8);
+    return `- ${title}${age}${state}`;
+  });
 }
 
 function renderInbox(inbox: InboxMsg[]): string[] {
-  if (inbox.length === 0) return [];
   const lines = ["有人在跟你说话："];
   for (const m of inbox.slice(0, 12)) {
-    const who = m.from ? `${m.from}` : "对方";
-    lines.push(`- ${who}：${excerpt(m.text, 400)}`);
+    lines.push(`- ${m.from ?? "对方"}：${excerpt(m.text, 400)}`);
   }
   if (inbox.length > 12) lines.push(`- …还有 ${inbox.length - 12} 条`);
   return lines;
@@ -58,43 +55,69 @@ function renderInbox(inbox: InboxMsg[]): string[] {
 const REASON_LINE: Record<WakeReason, string> = {
   timer: "你是被自己定的闹钟叫醒的。",
   knock: "有人敲门，所以你现在醒了。",
-  nudge: "你没有留下下次什么时候醒，所以被按默认间隔叫醒了。",
+  nudge: "你上次没有留下下次什么时候醒，所以被按默认间隔叫醒了。",
 };
 
 export function buildPacket(input: PacketInput): string {
-  const { paths, nowMs, reason, waitWhy, lastWakeMs, statePath, inbox, maxBytes } = input;
+  const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
+  const { inbox, maxBytes, crashed, longGap } = input;
 
-  const head: string[] = [];
   const identity = readText(paths.identity);
-  head.push(identity && identity.trim() !== "" ? excerpt(identity, 2000) : "（你还没有写过你是谁）");
+  const hasIdentity = identity !== null && identity.trim() !== "";
 
-  const nowIso = new Date(nowMs).toISOString();
+  const out: string[] = [];
+
+  if (hasIdentity) {
+    out.push(excerpt(identity, 2000));
+  } else if (waking <= 1) {
+    out.push("这是你第一次醒来。");
+  } else {
+    out.push(`这是你第 ${waking} 次醒来，你还没有写过你是谁。`);
+  }
+
   const since =
     lastWakeMs === null ? "第一次醒来" : `距上次醒来 ${formatDuration(nowMs - lastWakeMs)}`;
-  head.push(`现在：${nowIso} · ${since}`);
+  out.push(`现在：${new Date(nowMs).toISOString()} · ${since}`);
+  if (longGap) out.push("（这次空档比闹钟长得多，机器可能停过。）");
 
-  const body: string[] = [];
-  if (waitWhy) body.push(`你上次说在等：${waitWhy}`);
-  body.push("", "未闭合的事：", ...renderOpenLoops(paths, nowMs));
-  body.push("", "最近几天：", ...renderIndex(paths));
-
-  const inboxLines = renderInbox(inbox);
-  if (inboxLines.length > 0) body.push("", ...inboxLines);
-
-  body.push("", REASON_LINE[reason]);
-  body.push(
-    inbox.length > 0
-      ? "说句话回去，或者做你的事。"
-      : "现在没人在跟你说话。",
+  out.push(
+    "",
+    "你的东西：",
+    `  ${statePath}/identity.md      你是谁`,
+    `  ${statePath}/open-loops.json  没闭合的事`,
+    `  ${statePath}/waiting.json     下次什么时候醒`,
+    `  ${statePath}/journal/         日记`,
+    `  ${workPath}                   你干活的地方`,
   );
-  body.push("", `走之前，在 ${statePath}/waiting.json 写下你下次什么时候醒、为什么：`);
-  body.push('  { "wake": { "after": "20m" }, "why": "为什么" }');
-  body.push('  { "wake": { "at": "2026-03-02T09:15:00Z" }, "why": "为什么" }');
-  body.push("如果你不想再醒来，写 null —— 但先说清为什么。");
 
-  let out = head.join("\n") + "\n\n" + body.join("\n");
-  if (Buffer.byteLength(out, "utf8") > maxBytes) {
-    out = out.slice(0, maxBytes) + "\n…(唤醒纸被截断)";
+  if (waitWhy) out.push("", `你上次说在等：${waitWhy}`);
+
+  out.push("", "未闭合的事：", ...renderOpenLoops(paths, nowMs));
+
+  const recent = readTail(paths.daemonLog, 6);
+  out.push("", "最近几轮:", ...(recent.length > 0 ? recent : ["（这是第一轮）"]));
+
+  if (inbox.length > 0) out.push("", ...renderInbox(inbox));
+
+  if (crashed) {
+    out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");
   }
-  return out;
+
+  out.push("", REASON_LINE[reason]);
+  out.push(inbox.length > 0 ? "说句话回去，或者做你的事。" : "现在没人在跟你说话。");
+  out.push("你可以什么都不做，那不算失败。");
+  if (!hasIdentity) {
+    out.push("如果你决定做点什么，先写下你是谁，以及你为什么想做这件事。");
+  }
+
+  out.push("", `走之前，在 ${statePath}/waiting.json 写下你下次什么时候醒、为什么：`);
+  out.push('  { "wake": { "after": "20m" }, "why": "为什么" }');
+  out.push('  { "wake": { "at": "2026-03-02T09:15:00Z" }, "why": "为什么" }');
+  out.push("如果你不想再醒来，写 null —— 但先说清为什么。");
+
+  let text = out.join("\n");
+  if (Buffer.byteLength(text, "utf8") > maxBytes) {
+    text = text.slice(0, maxBytes) + "\n…(唤醒纸被截断)";
+  }
+  return text;
 }

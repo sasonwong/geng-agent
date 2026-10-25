@@ -3,10 +3,12 @@ import { join } from "node:path";
 import type { Paths } from "../paths.ts";
 import { ensureDirs, readText, writeJson, writeText } from "../state.ts";
 
-const IDENTITY = `我是 alice，一个跑在这台服务器上的进程。
+function identityFor(instance: string): string {
+  return `我是 ${instance}，一个跑在这台服务器上的进程。
 我在学着在没有人的时候，自己也做点事。
 现在我还没什么想法，但我知道那个空着的目录是我的。
 `;
+}
 
 const INDEX = [
   "# 日记索引",
@@ -37,7 +39,7 @@ export interface FakeOptions {
 export function writeFakeState(p: Paths, o: FakeOptions = {}): string[] {
   const created: string[] = [];
   const targets: Array<[string, () => void]> = [
-    [p.identity, () => writeText(p.identity, IDENTITY)],
+    [p.identity, () => writeText(p.identity, identityFor(p.instance))],
     [
       p.openLoops,
       () =>

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
 import { runDaemon } from "../../internal/daemon.ts";
+import { ExpectedError } from "../../internal/errors.ts";
 import { runDoctor } from "../../internal/doctor.ts";
 import { initInstance } from "../../internal/init.ts";
 import { makePaths } from "../../internal/paths.ts";
@@ -150,6 +151,10 @@ async function main(): Promise<number> {
 main().then(
   (code) => process.exit(code),
   (err) => {
+    if (err instanceof ExpectedError) {
+      console.error(err.message);
+      process.exit(1);
+    }
     console.error(err instanceof Error ? err.stack ?? err.message : String(err));
     process.exit(1);
   },

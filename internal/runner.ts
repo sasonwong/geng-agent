@@ -69,6 +69,7 @@ function dockerArgs(o: RunOptions): string[] {
     "-w",
     "/work",
   ];
+  if (policy.container.network) args.push("--network", policy.container.network);
   // secrets are injected, never mounted
   if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
 
@@ -97,6 +98,29 @@ function localEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+interface Active {
+  child: import("node:child_process").ChildProcess;
+  isDocker: boolean;
+  containerName: string;
+}
+
+let active: Active | null = null;
+
+/**
+ * Called on SIGTERM: a shutdown must abort the waking in flight instead of waiting
+ * for it, otherwise systemd's TimeoutStopSec kills us mid-cleanup.
+ */
+export function abortRunning(): void {
+  if (!active) return;
+  const { child, isDocker, containerName } = active;
+  if (isDocker) {
+    spawn("docker", ["kill", containerName], { stdio: "ignore" }).on("error", () => {});
+    return;
+  }
+  child.kill("SIGTERM");
+  setTimeout(() => child.kill("SIGKILL"), 8_000).unref();
+}
+
 export async function runCycle(o: RunOptions): Promise<RunResult> {
   const isDocker = o.policy.runner === "docker";
   const cmd = isDocker ? "docker" : "pi";
@@ -114,6 +138,7 @@ export async function runCycle(o: RunOptions): Promise<RunResult> {
       env: isDocker ? process.env : localEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
+    active = { child, isDocker, containerName: `agent-${o.paths.instance}` };
 
     child.stdout?.setEncoding("utf8");
     child.stderr?.setEncoding("utf8");
@@ -143,6 +168,7 @@ export async function runCycle(o: RunOptions): Promise<RunResult> {
     const finish = (code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) return;
       settled = true;
+      active = null;
       clearTimeout(timer);
       resolve({
         code,
