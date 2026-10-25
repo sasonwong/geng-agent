@@ -117,6 +117,18 @@ om 的阈值都在这里，它既不能换模型来躲上下文压力，也不�
 OPENCODE_API_KEY=...
 ```
 
+### 守护进程
+
+`deploy/geng@.service` 是模板，装的时候把两个占位符换掉：
+
+| 占位符 | 换成 |
+|---|---|
+| `@ROOT@` | 仓库路径，例如 `/home/you/geng-agent` |
+| `@NODE@` | **node 的绝对路径**。nvm 装的 node 不在 systemd 的 PATH 里，`env node` 会让 unit 每十秒以 127 退出：`$(command -v node)` |
+
+然后 `systemctl --user link <换过的文件>`、`systemctl --user enable --now geng@alice`，
+再 `loginctl enable-linger $USER`（不然退出 SSH 后它就停）。
+
 ### 代理
 
 两处，别混：

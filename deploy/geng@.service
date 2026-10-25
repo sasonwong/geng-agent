@@ -6,8 +6,10 @@ Type=simple
 WorkingDirectory=@ROOT@
 EnvironmentFile=-@ROOT@/secrets/%i.env
 # flock is the lock: the kernel owns it, the daemon does not.
+# @NODE@ is an absolute path on purpose: nvm's node is not on systemd's PATH, so
+# `env node` starts a unit that dies with 127 every ten seconds.
 ExecStart=/usr/bin/flock -w 5 @ROOT@/data/%i/daemon.lock \
-          /usr/bin/env node @ROOT@/cmd/geng/index.ts daemon --instance %i --root @ROOT@
+          @NODE@ @ROOT@/cmd/geng/index.ts daemon --instance %i --root @ROOT@
 Restart=always
 RestartSec=10
 # Must exceed our own shutdown grace, and stay far below one cycle's timeout.
