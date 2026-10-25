@@ -112,7 +112,6 @@ node cmd/geng/index.ts doctor alice --restore-test   # 真的读回来一次
 ```
 
 - 没有 `rustic`、没有密码、或者 `policy.json` 里 `backup.enabled: false` → 跳过，不算失败
-- 什么都没变就不拍（一轮闲置不占时间线上的一格）
 - 保留：最近 2000 张 / 每日 90 / 每周 52 / 每月 24，一天整理一次
 - 恢复**不覆盖 `data/`**，解到旁边的新目录，你看过再拷回去
 

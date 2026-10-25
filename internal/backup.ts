@@ -192,8 +192,7 @@ export async function maybeBackup(o: BackupOptions): Promise<BackupOutcome> {
 
   const globs = EXCLUDES.flatMap((g) => ["--glob", `!**/${g}`]);
   const result = await run(
-    // an idle cycle must leave no cell on the timeline
-    [...baseArgs(repo), "backup", paths.data, "--skip-if-unchanged", ...globs],
+    [...baseArgs(repo), "backup", paths.data, ...globs],
     env,
     BACKUP_TIMEOUT_MS,
   );
@@ -202,15 +201,10 @@ export async function maybeBackup(o: BackupOptions): Promise<BackupOutcome> {
     return { status: "fail", detail: result.stderr.trim().slice(0, 160) || `exit ${result.code}` };
   }
 
-  const id = parseSnapshotId(result.stdout + result.stderr);
-  if (!id || id.startsWith("00000000")) {
-    // rustic's no-change marker: nothing was written, so nothing to prune either
-    return { status: "skip", detail: "unchanged", ms: Date.now() - started };
-  }
-
   await maybeForget(paths, repo, env, nowMs);
 
-  return { status: "ok", detail: id, snapshotId: id, ms: Date.now() - started };
+  const id = parseSnapshotId(result.stdout + result.stderr);
+  return { status: "ok", detail: id ?? "", snapshotId: id, ms: Date.now() - started };
 }
 
 async function maybeForget(
@@ -245,8 +239,8 @@ export function writeDeployMeta(paths: Paths): void {
     policySchema: policy.schema ?? null,
     imageDigest: readImageDigest(paths),
   };
-  // No timestamp, and don't rewrite identical bytes: a file whose mtime moves every
-  // cycle would make every snapshot look different and defeat --skip-if-unchanged.
+  // No timestamp: this file describes the build, not the cycle. Rewriting identical
+  // bytes every waking is pure waste.
   if (JSON.stringify(readJson<unknown>(file, null)) === JSON.stringify(next)) return;
   writeJson(file, next);
 }
