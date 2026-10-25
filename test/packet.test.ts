@@ -33,6 +33,7 @@ function fixture(): { root: string; input: (over: Partial<PacketInput>) => Packe
     lowPending: 0,
     policyLine: "defaultWakeMinutes=30",
     searchLeft: 12,
+    envChanged: null,
   };
   return { root, input: (over) => ({ ...base, ...over }) };
 }
@@ -92,6 +93,15 @@ test("open loops carry their age", () => {
 test("a long gap is stated as a fact, not an excuse", () => {
   const { input } = fixture();
   assert.match(buildPacket(input({ longGap: true })), /机器可能停过/);
+});
+
+test("a changed environment is stated, not explained", () => {
+  const { input } = fixture();
+  const text = buildPacket(input({ envChanged: "环境变了：镜像 3f2a1b9c → 9c8d7e01。" }));
+  assert.match(text, /环境变了：镜像 3f2a1b9c → 9c8d7e01/);
+  // no advice attached: what the new tools mean is its call, not ours
+  assert.doesNotMatch(text, /工具|建议|应该/);
+  assert.doesNotMatch(buildPacket(input({ envChanged: null })), /环境变了/);
 });
 
 test("search quota is stated as a fact it can weigh", () => {

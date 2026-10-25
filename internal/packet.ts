@@ -33,6 +33,8 @@ export interface PacketInput {
   policyLine: string;
   /** Searches left today; null when no search endpoint is configured. */
   searchLeft: number | null;
+  /** Set when the image or the program changed since the last waking. */
+  envChanged: string | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -72,7 +74,7 @@ const REASON_LINE: Record<WakeReason, string> = {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath } = input;
-  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft } = input;
+  const { inbox, maxBytes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -91,6 +93,7 @@ export function buildPacket(input: PacketInput): string {
     lastWakeMs === null ? "第一次醒来" : `距上次醒来 ${formatDuration(nowMs - lastWakeMs)}`;
   out.push(`现在：${new Date(nowMs).toISOString()} · ${since}`);
   if (longGap) out.push("（这次空档比闹钟长得多，机器可能停过。）");
+  if (envChanged) out.push(envChanged);
 
   out.push(
     "",

@@ -14,6 +14,7 @@ import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { searchQuota } from "./search.ts";
+import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
 import { advance, loadEscalation, planFor, saveEscalation, type Escalation, type Plan } from "./escalation.ts";
@@ -140,6 +141,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   }
   let policy: Policy = loadPolicy(paths.policy);
 
+  // Every waking starts a fresh container from the image tag, so a rebuilt image is
+  // picked up by itself — but nothing would tell it that its world changed.
+  const currentEnv = { imageId: await imageId(policy), version: packageVersion(paths.root) };
+  const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);
+
   let releaseLock: (() => void) | null = null;
   if (!o.dry) {
     releaseLock = acquirePidLock(join(paths.data, "daemon.pid"));
@@ -211,6 +217,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     ).length;
 
     const packet = buildPacket({
+      envChanged,
       paths,
       nowMs,
       reason,
@@ -251,6 +258,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       lastWakeMs: nowMs,
       wakings: waking,
       sessionGen,
+      env: currentEnv,
     });
     recordWake(paths, nowMs);
 
