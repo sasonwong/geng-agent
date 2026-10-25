@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { appendLine } from "./state.ts";
 
@@ -25,6 +25,67 @@ export function saidFile(data: string, chat: number): string {
 export function appendSaid(data: string, chat: number, entry: Said): void {
   mkdirSync(peopleDir(data), { recursive: true });
   appendLine(saidFile(data, chat), JSON.stringify(entry));
+}
+
+/**
+ * The most recent thing said with anybody, whoever started it. Used both for "who did
+ * you last talk to" and for the page's last-words line, so a message it sent on its own
+ * initiative counts the same as a reply.
+ */
+export function lastSaidIn(
+  data: string,
+  limit = 20,
+): { chat: number; who: string; at: string; tail: Said[] } | null {
+  let chats: string[];
+  try {
+    chats = readdirSync(peopleDir(data)).filter((f) => f.endsWith(".jsonl"));
+  } catch {
+    return null;
+  }
+  let best: { chat: number; at: number } | null = null;
+  for (const f of chats) {
+    const chat = Number(f.replace(/\.jsonl$/, ""));
+    if (Number.isNaN(chat)) continue;
+    const last = readSaid(data, chat, 1)?.tail[0];
+    if (!last || Number.isNaN(Date.parse(last.at))) continue;
+    const at = Date.parse(last.at);
+    if (best === null || at > best.at) best = { chat, at };
+  }
+  if (best === null) return null;
+  const tail = readSaid(data, best.chat, limit)?.tail ?? [];
+  const last = tail[tail.length - 1];
+  if (!last) return null;
+  // an outbound line only knows the chat; the name comes from their own lines
+  const who =
+    last.dir === "in"
+      ? (last.from ?? `chat ${best.chat}`)
+      : (tail.filter((l) => l.dir === "in").pop()?.from ?? `chat ${best.chat}`);
+  return { chat: best.chat, who, at: last.at, tail };
+}
+
+/** Everybody whose conversation moved since `sinceMs` — however many that turns out to be. */
+export function activeSince(data: string, sinceMs: number): { chat: number; who: string }[] {
+  let chats: string[];
+  try {
+    chats = readdirSync(peopleDir(data)).filter((f) => f.endsWith(".jsonl"));
+  } catch {
+    return [];
+  }
+  const out: { chat: number; who: string }[] = [];
+  for (const f of chats) {
+    const chat = Number(f.replace(/\.jsonl$/, ""));
+    if (Number.isNaN(chat)) continue;
+    const last = readSaid(data, chat, 20)?.tail ?? [];
+    const newest = last[last.length - 1];
+    if (!newest || Number.isNaN(Date.parse(newest.at))) continue;
+    if (Date.parse(newest.at) < sinceMs) continue;
+    const who =
+      last.filter((l) => l.dir === "in").pop()?.from ??
+      last[last.length - 1]?.from ??
+      `chat ${chat}`;
+    out.push({ chat, who });
+  }
+  return out;
 }
 
 export interface Transcript {

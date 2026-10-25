@@ -13,7 +13,7 @@ import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
-import { readSaid, type Said } from "./people.ts";
+import { activeSince, lastSaidIn, readSaid } from "./people.ts";
 import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
@@ -257,32 +257,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       lastSaid: meta.lastSaid ?? null,
       lastCycle: meta.lastCycle ?? null,
       lastWords: (() => {
-        // the freshest transcript is the one that last spoke to somebody
-        let chats: string[] = [];
-        try {
-          chats = readdirSync(paths.people).filter((f) => f.endsWith(".jsonl"));
-        } catch {
-          return null;
-        }
-        let best: { at: number; chat: number } | null = null;
-        for (const f of chats) {
-          const chat = Number(f.replace(/\.jsonl$/, ""));
-          if (Number.isNaN(chat)) continue;
-          const last = readSaid(paths.data, chat, 1)?.tail[0];
-          if (!last || Number.isNaN(Date.parse(last.at))) continue;
-          const at = Date.parse(last.at);
-          if (best === null || at > best.at) best = { at, chat };
-        }
-        if (best === null) return null;
-        const tail = readSaid(paths.data, best.chat, 20)?.tail ?? [];
-        const last = tail[tail.length - 1];
-        if (!last) return null;
-        // the sender's name lives on their own lines; an outbound line only knows the chat
-        const who =
-          last.dir === "in"
-            ? (last.from ?? `chat ${best.chat}`)
-            : (tail.filter((l) => l.dir === "in").pop()?.from ?? `chat ${best.chat}`);
-        return { dir: last.dir, text: last.text, at: last.at, who };
+        const t = lastSaidIn(paths.data);
+        const last = t?.tail[t.tail.length - 1];
+        if (!t || !last) return null;
+        return { dir: last.dir, text: last.text, at: last.at, who: t.who };
       })(),
       thread: (() => {
         const last = [...inbox].reverse().find((m) => typeof m.chat === "number");
@@ -375,7 +353,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         wake: reason,
         tools: result.toolCalls.length,
         inbox: inbox.length,
-        talkedTo: [...inbox].reverse().find((m) => m.from)?.from ?? null,
+        // not from the inbox: it can also speak first, and that is the same act.
+        // A list, because a cycle can reach more than one person.
+        talkedTo: activeSince(paths.data, startedMs).map((a) => a.who),
         // both halves: a cycle that only wrote a journal entry did something, and a
         // count that only watches /work would quietly teach it to touch files instead
         touched:

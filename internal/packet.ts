@@ -47,7 +47,7 @@ export interface PacketInput {
     wake: WakeReason;
     tools: number;
     inbox: number;
-    talkedTo: string | null;
+    talkedTo: string[];
     touched: number;
   } | null;
   /** The last thing said on the address that last spoke, whoever said it. */
@@ -129,7 +129,13 @@ export function buildPacket(input: PacketInput): string {
   if (longGap) out.push("（这次空档比闹钟长得多，机器可能停过。）");
   if (envChanged) out.push(envChanged);
   if (lastCycle) {
-    const did = lastCycle.talkedTo ? `，和 ${lastCycle.talkedTo} 说了话` : "";
+    const people = (lastCycle.talkedTo ?? []).filter((w) => typeof w === "string" && w !== "");
+    const did =
+      people.length === 0
+        ? ""
+        : people.length === 1
+          ? `，和 ${people[0]} 说了话`
+          : `，和 ${people.length} 个人说了话`;
     // state on disk is untrusted: an older record may carry a null here
     const wrote = Number.isFinite(lastCycle.touched) ? lastCycle.touched : 0;
     // 0 is stated as 0: "wrote 0 files" is a fact, "did nothing" would be a verdict
@@ -165,7 +171,11 @@ export function buildPacket(input: PacketInput): string {
 
   if (thread) out.push("", ...renderThread(thread, peoplePath));
   if (inbox.length > 0) {
-    out.push("", `有人在跟你说话：${inbox.length} 条，在 ${inboxPath}/。`);
+    // the thread block above shows one conversation; say how many people are actually
+    // waiting, or the page quietly privileges whoever spoke last
+    const people = new Set(inbox.map((m) => m.chat).filter((c) => typeof c === "number"));
+    const who = people.size > 1 ? `（${people.size} 个人）` : "";
+    out.push("", `有人在跟你说话：${inbox.length} 条${who}，在 ${inboxPath}/。`);
   }
   if (lowPending > 0) {
     out.push(`还有 ${lowPending} 条群里的消息在 ${inboxPath}/low/，它们没有叫醒你。`);

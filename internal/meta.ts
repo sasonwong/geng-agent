@@ -25,8 +25,8 @@ export interface Meta {
     wake: "timer" | "knock" | "nudge";
     tools: number;
     inbox: number;
-    /** Who it was talking to, if a message woke it. */
-    talkedTo: string | null;
+    /** Everybody it exchanged words with during that cycle, by their own name. */
+    talkedTo: string[];
     /** Files written during that cycle, in /work and /state together. */
     touched: number;
   };
