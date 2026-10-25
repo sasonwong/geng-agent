@@ -19,6 +19,17 @@ export interface Meta {
   wakings?: number;
   /** The last thing it said, so a fresh-context waking knows how it left things. */
   lastSaid?: string | null;
+  /** What the previous waking turned out to be, in counts and reasons only. */
+  lastCycle?: {
+    at: string;
+    wake: "timer" | "knock" | "nudge";
+    tools: number;
+    inbox: number;
+    /** Who it was talking to, if a message woke it. */
+    talkedTo: string | null;
+    /** Files under /work written during that cycle. */
+    touched: number | null;
+  };
   env?: Env;
   /**
    * The session's running totals as of the last waking. pi reports them cumulatively for

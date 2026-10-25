@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
@@ -173,7 +174,11 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const dir = decision.high ? p.inbox : p.inboxLow;
     const id = `${message.chat.id}-${message.message_id}`;
     const at = new Date().toISOString();
-    writeJson(join(dir, `${id}.json`), {
+    const file = join(dir, `${id}.json`);
+    // a redelivered message (crash between handling and recording the offset) lands on
+    // the same file: rewrite it, but do not log the same words twice
+    const redelivered = existsSync(file);
+    writeJson(file, {
       id,
       text: message.text,
       from: senderName(message),
@@ -183,12 +188,14 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     });
     // Only what was actually delivered: a message the policy chose not to forward must
     // not reappear later in the transcript.
-    appendSaid(p.data, message.chat.id, {
-      at,
-      dir: "in",
-      text: message.text,
-      from: senderName(message),
-    });
+    if (!redelivered) {
+      appendSaid(p.data, message.chat.id, {
+        at,
+        dir: "in",
+        text: message.text,
+        from: senderName(message),
+      });
+    }
     log(`${key} ← ${decision.reason}${decision.high ? " (唤醒)" : ""}`);
   };
 
@@ -200,13 +207,15 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     for (;;) {
       const updates = await getUpdates(cfg.token, offsets[key] ?? 0);
       for (const update of updates) {
-        offsets[key] = update.update_id + 1;
-        writeJson(offsetsFile, offsets);
+        // Handle first, record the offset after: recording it first means a crash in
+        // between loses the message for good, and Telegram will never hand it over again.
         try {
           await handleUpdate(key, me, update);
         } catch (err) {
           writeOps(ops, "gateway", `${key} 处理消息出错：${(err as Error).message}`);
         }
+        offsets[key] = update.update_id + 1;
+        writeJson(offsetsFile, offsets);
       }
     }
   };

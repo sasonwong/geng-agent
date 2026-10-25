@@ -42,6 +42,8 @@ function fixture(): {
     searchLeft: 12,
     envChanged: null,
     lastSaid: null,
+    lastCycle: null,
+    lastWords: null,
     thread: null,
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
@@ -100,11 +102,41 @@ test("open loops are counted by file, and pointed at instead of pasted", () => {
   assert.doesNotMatch(text, /弄清一个问题/);
 });
 
-test("it is told how it left things, since nothing else carries over", () => {
+test("it is told the last words of the conversation, and who said them", () => {
   const { input } = fixture();
-  const text = buildPacket(input({ lastSaid: "先去看 cgroup，然后写下来。" }));
-  assert.match(text, /你上次说完这句就没再说话了：「先去看 cgroup，然后写下来。」/);
-  assert.doesNotMatch(buildPacket(input({ lastSaid: null })), /没再说话/);
+  const mine = buildPacket(
+    input({
+      lastWords: { dir: "out", text: "先去看 cgroup。", at: "2026-03-02T08:50:00Z", who: "telegram:@you" },
+      lastSaid: "ignored when a transcript exists",
+    }),
+  );
+  assert.match(mine, /你最后跟 telegram:@you 说的是 10m前：「先去看 cgroup。」/);
+  assert.doesNotMatch(mine, /ignored when a transcript exists/);
+
+  const theirs = buildPacket(
+    input({ lastWords: { dir: "in", text: "帮我看下 X", at: "2026-03-02T08:59:00Z", who: "telegram:@you" } }),
+  );
+  assert.match(theirs, /telegram:@you 在 1m前说了最后一句：「帮我看下 X」，你之后没说话。/);
+
+  // no gateway at all: fall back to what the harness saw it say
+  assert.match(buildPacket(input({ lastSaid: "没有 gateway 时这句在" })), /没有 gateway 时这句在/);
+});
+
+test("the previous waking is stated as counts, never as a story", () => {
+  const { input } = fixture();
+  const knocked = buildPacket(
+    input({
+      lastCycle: { at: "2026-03-02T08:59:00Z", wake: "knock", tools: 9, inbox: 1, talkedTo: "telegram:@you", touched: 0 },
+    }),
+  );
+  assert.match(knocked, /上一轮：有人敲门，和 telegram:@you 说了话，\/work 里没动东西。/);
+
+  const worked = buildPacket(
+    input({ lastCycle: { at: "2026-03-02T08:30:00Z", wake: "timer", tools: 9, inbox: 0, talkedTo: null, touched: 3 } }),
+  );
+  assert.match(worked, /上一轮：你自己的闹钟，动了 3 个文件。/);
+
+  assert.doesNotMatch(buildPacket(input({ lastCycle: null })), /上一轮：/);
 });
 
 test("an empty open-loops directory is stated plainly", () => {

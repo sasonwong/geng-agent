@@ -41,8 +41,19 @@ export interface PacketInput {
   searchLeft: number | null;
   /** Set when the image or the program changed since the last waking. */
   envChanged: string | null;
-  /** The last thing it said, because nothing else carries over between wakings. */
+  /** The last thing it said, when there is no transcript to read it from. */
   lastSaid: string | null;
+  /** Why the previous waking happened and what it left behind, in counts. */
+  lastCycle: {
+    at: string;
+    wake: WakeReason;
+    tools: number;
+    inbox: number;
+    talkedTo: string | null;
+    touched: number | null;
+  } | null;
+  /** The last thing said on the address that last spoke, whoever said it. */
+  lastWords: { dir: "in" | "out"; text: string; at: string; who: string } | null;
   /** What was last said to and by it on the address that knocked, if any. */
   thread: ThreadInput | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
@@ -87,6 +98,12 @@ function renderMutes(mutes: Record<string, { until?: string | null }>): string |
   return `你静音了 ${parts.join("、")}。这不改变投递：私聊和点名照样叫醒你。`;
 }
 
+const LAST_WAKE: Record<WakeReason, string> = {
+  timer: "你自己的闹钟",
+  knock: "有人敲门",
+  nudge: "你没留闹钟（按默认间隔）",
+};
+
 const REASON_LINE: Record<WakeReason, string> = {
   timer: "你是被自己定的闹钟叫醒的。",
   knock: "有人敲门，所以你现在醒了。",
@@ -100,7 +117,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, workPath, inboxPath, logPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, thread } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread } = input;
 
   const identity = readText(paths.identity);
   const hasIdentity = identity !== null && identity.trim() !== "";
@@ -120,6 +137,16 @@ export function buildPacket(input: PacketInput): string {
   out.push(`现在：${new Date(nowMs).toISOString()} · ${since}`);
   if (longGap) out.push("（这次空档比闹钟长得多，机器可能停过。）");
   if (envChanged) out.push(envChanged);
+  if (lastCycle) {
+    const did = lastCycle.talkedTo ? `，和 ${lastCycle.talkedTo} 说了话` : "";
+    const moved =
+      lastCycle.touched === null
+        ? ""
+        : lastCycle.touched > 0
+          ? `，动了 ${lastCycle.touched} 个文件`
+          : "，/work 里没动东西";
+    out.push(`上一轮：${LAST_WAKE[lastCycle.wake]}${did}${moved}。`);
+  }
 
   // one wrapped line: per-item padding never lines up once a path is shorter than the
   // longest one, and a misaligned legend reads like a bug
@@ -132,7 +159,17 @@ export function buildPacket(input: PacketInput): string {
   );
 
   if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);
-  if (lastSaid) out.push(`你上次说完这句就没再说话了：「${excerpt(flatten(lastSaid), 120)}」`);
+  if (lastWords) {
+    const age = lastWords.at ? formatDuration(nowMs - Date.parse(lastWords.at)) : "";
+    const said = excerpt(flatten(lastWords.text), 120);
+    out.push(
+      lastWords.dir === "out"
+        ? `你最后跟 ${lastWords.who} 说的是 ${age}前：「${said}」`
+        : `${lastWords.who} 在 ${age}前说了最后一句：「${said}」，你之后没说话。`,
+    );
+  } else if (lastSaid) {
+    out.push(`你上次说完这句就没再说话了：「${excerpt(flatten(lastSaid), 120)}」`);
+  }
 
   // the first page must not contradict itself: on birth there is no counting yet
   if (waking > 1) out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);
@@ -147,7 +184,6 @@ export function buildPacket(input: PacketInput): string {
       ? `未闭合的事：${loops} 件，在 ${statePath}/open-loops/。`
       : "未闭合的事：（没有未闭合的事）",
   );
-  out.push(`最近几轮：${logPath} 的最后几行。`);
 
   if (thread) out.push("", ...renderThread(thread, peoplePath));
   if (inbox.length > 0) {

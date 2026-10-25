@@ -1,5 +1,6 @@
-import { appendFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { appendLine } from "./state.ts";
 
 /**
  * What was actually exchanged with one address, in order, forever. Append-only and
@@ -22,9 +23,8 @@ export function saidFile(data: string, chat: number): string {
 }
 
 export function appendSaid(data: string, chat: number, entry: Said): void {
-  const dir = peopleDir(data);
-  mkdirSync(dir, { recursive: true });
-  appendFileSync(saidFile(data, chat), JSON.stringify(entry) + "\n");
+  mkdirSync(peopleDir(data), { recursive: true });
+  appendLine(saidFile(data, chat), JSON.stringify(entry));
 }
 
 export interface Transcript {

@@ -13,7 +13,8 @@ import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, spentThisCycle, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
-import { readSaid } from "./people.ts";
+import { readSaid, type Said } from "./people.ts";
+import { countTouched } from "./touch.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
@@ -255,6 +256,35 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       inbox,
       mutes: readMutes(paths.mute, nowMs),
       lastSaid: meta.lastSaid ?? null,
+      lastCycle: meta.lastCycle ?? null,
+      lastWords: (() => {
+        // the freshest transcript is the one that last spoke to somebody
+        let chats: string[] = [];
+        try {
+          chats = readdirSync(paths.people).filter((f) => f.endsWith(".jsonl"));
+        } catch {
+          return null;
+        }
+        let best: { at: number; chat: number } | null = null;
+        for (const f of chats) {
+          const chat = Number(f.replace(/\.jsonl$/, ""));
+          if (Number.isNaN(chat)) continue;
+          const last = readSaid(paths.data, chat, 1)?.tail[0];
+          if (!last || Number.isNaN(Date.parse(last.at))) continue;
+          const at = Date.parse(last.at);
+          if (best === null || at > best.at) best = { at, chat };
+        }
+        if (best === null) return null;
+        const tail = readSaid(paths.data, best.chat, 20)?.tail ?? [];
+        const last = tail[tail.length - 1];
+        if (!last) return null;
+        // the sender's name lives on their own lines; an outbound line only knows the chat
+        const who =
+          last.dir === "in"
+            ? (last.from ?? `chat ${best.chat}`)
+            : (tail.filter((l) => l.dir === "in").pop()?.from ?? `chat ${best.chat}`);
+        return { dir: last.dir, text: last.text, at: last.at, who };
+      })(),
       thread: (() => {
         const last = [...inbox].reverse().find((m) => typeof m.chat === "number");
         if (!last || last.chat === undefined) return null;
@@ -301,6 +331,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     writeMeta(paths, meta);
     recordWake(paths, nowMs);
 
+    const startedMs = Date.now();
     const result = await runWaking({
       command: buildCommand(paths, policy, sessionId),
       instance: paths.instance,
@@ -338,6 +369,19 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
     escalation = advance(escalation, symptom, result);
     saveEscalation(paths, escalation);
+
+    meta = {
+      ...meta,
+      lastCycle: {
+        at: new Date().toISOString(),
+        wake: reason,
+        tools: result.toolCalls.length,
+        inbox: inbox.length,
+        talkedTo: [...inbox].reverse().find((m) => m.from)?.from ?? null,
+        touched: countTouched(paths.workspace, startedMs),
+      },
+    };
+    writeMeta(paths, meta);
 
     const backup = await maybeBackup({ paths, policy, nowMs: Date.now() });
     const line = logLine(
