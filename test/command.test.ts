@@ -39,3 +39,17 @@ test("the tools are loaded from outside the agent's home", () => {
   assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
   assert.match(joined, /-e \/opt\/geng\/extensions\/websearch\.ts/);
 });
+
+test("every -e value is really passed to docker as an env var", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = defaultPolicy();
+  p.runner = "docker";
+  const args = buildCommand(makePaths(root, "alice"), p, "geng-x-0001", "P").args;
+  // TZ once shipped without its flag: docker read "TZ=Asia/Shanghai" as the image name,
+  // the container never started, and the daemon died with no log line at all.
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? "";
+    if (/^[A-Z_]+=/.test(a)) assert.equal(args[i - 1], "-e", `${a} 少了 -e`);
+  }
+  assert.ok(args.includes("TZ=Asia/Shanghai"));
+});

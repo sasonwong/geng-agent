@@ -249,8 +249,21 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   }, o.timeoutMs);
   timer.unref();
 
+  const failPending = () => {
+    // A child that died before answering leaves these promises pending — and their
+    // timers are unref'd, so the event loop empties and the daemon exits with no log
+    // line at all. A dead child has to become a symptom, never a silence.
+    for (const resolve of pending.values()) resolve(undefined);
+    pending.clear();
+  };
   child.on("error", () => {
     startFailed = true;
+    failPending();
+    resolveSettled();
+  });
+  child.on("close", () => {
+    if (!settled) startFailed = true;
+    failPending();
     resolveSettled();
   });
   child.stdin?.on("error", () => {});

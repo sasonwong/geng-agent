@@ -56,7 +56,8 @@ export function buildCommand(
       "no-new-privileges",
       "-e",
       "HOME=/home/agent",
-      // the page prints both clocks, so this has to be the same zone the page names
+      // every -e needs its own flag; a bare KEY=VALUE lands where the image name goes
+      "-e",
       `TZ=${policy.timezone}`,
       "-v",
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
