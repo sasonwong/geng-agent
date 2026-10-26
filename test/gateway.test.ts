@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { knownPlaces, noteChat, readChats, route } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/state.ts";
+import { makePaths } from "../internal/paths.ts";
 
 test("direct address is always high and always delivered", () => {
   assert.deepEqual(route({ isDm: true, isMention: false, isReply: false, listen: "mentions", muted: true, listening: false }), {
@@ -123,4 +124,22 @@ test("the page is told where it may speak, and which one is the default", () => 
     { id: 111, label: "私聊 telegram:@owner", home: true },
     { id: -222, label: "群「g」", home: false },
   ]);
+});
+
+test("a quote only applies inside the chat it came from", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  mkdirSync(paths.outbox, { recursive: true });
+  writeJson(join(paths.outbox, "1-x.json"), {
+    id: "1-x",
+    messages: ["嗯"],
+    chat: -1001234,
+    replyTo: { chat: -1001234, messageId: 12 },
+  });
+  const items = readOutbox(paths.outbox);
+  assert.equal(items.length, 1);
+  assert.deepEqual(items[0]?.replyTo, { chat: -1001234, messageId: 12 });
+  // an item written by an older/broken sender still reads as "no quote"
+  writeJson(join(paths.outbox, "2-y.json"), { id: "2-y", messages: ["哈"], replyTo: "151" });
+  assert.equal(readOutbox(paths.outbox)[1]?.replyTo, undefined);
 });

@@ -12,6 +12,8 @@ export interface Said {
   dir: "in" | "out";
   text: string;
   from?: string;
+  /** `<chat>-<message_id>`: what it needs to quote a line from an older exchange. */
+  id?: string;
 }
 
 export function peopleDir(data: string): string {
