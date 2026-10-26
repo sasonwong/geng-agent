@@ -56,7 +56,7 @@ test("markSeen quarantines an unparseable message instead of dying", () => {
   assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".json")), []);
 });
 
-test("an empty-text message is not handed over, and stays where it is", () => {
+test("a message with neither words nor a file is not handed over", () => {
   const { dir, seen } = inbox();
   writeFileSync(join(dir, "001.json"), JSON.stringify({ text: "   " }));
   assert.equal(peekInbox(dir).length, 0);
@@ -72,4 +72,25 @@ test("the typing indicator follows the newest knock, in its own chat", () => {
   ];
   assert.equal(newestKnock(msgs)?.id, "2");
   assert.equal(newestKnock([{ id: "4", at: "2026-03-02T08:00:00Z" }]), null);
+});
+test("a message that is only a file is still a message", () => {
+  const { dir, seen } = inbox();
+  writeFileSync(
+    join(dir, "001.json"),
+    JSON.stringify({
+      id: "1",
+      text: "",
+      from: "telegram:@carol",
+      chat: -100,
+      attachments: [{ kind: "document", path: "/files/1-check.md", bytes: 3952 }],
+    }),
+  );
+
+  const peeked = peekInbox(dir);
+  assert.equal(peeked.length, 1);
+  const only = peeked[0];
+  assert.ok(only);
+  assert.equal(only.text, "");
+  assert.deepEqual(only.attachments, [{ kind: "document", path: "/files/1-check.md", bytes: 3952 }]);
+  assert.equal(readdirSync(seen).length, 0, "peeking must not consume it");
 });

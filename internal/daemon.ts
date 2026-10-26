@@ -341,13 +341,13 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     const startedMs = Date.now();
     // the page already showed these; only what arrives from here on is pushed in
     const shown = new Set(inbox.map((m) => m.id));
-    const injected: { id: string; file: string; text: string; from?: string }[] = [];
+    const injected: { id: string; file: string; text: string; from?: string; attachments?: { kind: string }[] }[] = [];
     const result = await runWaking({
       drain: () => {
         const fresh = freshForSteer(peekInbox(paths.inbox), shown, INJECT_CAP - injected.length);
         for (const m of fresh) {
           shown.add(m.id); // do not hand it the same words twice
-          injected.push({ id: m.id, file: m.file, text: m.text, from: m.from });
+          injected.push({ id: m.id, file: m.file, text: m.text, from: m.from, attachments: m.attachments });
         }
         return fresh.map(injectionText);
       },

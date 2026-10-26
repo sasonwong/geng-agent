@@ -29,3 +29,9 @@ test("an injection no turn followed is not counted as delivered", () => {
   assert.deepEqual(deliveredFiles(injected, []), []);
   assert.deepEqual(deliveredFiles([], [{ read: true }]), []);
 });
+test("a file with no words still says something when it interrupts", () => {
+  assert.equal(
+    injectionText({ id: "1", file: "1.json", text: "", from: "telegram:@carol", attachments: [{ kind: "document" }] }),
+    "[刚收到] telegram:@carol：没写字，只带了 1 个附件，去看一眼。",
+  );
+});

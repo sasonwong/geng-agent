@@ -15,15 +15,44 @@ export interface InboxMsg {
   attachments?: { kind: string; path?: string; note?: string; bytes?: number }[];
 }
 
+/**
+ * A document, a photo or a voice note often arrives with nothing typed. The gateway
+ * writes those on purpose (it even puts a placeholder in the transcript), so treating
+ * "no text" as "not a message" is how one gets lost without ever being shown: it stays
+ * in the inbox, never handed over, never marked seen, and only survives as a count.
+ */
+function parseAttachments(raw: unknown): InboxMsg["attachments"] {
+  if (!Array.isArray(raw)) return undefined;
+  const out: NonNullable<InboxMsg["attachments"]> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const a = item as Record<string, unknown>;
+    if (typeof a.kind !== "string") continue;
+    out.push({
+      kind: a.kind,
+      ...(typeof a.path === "string" ? { path: a.path } : {}),
+      ...(typeof a.note === "string" ? { note: a.note } : {}),
+      ...(typeof a.bytes === "number" ? { bytes: a.bytes } : {}),
+    });
+  }
+  return out.length > 0 ? out : undefined;
+}
+
 function parseFile(dir: string, name: string): InboxMsg | null {
-  const msg = readJson<InboxMsg | null>(join(dir, name), null);
-  if (!msg || typeof msg.text !== "string" || msg.text.trim() === "") return null;
+  const msg = readJson<Record<string, unknown> | null>(join(dir, name), null);
+  if (!msg) return null;
+  const text = typeof msg.text === "string" ? msg.text : "";
+  const attachments = parseAttachments(msg.attachments);
+  // Nothing said and nothing carried: not a message. Said nothing but sent something:
+  // a message, and the only thing worth passing on is that it is there.
+  if (text.trim() === "" && !attachments) return null;
   return {
     id: typeof msg.id === "string" ? msg.id : name.replace(/\.json$/, ""),
     file: name,
-    text: msg.text,
-    from: msg.from,
-    at: msg.at,
+    text,
+    attachments,
+    from: typeof msg.from === "string" ? msg.from : undefined,
+    at: typeof msg.at === "string" ? msg.at : undefined,
     chat: typeof msg.chat === "number" ? msg.chat : undefined,
   };
 }
