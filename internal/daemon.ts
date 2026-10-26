@@ -1,15 +1,8 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
-import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
-import {
-  countOutbox,
-  deliveredFiles,
-  freshForSteer,
-  INJECT_CAP,
-  injectionText,
-  spokenOutbox,
-} from "./inject.ts";
+import { markSeen, peekInbox } from "./inbox.ts";
+import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -328,7 +321,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     writeMeta(paths, meta);
     recordWake(paths, nowMs);
 
-    const outboxBefore = countOutbox(paths.outbox);
     const startedMs = Date.now();
     // the page already showed these; only what arrives from here on is pushed in
     const shown = new Set(inbox.map((m) => m.id));
@@ -369,15 +361,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
 
     const symptom = classify(result);
-    const spoken = spokenOutbox(
-      reason,
-      result.finalText,
-      newestKnock(inbox)?.chat,
-      countOutbox(paths.outbox) !== outboxBefore,
-    );
-    if (spoken && symptom === "ok") {
-      writeJson(join(paths.outbox, `${spoken.id}.json`), spoken);
-    }
     // Only a wake that ran to the end has read them. Anything else leaves the messages
     // in place so the next wake hands them over again rather than losing them.
     // An injection that no turn followed never reached the model: leaving it unseen
