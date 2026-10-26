@@ -30,6 +30,8 @@ export function buildCommand(
   sessionId: string,
   /** The constant half of waking up, with the identity it wrote appended. */
   systemPrompt: string,
+  /** How many places it may speak into: with more than one, `say` must name one. */
+  places: number,
   /** Replace the in-container command; used by the doctor probe. */
   tail?: string[],
 ): Command {
@@ -59,6 +61,8 @@ export function buildCommand(
       // every -e needs its own flag; a bare KEY=VALUE lands where the image name goes
       "-e",
       `TZ=${policy.timezone}`,
+      "-e",
+      `GENG_PLACES=${places}`,
       "-v",
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
@@ -119,7 +123,7 @@ export function buildCommand(
       "--system-prompt",
       systemPrompt,
     ],
-    env: localEnv(),
+    env: { ...localEnv(), GENG_PLACES: String(places) },
     cwd: paths.workspace,
   };
 }

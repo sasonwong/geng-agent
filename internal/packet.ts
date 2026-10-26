@@ -137,12 +137,15 @@ export function systemFacts(
   policyLine: string,
 ): string {
   const out: string[] = [];
+  if (places.length === 1) {
+    out.push(`能说话的地方：${places[0]?.label ?? "?"}。`);
+  }
   if (places.length > 1) {
     const list = places
       .map((p) => `${p.label}（${p.id}${p.home ? "，默认" : ""}）`)
       .join("、");
     out.push(
-      `能说话的地方：${list}。say 不写 to 就发到${places.find((p) => p.home)?.label ?? "默认那个"}。`,
+      `能说话的地方：${list}。say 要指明 to。`,
     );
   }
   out.push(`可以调的运行参数：${policyLine}。`);

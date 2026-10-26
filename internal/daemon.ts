@@ -248,9 +248,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // The system prompt carries the two facts that only change when the operator does
     // something — where it may speak, and its own knobs — so the tools block underneath
     // it stays cacheable from one waking to the next.
+    const places = knownPlaces(paths.root, o.instance);
     const systemPrompt = systemPromptFor(
       paths,
-      systemFacts(knownPlaces(paths.root, o.instance), policySummary(policy)),
+      systemFacts(places, policySummary(policy)),
     );
     const longGap = typeof meta.lastWakeMs === "number" && nowMs - meta.lastWakeMs > longGapMs;
     const wakes24h = readJson<number[]>(join(paths.meta, "wakes.json"), []).filter(
@@ -347,7 +348,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         }
         return fresh.map(injectionText);
       },
-      command: buildCommand(paths, policy, sessionId, systemPrompt),
+      command: buildCommand(paths, policy, sessionId, systemPrompt, places.length),
       instance: paths.instance,
       isDocker: policy.runner === "docker",
       timeoutMs: policy.cycle.timeoutSec * 1000,

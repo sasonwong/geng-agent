@@ -14,6 +14,9 @@ const STATE = process.env.GENG_STATE ?? "/state";
 // its mountpoint inside the bind, which lands in the agent's own book as a root-owned dir
 const OUTBOX = process.env.GENG_OUTBOX ?? "/outbox";
 const MUTE = join(STATE, "mute.json");
+// How many places this instance may speak into, counted by the daemon. Guessing the
+// target is what put a group reply into a private chat, so at two or more it is refused.
+const PLACES = Number(process.env.GENG_PLACES ?? "0");
 const FORGET = join(STATE, "files.forget.json");
 
 function writeAtomic(file: string, text: string): void {
@@ -31,7 +34,7 @@ const sayTool = defineTool({
   name: "say",
   label: "Say",
   description:
-    "说话。一次调用里的几句会一起送到；分几次调用就是隔一阵说一句。没人问你的时候也可以说。不写 to 就是私聊。",
+    "说话。一次调用里的几句会一起送到；分几次调用就是隔一阵说一句。没人问你的时候也可以说。",
   parameters: Type.Object({
     messages: Type.Array(Type.String(), {
       minItems: 1,
@@ -40,7 +43,7 @@ const sayTool = defineTool({
     }),
     to: Type.Optional(
       Type.String({
-        description: "发给哪个 chat 的 id（见纸上的「能说话的地方」）。不写就是私聊。",
+        description: "发给哪个 chat 的 id（见提示词里的「能说话的地方」）。",
       }),
     ),
     files: Type.Optional(
@@ -54,6 +57,9 @@ const sayTool = defineTool({
     const messages = params.messages.filter((m) => m.trim() !== "");
     if (messages.length === 0) {
       return { content: [{ type: "text", text: "没说什么。" }], details: undefined };
+    }
+    if (params.to === undefined && PLACES >= 2) {
+      throw new Error("有两处以上能说话，to 必填：提示词「能说话的地方」里有各个 chat 的 id。");
     }
     const chat = params.to === undefined ? undefined : Number(params.to);
     if (params.to !== undefined && !Number.isFinite(chat)) {
