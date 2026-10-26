@@ -4,7 +4,7 @@ import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { markSeen, peekInbox } from "./inbox.ts";
 import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
-import { makePaths, type Paths } from "./paths.ts";
+import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
@@ -38,23 +38,6 @@ export interface DaemonOptions {
   log?: (line: string) => void;
 }
 
-function requiredDirs(p: Paths): string[] {
-  return [
-    p.data,
-    p.sessionDir,
-    p.palimpsest,
-    p.journal,
-    p.workspace,
-    p.usage,
-    p.meta,
-    p.inbox,
-    p.inboxSeen,
-    p.inboxLow,
-    p.outbox,
-    p.openLoops,
-    p.people,
-  ];
-}
 
 function pendingLow(p: Paths): number {
   try {
@@ -271,6 +254,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       statePath,
       inboxPath: at("/inbox", paths.inbox),
       peoplePath: at("/people", paths.people),
+      filesPath: at("/files", paths.filesDir),
       inbox,
       mutes: readMutes(paths.mute, nowMs),
       lastSaid: meta.lastSaid ?? null,

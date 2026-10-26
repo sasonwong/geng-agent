@@ -28,6 +28,7 @@ function fixture(): {
     statePath: "/state",
     inboxPath: "/inbox",
     peoplePath: "/people",
+    filesPath: "/files",
     inbox: [],
     mutes: {},
     crashed: false,

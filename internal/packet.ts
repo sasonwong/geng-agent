@@ -2,6 +2,7 @@ import { readdirSync } from "node:fs";
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
 import { excerpt, readJson, readText } from "./state.ts";
+import { KIND_WORD } from "./attach.ts";
 import { formatDuration } from "./schedule.ts";
 
 export type WakeReason = "timer" | "knock" | "nudge";
@@ -33,6 +34,8 @@ export interface PacketInput {
   parked: boolean;
   /** Ambient messages waiting in inbox/low, which did not wake it. */
   lowPending: number;
+  /** Where files people sent it live; injected so neither runner hardcodes a path. */
+  filesPath: string;
   /** The settings it is allowed to renegotiate, shown so it can renegotiate them. */
   /** Searches left today; null when no search endpoint is configured. */
   searchLeft: number | null;
@@ -139,7 +142,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, filesPath, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting } = input;
 
   const out: string[] = [];
 
@@ -204,6 +207,22 @@ export function buildPacket(input: PacketInput): string {
     const who = people.size > 1 ? `（${people.size} 个人）` : "";
     out.push("", `有人在跟你说话：${inbox.length} 条${who}，在 ${inboxPath}/。`);
   }
+  // Files are counted, never described: what is in them is the agent's business to look at.
+  const kinds = new Map<string, number>();
+  for (const m of inbox) {
+    for (const a of m.attachments ?? []) kinds.set(a.kind, (kinds.get(a.kind) ?? 0) + 1);
+  }
+  const files = [...kinds]
+    .filter(([kind]) => kind !== "voice")
+    .map(([kind, n]) => `${n}${KIND_WORD[kind as keyof typeof KIND_WORD] ?? "个文件"}`);
+  if (files.length > 0) out.push(`一起发来的还有 ${files.join("、")}，在 ${filesPath}/。`);
+  const voice = kinds.get("voice") ?? 0;
+  if (voice > 0) {
+    // no transcription exists here, so the honest thing is that the words are not
+    // available — not that it failed at something
+    out.push(`还有 ${voice} 条语音：这里没有能把声音变成字的东西，话是听不到的。`);
+  }
+
   if (lowPending > 0) {
     out.push(`还有 ${lowPending} 条群里的消息在 ${inboxPath}/low/，它们没有叫醒你。`);
   }

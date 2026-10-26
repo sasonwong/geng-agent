@@ -15,6 +15,8 @@ export interface Paths {
   inboxSeen: string;
   inboxLow: string;
   outbox: string;
+  /** Files people sent it. Read-only inside the container, never its business to write. */
+  filesDir: string;
   daemonLog: string;
   /** Outside the book on purpose: the rules it lives under are not something it reads
    * or writes. The negotiable values reach it through the wake page instead. */
@@ -47,6 +49,7 @@ export function makePaths(root: string, instance: string): Paths {
   const palimpsest = join(data, "palimpsest");
   const inbox = join(data, "inbox");
   const outbox = join(data, "outbox");
+  const filesDir = join(data, "files");
   const journal = join(palimpsest, "journal");
   return {
     root: r,
@@ -61,6 +64,7 @@ export function makePaths(root: string, instance: string): Paths {
     inboxSeen: join(inbox, "seen"),
     inboxLow: join(inbox, "low"),
     outbox,
+    filesDir,
     daemonLog: join(data, "daemon.log"),
     policy: join(data, "policy.json"),
     identity: join(palimpsest, "identity.md"),
@@ -82,3 +86,28 @@ export function makePaths(root: string, instance: string): Paths {
 export const STATE_MOUNT = "/state";
 export const WORK_MOUNT = "/work";
 export const HOME_MOUNT = "/home/agent";
+
+/**
+ * One list, because two lists drift exactly when you are debugging: init and the daemon
+ * both create the state tree, and a directory added to one but not the other fails
+ * silently at run time.
+ */
+export function requiredDirs(p: Paths): string[] {
+  return [
+    p.data,
+    p.sessionDir,
+    p.palimpsest,
+    p.journal,
+    p.workspace,
+    p.usage,
+    p.meta,
+    p.inbox,
+    p.inboxSeen,
+    p.inboxLow,
+    p.outbox,
+    p.piDir,
+    p.openLoops,
+    p.people,
+    p.filesDir,
+  ];
+}

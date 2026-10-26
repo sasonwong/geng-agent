@@ -38,6 +38,8 @@ export function isMuted(
 export interface OutboxItem {
   /** Which chat it meant to speak into; absent means home. */
   chat?: number;
+  /** Container paths under /work that go out with the words. */
+  files?: string[];
   file: string;
   id: string;
   messages: string[];
@@ -56,10 +58,13 @@ export function readOutbox(dir: string): OutboxItem[] {
     return items;
   }
   for (const f of files) {
-    const raw = readJson<{ id?: string; messages?: unknown; text?: unknown; chat?: unknown }>(
-      join(dir, f),
-      {},
-    );
+    const raw = readJson<{
+      id?: string;
+      messages?: unknown;
+      text?: unknown;
+      chat?: unknown;
+      files?: unknown;
+    }>(join(dir, f), {});
     const messages = Array.isArray(raw.messages)
       ? raw.messages.filter((m): m is string => typeof m === "string" && m.trim() !== "")
       : typeof raw.text === "string" && raw.text.trim() !== ""
@@ -68,6 +73,7 @@ export function readOutbox(dir: string): OutboxItem[] {
     items.push({
       file: join(dir, f),
       id: raw.id ?? f.replace(/\.json$/, ""),
+      files: Array.isArray(raw.files) ? raw.files.filter((x): x is string => typeof x === "string") : [],
       messages,
       chat: typeof raw.chat === "number" ? raw.chat : undefined,
     });

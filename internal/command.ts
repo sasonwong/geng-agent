@@ -73,6 +73,10 @@ export function buildCommand(
       `${paths.inbox}:/inbox:ro`,
       "-v",
       `${paths.people}:/people:ro`,
+      // what people sent it: read-only, because a file it may not have looked at yet must
+      // not be something it can edit
+      "-v",
+      `${paths.filesDir}:/files:ro`,
       "-v",
       `${paths.workspace}:/work`,
       "-w",

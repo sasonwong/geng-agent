@@ -11,6 +11,8 @@ export interface InboxMsg {
   at?: string;
   /** Which address it came from, so its transcript can be found. */
   chat?: number;
+  /** What came with it. Voice carries a note instead of a path, on purpose. */
+  attachments?: { kind: string; path?: string; note?: string; bytes?: number }[];
 }
 
 function parseFile(dir: string, name: string): InboxMsg | null {

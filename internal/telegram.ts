@@ -1,5 +1,8 @@
 /** Thin Telegram Bot API client. No SDK: five methods is not worth a dependency. */
 
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname } from "node:path";
+
 export interface BotConfig {
   token: string;
   /** Which inbound messages are forwarded at all. Direct address always wins. */
@@ -14,11 +17,29 @@ export interface TgEntity {
   length: number;
 }
 
+export interface TgFileRef {
+  file_id: string;
+  file_size?: number;
+  file_name?: string;
+  mime_type?: string;
+}
+
 export interface TgMessage {
   message_id: number;
   from?: { id: number; username?: string; first_name?: string };
   chat: { id: number; type: "private" | "group" | "supergroup" | "channel"; title?: string };
   text?: string;
+  /** what an attachment with words looks like */
+  caption?: string;
+  /** the biggest size of a photo is the last entry */
+  photo?: TgFileRef[];
+  document?: TgFileRef;
+  audio?: TgFileRef;
+  video?: TgFileRef;
+  animation?: TgFileRef;
+  video_note?: TgFileRef;
+  sticker?: TgFileRef;
+  voice?: TgFileRef;
   entities?: TgEntity[];
   reply_to_message?: { from?: { id: number } };
   message_thread_id?: number;
@@ -114,12 +135,65 @@ export async function sendMessage(
  * "I am working on it" for up to five seconds; clients clear it the moment a message
  * arrives. Not a read receipt — the Bot API has no such thing for bots.
  */
+/** Bots may download up to 20 MB; anything bigger is not ours to fetch. */
+export const FILE_LIMIT = 20 * 1024 * 1024;
+
+export async function getFilePath(token: string, fileId: string): Promise<string> {
+  const file = await call<{ file_path?: string }>(token, "getFile", { file_id: fileId });
+  if (!file.file_path) throw new Error("getFile 没给 file_path");
+  return file.file_path;
+}
+
+export async function downloadFile(
+  token: string,
+  filePath: string,
+  dest: string,
+): Promise<number> {
+  const response = await fetch(`${API}/file/bot${token}/${filePath}`, {
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!response.ok) throw new Error(`下载失败 HTTP ${response.status}`);
+  const bytes = Buffer.from(await response.arrayBuffer());
+  if (bytes.length > FILE_LIMIT) throw new Error(`文件超过 ${FILE_LIMIT} 字节`);
+  mkdirSync(dirname(dest), { recursive: true });
+  writeFileSync(dest, bytes);
+  return bytes.length;
+}
+
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+
+/** Photos as photos, everything else as a document. `path` is a host path. */
+export async function sendFile(token: string, chat: number, path: string): Promise<void> {
+  const bytes = readFileSync(path);
+  const name = basename(path);
+  const form = new FormData();
+  form.set("chat_id", String(chat));
+  if (IMAGE_EXT.test(name)) {
+    form.set("photo", new Blob([bytes]), name);
+  } else {
+    form.set("document", new Blob([bytes]), name);
+  }
+  const response = await fetch(`${API}/bot${token}/${IMAGE_EXT.test(name) ? "sendPhoto" : "sendDocument"}`, {
+    method: "POST",
+    body: form,
+    signal: AbortSignal.timeout(120_000),
+  });
+  const text = await response.text();
+  let body: { ok?: boolean; description?: string };
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new Error(`sendFile: HTTP ${response.status} ${text.slice(0, 200)}`);
+  }
+  if (!body.ok) throw new Error(`sendFile: ${body.description ?? `HTTP ${response.status}`}`);
+}
+
 export async function sendTyping(token: string, chat: number): Promise<void> {
   await call(token, "sendChatAction", { chat_id: chat, action: "typing" });
 }
 
 export function isMentioned(m: TgMessage, me: BotIdentity): boolean {
-  const text = m.text ?? "";
+  const text = m.text ?? m.caption ?? "";
   for (const e of m.entities ?? []) {
     if (e.type === "mention" || e.type === "text_mention") {
       const mentioned = text.slice(e.offset, e.offset + e.length);

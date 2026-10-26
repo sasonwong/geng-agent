@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { makePaths } from "./paths.ts";
+import { makePaths, requiredDirs } from "./paths.ts";
 
 const SECRETS_TEMPLATE = `# geng: credentials for this instance.
 # Injected with \`docker run --env-file\` — never mounted, never in data/, never in backups.
@@ -13,24 +13,7 @@ const SECRETS_TEMPLATE = `# geng: credentials for this instance.
 
 export function initInstance(root: string, instance: string): void {
   const p = makePaths(root, instance);
-  for (const d of [
-    p.data,
-    p.sessionDir,
-    p.palimpsest,
-    p.journal,
-    p.workspace,
-    p.usage,
-    p.meta,
-    p.inbox,
-    p.inboxSeen,
-    p.inboxLow,
-    p.outbox,
-    p.piDir,
-    p.openLoops,
-    p.people,
-  ]) {
-    mkdirSync(d, { recursive: true });
-  }
+  for (const d of requiredDirs(p)) mkdirSync(d, { recursive: true });
 
   // daemon.log is bind-mounted into the container: docker creates a *directory* for a
   // missing host path, and then every line the daemon tries to append fails with EISDIR.

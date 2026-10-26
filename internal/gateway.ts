@@ -4,6 +4,7 @@ import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
 import { appendSaid } from "./people.ts";
+import { attachmentOf, hostPathForWorkPath, KIND_WORD, safeName } from "./attach.ts";
 import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
@@ -13,6 +14,9 @@ import {
   getUpdates,
   isMentioned,
   isReplyToBot,
+  downloadFile,
+  getFilePath,
+  sendFile,
   sendMessage,
   sendTyping,
   senderName,
@@ -176,7 +180,12 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
   };
 
-  const deliver = async (key: string, texts: string[], want?: number): Promise<boolean> => {
+  const deliver = async (
+    key: string,
+    texts: string[],
+    want?: number,
+    files: string[] = [],
+  ): Promise<boolean> => {
     const cfg = bots[key];
     if (!cfg) return false;
     const mine = (chats[key] ??= { known: {} });
@@ -192,6 +201,16 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     if (trip(key, texts)) return false;
     for (const text of texts) await sendMessage(cfg.token, chat, text);
     const p = instanceData(key);
+    for (const given of files) {
+      // the path came from inside the container, so it can be anything it likes: only
+      // /work is its own, and only files that exist there are sent
+      const host = hostPathForWorkPath(p?.workspace ?? "", given);
+      if (host === null) {
+        writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
+        continue;
+      }
+      await sendFile(cfg.token, chat, host);
+    }
     if (p) {
       for (const text of texts) {
         appendSaid(p.data, chat, { at: new Date().toISOString(), dir: "out", text });
@@ -202,7 +221,14 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
   const handleUpdate = async (key: string, me: BotIdentity, update: TgUpdate): Promise<void> => {
     const message = update.message;
-    if (!message || !message.text) return;
+    if (!message) return;
+    // text, or a caption on an attachment; anything else still has to be accounted for
+    const words = message.text ?? message.caption ?? "";
+    const att = attachmentOf(message);
+    if (words === "" && att === null) {
+      log(`${key} ← 忽略（${message.sticker ? "sticker" : "没有文字也没有附件"}）`);
+      return;
+    }
     const mine = (chats[key] ??= { known: {} });
     const seen = noteChat(
       mine,
@@ -225,7 +251,8 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
 
     const cfg = bots[key];
-    const listen = cfg?.listen ?? "all";
+    if (!cfg) return;
+    const listen = cfg.listen ?? "all";
     const mutes = readMutes(join(p.palimpsest, "mute.json"), Date.now());
     const muted = isMuted(mutes, { chatId: message.chat.id, isDm: message.chat.type === "private" });
 
@@ -237,7 +264,25 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       muted: muted.muted,
     });
 
-    if (!decision.deliver) return;
+    if (!decision.deliver) {
+      log(`${key} ← ${decision.reason}（没送）`);
+      return;
+    }
+
+    // fetch first, so the message is never announced without the thing it came with
+    if (att && att.fileId) {
+      const name = safeName(message.chat.id, message.message_id, att.name ?? "file");
+      const dest = join(p.filesDir, name);
+      try {
+        const filePath = await getFilePath(cfg.token, att.fileId);
+        const bytes = await downloadFile(cfg.token, filePath, dest);
+        att.path = `/files/${name}`;
+        att.bytes = bytes;
+      } catch (err) {
+        writeOps(ops, "gateway", `${key} 的文件没取到：${(err as Error).message}`);
+        att.note = "没取到";
+      }
+    }
 
     const dir = decision.high ? p.inbox : p.inboxLow;
     const id = `${message.chat.id}-${message.message_id}`;
@@ -248,23 +293,28 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const redelivered = existsSync(file);
     writeJson(file, {
       id,
-      text: message.text,
+      text: words,
       from: senderName(message),
       at,
       chat: message.chat.id,
       route: decision.reason,
+      ...(att ? { attachments: [att] } : {}),
     });
     // Only what was actually delivered: a message the policy chose not to forward must
     // not reappear later in the transcript.
     if (!redelivered) {
+      // the transcript keeps a placeholder so a file does not read as silence
+      const said = words !== "" ? words : `[${att ? KIND_WORD[att.kind] : "空消息"}]`;
       appendSaid(p.data, message.chat.id, {
         at,
         dir: "in",
-        text: message.text,
+        text: said,
         from: senderName(message),
       });
     }
-    log(`${key} ← ${decision.reason}${decision.high ? " (唤醒)" : ""}`);
+    log(
+      `${key} ← ${decision.reason}${decision.high ? " (唤醒)" : ""}${att ? ` ${att.kind}${att.note ? `(${att.note})` : ""}` : ""}`,
+    );
   };
 
   const poll = async (key: string): Promise<void> => {
@@ -333,7 +383,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
             continue;
           }
           try {
-            if (await deliver(key, item.messages, item.chat)) {
+            if (await deliver(key, item.messages, item.chat, item.files)) {
               ackOutbox(dir, item.file);
             }
           } catch (err) {

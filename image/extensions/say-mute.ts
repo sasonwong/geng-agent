@@ -39,7 +39,13 @@ const sayTool = defineTool({
     }),
     to: Type.Optional(
       Type.String({
-        description: "发给哪个 chat 的 id（见唤醒纸「能说话的地方」）。不写就是私聊。",
+        description: "发给哪个 chat 的 id（见纸上的「能说话的地方」）。不写就是私聊。",
+      }),
+    ),
+    files: Type.Optional(
+      Type.Array(Type.String(), {
+        maxItems: 10,
+        description: "一起发出去的文件，写 /work 里的绝对路径（例如 /work/report.html）。",
       }),
     ),
   }),
@@ -52,13 +58,24 @@ const sayTool = defineTool({
     if (params.to !== undefined && !Number.isFinite(chat)) {
       return { content: [{ type: "text", text: `to 要写 chat 的 id：${params.to} 不是。` }], details: undefined };
     }
+    const files = (params.files ?? []).filter((f) => f.trim() !== "");
     const id = nextId();
     writeAtomic(
       join(OUTBOX, `${id}.json`),
-      JSON.stringify({ id, messages, ...(chat === undefined ? {} : { chat }) }) + "\n",
+      JSON.stringify({
+        id,
+        messages,
+        ...(chat === undefined ? {} : { chat }),
+        ...(files.length === 0 ? {} : { files }),
+      }) + "\n",
     );
     return {
-      content: [{ type: "text", text: `说了 ${messages.length} 句。` }],
+      content: [
+        {
+          type: "text",
+          text: `说了 ${messages.length} 句${files.length === 0 ? "" : `，带 ${files.length} 个文件`}。`,
+        },
+      ],
       details: { id, count: messages.length },
     };
   },
