@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { attentionActive, parseAttention } from "./attention.ts";
 import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
@@ -26,7 +27,7 @@ import {
   type TgUpdate,
 } from "./telegram.ts";
 
-export type RouteReason = "dm" | "mention" | "reply" | "ambient" | "muted" | "skip";
+export type RouteReason = "dm" | "mention" | "reply" | "listen" | "ambient" | "muted" | "skip";
 
 export interface RouteInput {
   isDm: boolean;
@@ -34,6 +35,8 @@ export interface RouteInput {
   isReply: boolean;
   listen: "all" | "mentions";
   muted: boolean;
+  /** It asked to hear this chat for a while, so plain talk there wakes it too. */
+  listening: boolean;
 }
 
 export interface Route {
@@ -51,6 +54,7 @@ export function route(i: RouteInput): Route {
   if (i.isDm) return { deliver: true, high: true, reason: "dm" };
   if (i.isMention) return { deliver: true, high: true, reason: "mention" };
   if (i.isReply) return { deliver: true, high: true, reason: "reply" };
+  if (i.listening) return { deliver: true, high: true, reason: "listen" };
   if (i.listen === "mentions") return { deliver: false, high: false, reason: "skip" };
   return { deliver: true, high: false, reason: i.muted ? "muted" : "ambient" };
 }
@@ -259,6 +263,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     if (!cfg) return;
     const listen = cfg.listen ?? "all";
     const mutes = readMutes(join(p.palimpsest, "mute.json"), Date.now());
+    const attention = parseAttention(readJson(join(p.palimpsest, "attention.json"), null));
     const muted = isMuted(mutes, { chatId: message.chat.id, isDm: message.chat.type === "private" });
 
     const decision = route({
@@ -267,6 +272,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       isReply: isReplyToBot(message, me),
       listen,
       muted: muted.muted,
+      listening: attentionActive(attention, message.chat.id, Date.now()),
     });
 
     if (!decision.deliver) {

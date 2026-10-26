@@ -8,36 +8,44 @@ import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/state.ts";
 
 test("direct address is always high and always delivered", () => {
-  assert.deepEqual(route({ isDm: true, isMention: false, isReply: false, listen: "mentions", muted: true }), {
+  assert.deepEqual(route({ isDm: true, isMention: false, isReply: false, listen: "mentions", muted: true, listening: false }), {
     deliver: true,
     high: true,
     reason: "dm",
   });
   assert.equal(
-    route({ isDm: false, isMention: true, isReply: false, listen: "mentions", muted: true }).high,
+    route({ isDm: false, isMention: true, isReply: false, listen: "mentions", muted: true, listening: false }).high,
     true,
   );
   assert.equal(
-    route({ isDm: false, isMention: false, isReply: true, listen: "mentions", muted: false }).reason,
+    route({ isDm: false, isMention: false, isReply: true, listen: "mentions", muted: false, listening: false }).reason,
     "reply",
   );
 });
 
 test("ambient group chatter is low, and a mute only silences that", () => {
-  assert.deepEqual(route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: false }), {
+  assert.deepEqual(route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: false, listening: false }), {
     deliver: true,
     high: false,
     reason: "ambient",
   });
   assert.equal(
-    route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: true }).reason,
+    route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: true, listening: false }).reason,
     "muted",
   );
 });
 
+test("a window it asked for turns plain talk into a knock", () => {
+  assert.deepEqual(route({ isDm: false, isMention: false, isReply: false, listen: "mentions", muted: true, listening: true }), {
+    deliver: true,
+    high: true,
+    reason: "listen",
+  });
+});
+
 test("listen=mentions drops ambient entirely", () => {
   assert.equal(
-    route({ isDm: false, isMention: false, isReply: false, listen: "mentions", muted: false }).deliver,
+    route({ isDm: false, isMention: false, isReply: false, listen: "mentions", muted: false, listening: false }).deliver,
     false,
   );
 });

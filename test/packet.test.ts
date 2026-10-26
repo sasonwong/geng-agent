@@ -29,6 +29,8 @@ function fixture(): {
     inboxPath: "/inbox",
     peoplePath: "/people",
     timezone: "Asia/Shanghai",
+    places: [{ id: -1001234567890, label: "群「测试」", home: false }],
+    attention: null,
     filesPath: "/files",
     filesForgotten: 0,
     filesPruned: 0,
@@ -269,4 +271,13 @@ test("files it asked to forget, and files the cap took, are stated as what happe
   // and when nothing happened, the page says nothing at all
   const quiet = buildPacket(fixture().input({}));
   assert.doesNotMatch(quiet, /删了|清掉|上限/);
+});
+
+test("a window it opened is stated on the page, and vanishes when it has passed", () => {
+  const f = fixture();
+  const now = f.input({}).nowMs;
+  const live = f.input({ attention: { chats: [-1001234567890], untilMs: now + 3_600_000 } });
+  assert.match(buildPacket(live), /你在听：群「测试」 的全部消息，到 \d\d:\d\d \+08 为止。/);
+  const expired = f.input({ attention: { chats: [-1001234567890], untilMs: now - 1000 } });
+  assert.doesNotMatch(buildPacket(expired), /你在听/);
 });

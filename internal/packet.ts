@@ -39,6 +39,10 @@ export interface PacketInput {
   lowPending: number;
   /** The timezone its container runs in, so the page and its own `date` agree. */
   timezone: string;
+  /** Where it may speak, so a window can be rendered with the names it knows. */
+  places: { id: number; label: string; home: boolean }[];
+  /** A window it opened itself with `listen`; past its end it is not shown at all. */
+  attention: { chats: (number | "*")[]; untilMs: number; why?: string } | null;
   /** Where files people sent it live; injected so neither runner hardcodes a path. */
   filesPath: string;
   /** Applied before this waking: what it asked to forget, and what the cap took. */
@@ -107,6 +111,19 @@ function renderThread(t: ThreadInput, peoplePath: string): string[] {
   return out;
 }
 
+function renderAttention(
+  a: { chats: (number | "*")[]; untilMs: number; why?: string } | null,
+  places: { id: number; label: string }[],
+  timezone: string,
+  nowMs: number,
+): string | null {
+  if (!a || nowMs >= a.untilMs) return null;
+  const names = a.chats.map((c) =>
+    c === "*" ? "所有会话" : (places.find((p) => p.id === c)?.label ?? `chat ${c}`),
+  );
+  return `你在听：${names.join("、")} 的全部消息，到 ${localClock(a.untilMs, timezone)} 为止。`;
+}
+
 function renderMutes(mutes: Record<string, { until?: string | null }>): string | null {
   const entries = Object.entries(mutes);
   if (entries.length === 0) return null;
@@ -159,7 +176,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
 
   const out: string[] = [];
 
@@ -256,7 +273,9 @@ export function buildPacket(input: PacketInput): string {
     out.push(`还有 ${lowPending} 条群里的消息在 ${inboxPath}/low/，它们没有叫醒你。`);
   }
   const muteLine = renderMutes(mutes);
+  const attentionLine = renderAttention(attention, places, timezone, nowMs);
   if (muteLine) out.push(muteLine);
+  if (attentionLine) out.push(attentionLine);
 
   if (hint) {
     out.push("", "[观察]", hint);

@@ -14,6 +14,9 @@ const STATE = process.env.GENG_STATE ?? "/state";
 // its mountpoint inside the bind, which lands in the agent's own book as a root-owned dir
 const OUTBOX = process.env.GENG_OUTBOX ?? "/outbox";
 const MUTE = join(STATE, "mute.json");
+const ATTENTION = join(STATE, "attention.json");
+// four hours is the most it may ask for: longer than that is not attention, it is a rule
+const ATTENTION_MAX_MS = 4 * 3_600_000;
 // How many places this instance may speak into, counted by the daemon. Guessing the
 // target is what put a group reply into a private chat, so at two or more it is refused.
 const PLACES = Number(process.env.GENG_PLACES ?? "0");
@@ -88,6 +91,59 @@ const sayTool = defineTool({
   },
 });
 
+const listenTool = defineTool({
+  name: "listen",
+  label: "Listen",
+  description:
+    "在一个会话里，平时的消息不会叫醒你——只在你下一轮醒来时摆在那儿。用这个说\"接下来这段时间，那儿的消息直接叫我\"。到点自动失效。",
+  parameters: Type.Object({
+    chats: Type.Array(Type.String(), {
+      minItems: 1,
+      maxItems: 10,
+      description: "要听哪些会话的 chat id（见提示词「能说话的地方」）。写 * 是所有会话。空数组表示不再听了。",
+    }),
+    until: Type.Optional(
+      Type.String({
+        description: "听到什么时候，ISO 时间（例如 2026-10-26T17:00:00Z）。不写就是四小时后。最长四小时。",
+      }),
+    ),
+    why: Type.Optional(Type.String({ description: "为什么听——给自己看的一句话。" })),
+  }),
+  async execute(_toolCallId, params) {
+    const raw = params.chats.map((c) => c.trim()).filter((c) => c !== "");
+    if (raw.length === 0) {
+      writeAtomic(ATTENTION, "{}\n");
+      return { content: [{ type: "text", text: "不听了。" }], details: undefined };
+    }
+    const chats = raw.map((c) => (c === "*" ? "*" : Number(c)));
+    if (chats.some((c) => c !== "*" && !Number.isFinite(c))) {
+      return {
+        content: [{ type: "text", text: `要写 chat 的 id 或 *：${raw.join("、")} 里有的不是。` }],
+        details: undefined,
+      };
+    }
+    const now = Date.now();
+    const wanted = params.until ? Date.parse(params.until) : NaN;
+    const until = Math.min(Number.isNaN(wanted) ? now + ATTENTION_MAX_MS : wanted, now + ATTENTION_MAX_MS);
+    if (until <= now) {
+      return { content: [{ type: "text", text: `那个时间已经过去了：${params.until}` }], details: undefined };
+    }
+    writeAtomic(
+      ATTENTION,
+      JSON.stringify({ chats, until: new Date(until).toISOString(), why: params.why ?? "", at: new Date(now).toISOString() }, null, 2) + "\n",
+    );
+    return {
+      content: [
+        {
+          type: "text",
+          text: `听着了：${chats.join("、")}，到 ${new Date(until).toISOString()} 为止（那时之后又按原样）。`,
+        },
+      ],
+      details: { chats, until: new Date(until).toISOString() },
+    };
+  },
+});
+
 const forgetTool = defineTool({
   name: "forget",
   label: "Forget files",
@@ -152,6 +208,7 @@ const muteTool = defineTool({
 export default function (pi: ExtensionAPI) {
   if (!existsSync(STATE)) return;
   pi.registerTool(sayTool);
+  pi.registerTool(listenTool);
   pi.registerTool(forgetTool);
   pi.registerTool(muteTool);
 }
