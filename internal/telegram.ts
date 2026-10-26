@@ -121,12 +121,14 @@ export async function sendMessage(
   chat: number,
   text: string,
   threadId?: number,
+  replyTo?: number,
 ): Promise<void> {
   for (const part of splitMessage(text)) {
     await call(token, "sendMessage", {
       chat_id: chat,
       text: part,
       ...(threadId ? { message_thread_id: threadId } : {}),
+      ...(replyTo ? { reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } } : {}),
     });
   }
 }

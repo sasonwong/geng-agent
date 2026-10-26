@@ -55,16 +55,39 @@ const sayTool = defineTool({
         description: "一起发出去的文件，写 /work 里的绝对路径（例如 /work/report.html）。",
       }),
     ),
+    replyTo: Type.Optional(
+      Type.String({
+        description:
+          "引用的那条消息的 id（收件箱文件里的 id，或 /people 里那些行，形如 -1001234567890-151）。写了它就发到那条消息所在的会话，to 可以省。",
+      }),
+    ),
   }),
   async execute(_toolCallId, params) {
     const messages = params.messages.filter((m) => m.trim() !== "");
     if (messages.length === 0) {
       return { content: [{ type: "text", text: "没说什么。" }], details: undefined };
     }
-    if (params.to === undefined && PLACES >= 2) {
+    // shape only: the gateway re-parses this, and it is what drops a quote that does not
+    // belong to the chat being spoken into
+    let quote: { chat: number; messageId: number } | null = null;
+    if (params.replyTo !== undefined) {
+      const cut = params.replyTo.lastIndexOf("-");
+      const c = Number(params.replyTo.slice(0, cut));
+      const m = Number(params.replyTo.slice(cut + 1));
+      if (cut <= 0 || !Number.isSafeInteger(c) || !Number.isSafeInteger(m) || m <= 0) {
+        return {
+          content: [{ type: "text", text: `replyTo 要写收件箱里的那个 id：${params.replyTo} 不是。` }],
+          details: undefined,
+        };
+      }
+      quote = { chat: c, messageId: m };
+    }
+    // quoting one message already says which conversation it belongs to
+    const target = params.to !== undefined ? Number(params.to) : (quote?.chat ?? undefined);
+    if (target === undefined && PLACES >= 2) {
       throw new Error("有两处以上能说话，to 必填：提示词「能说话的地方」里有各个 chat 的 id。");
     }
-    const chat = params.to === undefined ? undefined : Number(params.to);
+    const chat = target;
     if (params.to !== undefined && !Number.isFinite(chat)) {
       return { content: [{ type: "text", text: `to 要写 chat 的 id：${params.to} 不是。` }], details: undefined };
     }
@@ -77,6 +100,7 @@ const sayTool = defineTool({
         messages,
         ...(chat === undefined ? {} : { chat }),
         ...(files.length === 0 ? {} : { files }),
+        ...(quote === null ? {} : { replyTo: quote }),
       }) + "\n",
     );
     return {

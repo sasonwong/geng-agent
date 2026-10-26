@@ -40,6 +40,8 @@ export interface OutboxItem {
   chat?: number;
   /** Container paths under /work that go out with the words. */
   files?: string[];
+  /** Answer one particular message, so the other side sees which line it is about. */
+  replyTo?: { chat: number; messageId: number };
   file: string;
   id: string;
   messages: string[];
@@ -47,6 +49,15 @@ export interface OutboxItem {
 
 export function outboxDir(data: string): string {
   return join(data, "outbox");
+}
+
+/** An item written by an older or broken sender simply has no quote. */
+function parseReplyTo(raw: unknown): { chat: number; messageId: number } | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as { chat?: unknown; messageId?: unknown };
+  if (typeof o.chat !== "number" || typeof o.messageId !== "number") return undefined;
+  if (!Number.isSafeInteger(o.chat) || !Number.isSafeInteger(o.messageId)) return undefined;
+  return { chat: o.chat, messageId: o.messageId };
 }
 
 export function readOutbox(dir: string): OutboxItem[] {
@@ -64,6 +75,7 @@ export function readOutbox(dir: string): OutboxItem[] {
       text?: unknown;
       chat?: unknown;
       files?: unknown;
+      replyTo?: unknown;
     }>(join(dir, f), {});
     const messages = Array.isArray(raw.messages)
       ? raw.messages.filter((m): m is string => typeof m === "string" && m.trim() !== "")
@@ -76,6 +88,7 @@ export function readOutbox(dir: string): OutboxItem[] {
       files: Array.isArray(raw.files) ? raw.files.filter((x): x is string => typeof x === "string") : [],
       messages,
       chat: typeof raw.chat === "number" ? raw.chat : undefined,
+      replyTo: parseReplyTo(raw.replyTo),
     });
   }
   return items;

@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { attentionActive, parseAttention } from "./attention.ts";
+import { quoteFor } from "./quote.ts";
 import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
@@ -194,6 +195,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     texts: string[],
     want?: number,
     files: string[] = [],
+    replyTo?: { chat: number; messageId: number },
   ): Promise<boolean> => {
     const cfg = bots[key];
     if (!cfg) return false;
@@ -208,7 +210,21 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       return true; // acknowledged: retrying will never make it known
     }
     if (trip(key, texts)) return false;
-    for (const text of texts) await sendMessage(cfg.token, chat, text);
+    // a quote only means something inside the chat it came from; a mismatched one is
+    // dropped rather than sent into the wrong conversation
+    const reply = quoteFor(chat, replyTo);
+    for (const text of texts) {
+      if (reply === undefined) {
+        await sendMessage(cfg.token, chat, text);
+        continue;
+      }
+      try {
+        await sendMessage(cfg.token, chat, text, undefined, reply);
+      } catch {
+        // a deleted message must not take the words down with it
+        await sendMessage(cfg.token, chat, text);
+      }
+    }
     const p = instanceData(key);
     for (const given of files) {
       // the path came from inside the container, so it can be anything it likes: only
@@ -321,6 +337,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         dir: "in",
         text: said,
         from: senderName(message),
+        id,
       });
     }
     log(
@@ -394,7 +411,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
             continue;
           }
           try {
-            if (await deliver(key, item.messages, item.chat, item.files)) {
+            if (await deliver(key, item.messages, item.chat, item.files, item.replyTo)) {
               ackOutbox(dir, item.file);
             }
           } catch (err) {
