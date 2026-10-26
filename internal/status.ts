@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { knownPlaces } from "./gateway.ts";
 import { listSessionFiles } from "./runner.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy } from "./policy.ts";
@@ -81,6 +82,15 @@ export async function printStatus(root: string, instance: string): Promise<void>
     `  第几次      ${meta.wakings ?? 0}（24 小时内 ${wakes.length} 次）`,
     `  下次醒来    ${wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) + " 后" : "未设定"}${wait?.why ? "  ·  " + wait.why : ""}`,
     `  收件        ${countJson(p.inbox)} 条待处理`,
+    ...(knownPlaces(p.root, instance).length > 0
+      ? [
+          `  说话到      ${(() => {
+            const places = knownPlaces(p.root, instance);
+            const home = places.find((x) => x.home);
+            return `${home ? home.label : "（没定）"}${places.length > 1 ? `，另有 ${places.length - 1} 个地方` : ""}`;
+          })()}`,
+        ]
+      : []),
     `  identity    ${identity ? bytes(Buffer.byteLength(identity, "utf8")) : "（未写）"}`,
     `  未闭合      ${Array.isArray(loops) ? loops.length : 0} 件`,
     `  session     ${sessions.length} 文件 / ${bytes(sessionBytes)}`,
