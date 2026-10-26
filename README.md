@@ -2,7 +2,7 @@
 
 # geng-agent
 
-**更 agent 的 agent。**
+**更 agent 的 agent。** &nbsp; [![ci](https://github.com/sasonwong/geng-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/sasonwong/geng-agent/actions/workflows/ci.yml)
 
 现在大部分 agent 只是被调用的函数：你说一句，它答一句，结束。它没有自己的时间，不记得上次
 想干什么，也不在你走开之后继续做什么。

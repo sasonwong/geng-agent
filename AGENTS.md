@@ -100,6 +100,27 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 只要有一个 assistant 回合开始就算送到；没有就是没送到，`daemon.log` 记 `inj=N(unread=M)`，
 文件不标已读。
 
+## 改这个仓库的循环
+
+这个仓库同时是它自己运行的程序。所以开发循环里有一条比"能不能写对"更硬的边界：
+
+- **推分支，不推 main。** main 有分支保护，合并需要人批准。
+- **宿主机上的部署是人的动作**（`deploy/update.sh` 或重启 unit）。容器里的实例改得动代码，
+  改不动正在跑它的那台机器——否则它就等于能改监管自己的程序。
+- **工作副本放 `/work/geng`**，不要放 `/work` 根目录（那儿是它自己的活儿，混在一起会让
+  `ls /work` 失去意义，也会让"这轮动了什么"数不准）。
+- **合并前必须过的两道闸**：`npm run check`（tsc）和 `npm test`。CI 跑的是同两条命令，
+  所以本地绿了、CI 红了，说明没跑的是其中一条，不是命令不一样。
+- **`GH_TOKEN` 从环境注入**（`secrets/<instance>.env`，每轮新建容器时读）。`git clone` /
+  `push` 通过镜像里的 `/etc/gitconfig` 走 `gh auth git-credential`，不需要每轮登录。凭据
+  能读到，所以它必须是最小权限、只对一个仓库。
+- **没有 token 也能贡献**：`git format-patch` 出补丁，用 `say` 的 `files` 发给主人，宿主
+  机上 `git am` 落地。这条路随时可用，不依赖任何凭据。
+
+提交身份（`user.name` / `user.email`）如果没配，用 `git -c user.name=… -c user.email=… commit`
+一次，或者让主人把 `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` 写进 env 文件——`HOME` 每轮都会
+被丢掉，写进 `~/.gitconfig` 的东西活不过这一次醒来。
+
 ## 文档
 
 - `README.md` 只写项目简介和用法
