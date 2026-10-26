@@ -33,6 +33,27 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 
   checks.push({ name: "data 目录", ok: existsSync(p.data), detail: p.data });
 
+  // "active (running)" is not evidence of anything: a unit that restarts every 16s is
+  // also active. Only a counter says so, and this is where the crash loop was invisible.
+  try {
+    const n = Number(
+      execFileSync("systemctl", ["--user", "show", `geng@${instance}`, "-p", "NRestarts"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+        .trim()
+        .replace("NRestarts=", ""),
+    );
+    checks.push({
+      name: "守护进程重启",
+      ok: !Number.isFinite(n) || n < 20,
+      warnOnly: true,
+      detail: n >= 20 ? `重启了 ${n} 次，它可能在崩溃循环里——看 journalctl --user -u geng@${instance}` : `${n} 次`,
+    });
+  } catch {
+    checks.push({ name: "守护进程重启", ok: true, warnOnly: true, detail: "没装成 user 单元，跳过" });
+  }
+
   let policy;
   try {
     policy = loadPolicy(p.policy);
