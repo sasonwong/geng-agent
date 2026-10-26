@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { markSeen, newestKnock, peekInbox } from "../internal/inbox.ts";
+import { inboxCount, markSeen, newestKnock, peekInbox, quarantine } from "../internal/inbox.ts";
+import { writeJson } from "../internal/state.ts";
 
 function inbox(): { dir: string; seen: string } {
   const base = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -72,4 +73,40 @@ test("the typing indicator follows the newest knock, in its own chat", () => {
   ];
   assert.equal(newestKnock(msgs)?.id, "2");
   assert.equal(newestKnock([{ id: "4", at: "2026-03-02T08:00:00Z" }]), null);
+});
+
+test("a picture with no caption is a message, not a broken file", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const inbox = join(root, "inbox");
+  const seen = join(root, "seen");
+  mkdirSync(inbox, { recursive: true });
+  mkdirSync(seen, { recursive: true });
+  // exactly what the gateway writes for a document sent without words
+  writeJson(join(inbox, "-100-9.json"), {
+    id: "-100-9",
+    text: "",
+    from: "telegram:@you",
+    at: "2026-03-02T09:00:00Z",
+    chat: -100,
+    attachments: [{ kind: "document", path: "/files/-100-9-a.md", bytes: 12 }],
+  });
+  const msgs = peekInbox(inbox);
+  assert.equal(msgs.length, 1);
+  assert.deepEqual(msgs[0]?.attachments, [{ kind: "document", path: "/files/-100-9-a.md", bytes: 12 }]);
+  assert.equal(inboxCount(inbox), 1);
+});
+
+test("a file with neither words nor attachments is set aside, and never knocks", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const inbox = join(root, "inbox");
+  const seen = join(root, "seen");
+  mkdirSync(inbox, { recursive: true });
+  mkdirSync(seen, { recursive: true });
+  writeFileSync(join(inbox, "-100-10.json"), JSON.stringify({ id: "-100-10", text: "" }));
+  // the knock count is the parser's, not a directory listing: this is the loop that cost
+  // 58 cycles and $0.33 in an hour
+  assert.equal(inboxCount(inbox), 0);
+  assert.deepEqual(quarantine(inbox, seen), ["-100-10.json"]);
+  assert.equal(existsSync(join(seen, "-100-10.json.bad")), true);
+  assert.equal(existsSync(join(inbox, "-100-10.json")), false);
 });
