@@ -78,6 +78,8 @@ export interface PacketInput {
   identity: string | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
+  /** The last round was cut short by a restart, not by a crash: same fact, calmer cause. */
+  interrupted: boolean;
 }
 
 /**
@@ -183,7 +185,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, attention, interrupted, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
 
   const out: string[] = [];
 
@@ -290,6 +292,8 @@ export function buildPacket(input: PacketInput): string {
 
   if (crashed) {
     out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");
+  } else if (interrupted) {
+    out.push("", "上一轮是被重启打断的。没出错，可能停在一半。");
   }
 
   // Its own words, verbatim, right before the reason it is awake: the last two things it

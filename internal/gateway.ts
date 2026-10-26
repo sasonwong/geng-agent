@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { attentionActive, parseAttention } from "./attention.ts";
+import { Tripwire } from "./tripwire.ts";
 import { quoteFor, quotedOf } from "./quote.ts";
 import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
@@ -126,16 +127,15 @@ export function knownPlaces(
   }));
 }
 
+/**
+ * The brake's numbers. The window/limit/pause live here; the recording lives in
+ * internal/tripwire.ts, because the order of "look at the pause" vs "record an attempt"
+ * is the whole difference between a brake and a lockup.
+ */
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 30;
 const REPEAT_LIMIT = 10;
 const PAUSE_MS = 10 * 60_000;
-
-interface SendWatch {
-  times: number[];
-  texts: string[];
-  pausedUntil: number;
-}
 
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
@@ -152,12 +152,12 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const offsetsFile = join(root, "data", "_gateway", "offsets.json");
   const chats = readChats(chatsFile);
   const offsets = readJson<Record<string, number>>(offsetsFile, {});
-  const watch = new Map<string, SendWatch>();
+  const watch = new Map<string, Tripwire>();
 
-  const watchFor = (key: string): SendWatch => {
+  const watchFor = (key: string): Tripwire => {
     let w = watch.get(key);
     if (!w) {
-      w = { times: [], texts: [], pausedUntil: 0 };
+      w = new Tripwire({ windowMs: RATE_WINDOW_MS, rate: RATE_LIMIT, repeat: REPEAT_LIMIT, pauseMs: PAUSE_MS });
       watch.set(key, w);
     }
     return w;
@@ -166,26 +166,13 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   /** Tripwires look only at shape — rate, length, repetition. Never at meaning. */
   const trip = (key: string, texts: string[]): string | null => {
     const w = watchFor(key);
-    const now = Date.now();
-    w.times = w.times.filter((t) => now - t < RATE_WINDOW_MS);
-    w.times.push(now);
-    for (const t of texts) {
-      w.texts.push(t);
-      if (w.texts.length > 40) w.texts.shift();
-    }
-    if (now < w.pausedUntil) return "paused";
-    if (w.times.length > RATE_LIMIT) {
-      w.pausedUntil = now + PAUSE_MS;
-      writeOps(ops, "gateway", `${key} 在 1 分钟内要发 ${w.times.length} 条，暂停投递 10 分钟。消息没丢。`);
-      return "rate";
-    }
-    const last = w.texts[w.texts.length - 1];
-    if (last && w.texts.filter((t) => t === last).length >= REPEAT_LIMIT) {
-      w.pausedUntil = now + PAUSE_MS;
+    const verdict = w.check(texts, Date.now());
+    if (verdict === "rate") {
+      writeOps(ops, "gateway", `${key} 在 1 分钟内要发 ${w.attempts} 条，暂停投递 10 分钟。消息没丢。`);
+    } else if (verdict === "repeat") {
       writeOps(ops, "gateway", `${key} 连续发了同一句话 ${REPEAT_LIMIT} 次，暂停投递 10 分钟。消息没丢。`);
-      return "repeat";
     }
-    return null;
+    return verdict;
   };
 
   const instanceData = (key: string): Paths | null => {
