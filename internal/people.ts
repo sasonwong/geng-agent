@@ -14,6 +14,8 @@ export interface Said {
   from?: string;
   /** `<chat>-<message_id>`: what it needs to quote a line from an older exchange. */
   id?: string;
+  /** The line this one answered, when the person replied to a specific message. */
+  quote?: { id: string; from?: string; text?: string };
 }
 
 export function peopleDir(data: string): string {
@@ -147,6 +149,10 @@ export function readSaid(data: string, chat: number, limit: number): Transcript 
         dir: parsed.dir === "out" ? "out" : "in",
         text: parsed.text,
         from: typeof parsed.from === "string" ? parsed.from : undefined,
+        // every field the writer adds is dropped here by default: this object is rebuilt,
+        // not cast, so a new field has to be carried through on purpose
+        ...(typeof parsed.id === "string" ? { id: parsed.id } : {}),
+        ...(parsed.quote && typeof parsed.quote === "object" ? { quote: parsed.quote } : {}),
       });
     } catch {
       // one broken line must not hide the rest of the conversation
