@@ -28,6 +28,7 @@ function fixture(): {
     statePath: "/state",
     inboxPath: "/inbox",
     peoplePath: "/people",
+    timezone: "Asia/Shanghai",
     filesPath: "/files",
     filesForgotten: 0,
     filesPruned: 0,

@@ -3,6 +3,7 @@ import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
 import { excerpt, readJson, readText } from "./state.ts";
 import { KIND_WORD } from "./attach.ts";
+import { localClock } from "./time.ts";
 import { formatDuration } from "./schedule.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -36,6 +37,8 @@ export interface PacketInput {
   parked: boolean;
   /** Ambient messages waiting in inbox/low, which did not wake it. */
   lowPending: number;
+  /** The timezone its container runs in, so the page and its own `date` agree. */
+  timezone: string;
   /** Where files people sent it live; injected so neither runner hardcodes a path. */
   filesPath: string;
   /** Applied before this waking: what it asked to forget, and what the cap took. */
@@ -153,7 +156,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
 
   const out: string[] = [];
 
@@ -161,7 +164,7 @@ export function buildPacket(input: PacketInput): string {
   // identity it wrote is its last section there.
   const since =
     lastWakeMs === null ? "第一次醒来" : `距上次醒来 ${formatDuration(nowMs - lastWakeMs)}`;
-  out.push(`现在：${new Date(nowMs).toISOString()} · ${since}`);
+  out.push(`现在：${new Date(nowMs).toISOString()} · ${localClock(nowMs, timezone)} · ${since}`);
   if (longGap) out.push("（这次空档比闹钟长得多，机器可能停过。）");
   if (envChanged) out.push(envChanged);
   if (lastCycle) {

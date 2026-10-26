@@ -15,6 +15,8 @@ export interface Policy {
   };
   /** Off if you don't want snapshots; also skipped automatically when rustic or its password is missing. */
   backup: { enabled: boolean };
+  /** The container's clock. The page shows UTC and this, so the two never disagree. */
+  timezone: string;
   /** What arrives from people does not accumulate forever. */
   files: {
     /** 0 clears nothing by age: the size cap then governs alone. */
@@ -37,6 +39,7 @@ export function defaultPolicy(): Policy {
     runner: "local",
     cycle: { timeoutSec: 1200, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
     backup: { enabled: true },
+    timezone: "Asia/Shanghai",
     files: { maxAgeDays: 0, maxMb: 500 },
     container: {
       image: "geng-agent:latest",
@@ -94,6 +97,7 @@ export function loadPolicy(file: string): Policy {
       repeatThreshold: num(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
     backup: { enabled: p.backup?.enabled !== false },
+    timezone: str(p.timezone ?? d.timezone, "timezone"),
     files: {
       maxAgeDays: num(p.files?.maxAgeDays ?? d.files.maxAgeDays, "files.maxAgeDays", 0),
       maxMb: num(p.files?.maxMb ?? d.files.maxMb, "files.maxMb", 1),

@@ -268,6 +268,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       statePath,
       inboxPath: at("/inbox", paths.inbox),
       peoplePath: at("/people", paths.people),
+      timezone: policy.timezone,
       filesPath: at("/files", paths.filesDir),
       filesForgotten: forgot,
       filesPruned: pruned.removed,

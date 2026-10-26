@@ -1,7 +1,8 @@
 FROM node:24-slim
 
+# tzdata is not in the slim base: without it TZ=Asia/Shanghai silently means UTC
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git iproute2 \
+  && apt-get install -y --no-install-recommends ca-certificates curl git iproute2 tzdata \
   && rm -rf /var/lib/apt/lists/*
 
 # registry/retry are build args because a flaky proxy is the normal case

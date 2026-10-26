@@ -20,5 +20,6 @@
   "files": {
     "maxAgeDays": 0,
     "maxMb": 500
-  }
+  },
+  "timezone": "Asia/Shanghai"
 }

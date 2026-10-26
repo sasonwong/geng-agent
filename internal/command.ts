@@ -56,6 +56,8 @@ export function buildCommand(
       "no-new-privileges",
       "-e",
       "HOME=/home/agent",
+      // the page prints both clocks, so this has to be the same zone the page names
+      `TZ=${policy.timezone}`,
       "-v",
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
