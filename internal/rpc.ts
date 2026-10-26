@@ -33,8 +33,8 @@ export interface RpcResult {
   finalText: string;
   stats: SessionStats | null;
   interventions: string[];
-  /** Messages pushed into this waking while it ran. */
-  injections: string[];
+  /** Messages pushed into this waking while it ran; `read` is whether a turn followed. */
+  injections: { text: string; read: boolean }[];
   stderrTail: string;
   durationMs: number;
 }
@@ -135,7 +135,9 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   let compacted = false;
   let finalText = "";
   let stats: SessionStats | null = null;
-  const injections: string[] = [];
+  // `read` is not a guess: a steer is delivered before the next model call, so if no
+  // assistant turn *starts* after we sent it, it never reached the model.
+  const injections: { text: string; read: boolean }[] = [];
   let resolveSettled: () => void = () => {};
   const pending = new Map<string, (data: unknown) => void>();
   let nextId = 0;
@@ -194,6 +196,11 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
         fire({ type: "compact" });
         interventions.push(`compact: ${repeat.name} x${repeat.count}`);
       }
+      return;
+    }
+
+    if (type === "turn_start") {
+      for (const i of injections) i.read = true;
       return;
     }
 
@@ -258,8 +265,8 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   const drainTimer = setInterval(() => {
     if (settled || timedOut || startFailed || !o.drain) return;
     for (const message of o.drain()) {
+      injections.push({ text: message, read: false });
       fire({ type: "steer", message });
-      injections.push(message);
     }
   }, 2_000);
   drainTimer.unref();

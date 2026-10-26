@@ -2,7 +2,7 @@ import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { markSeen, peekInbox } from "./inbox.ts";
-import { freshForSteer, INJECT_CAP, injectionText } from "./inject.ts";
+import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -130,7 +130,10 @@ function logLine(
   }
   parts.push(`inbox=${inboxCount}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
-  if (r && r.injections.length > 0) parts.push(`inj=${r.injections.length}`);
+  if (r && r.injections.length > 0) {
+    const unread = r.injections.filter((i) => !i.read).length;
+    parts.push(unread > 0 ? `inj=${r.injections.length}(unread=${unread})` : `inj=${r.injections.length}`);
+  }
   if (backup) parts.push(`backup=${backup.status}${backup.detail ? `(${backup.detail})` : ""}`);
   return parts.join(" ");
 }
@@ -360,11 +363,14 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     const symptom = classify(result);
     // Only a wake that ran to the end has read them. Anything else leaves the messages
     // in place so the next wake hands them over again rather than losing them.
-    if (symptom === "ok" && inbox.length + injected.length > 0) {
+    // An injection that no turn followed never reached the model: leaving it unseen
+    // means the next page hands it over again, which is the cheap side of the trade.
+    const read = deliveredFiles(injected, result.injections);
+    if (symptom === "ok" && inbox.length + read.length > 0) {
       markSeen(
         [paths.inbox, paths.inboxLow],
         paths.inboxSeen,
-        [...inbox.map((m) => m.file), ...injected.map((m) => m.file)],
+        [...inbox.map((m) => m.file), ...read],
       );
     }
     escalation = advance(escalation, symptom, result);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { freshForSteer, INJECT_CAP, injectionText } from "../internal/inject.ts";
+import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "../internal/inject.ts";
 
 const msg = (id: string) => ({ id, file: `${id}.json`, text: `话 ${id}`, from: "telegram:@x" });
 
@@ -21,4 +21,11 @@ test("the cap holds, and a full cycle gets nothing more", () => {
 test("an injected line says who and what, with no advice attached", () => {
   assert.equal(injectionText({ id: "1", file: "1.json", text: " 还在吗 \n", from: "telegram:@x" }), "[刚收到] telegram:@x：还在吗");
   assert.equal(injectionText({ id: "1", file: "1.json", text: "x".repeat(500) }).length < 430, true);
+});
+
+test("an injection no turn followed is not counted as delivered", () => {
+  const injected = [{ file: "a.json" }, { file: "b.json" }];
+  assert.deepEqual(deliveredFiles(injected, [{ read: true }, { read: false }]), ["a.json"]);
+  assert.deepEqual(deliveredFiles(injected, []), []);
+  assert.deepEqual(deliveredFiles([], [{ read: true }]), []);
 });

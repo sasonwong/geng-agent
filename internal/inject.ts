@@ -24,3 +24,14 @@ export function injectionText(m: LiveMsg): string {
   const text = m.text.replace(/\s+/g, " ").trim();
   return `[刚收到] ${who}：${text.length > 400 ? text.slice(0, 400) + "…" : text}`;
 }
+
+/**
+ * Which injected messages were actually read. Same order on both sides: the drain hands
+ * them over in order and rpc records them in order.
+ */
+export function deliveredFiles(
+  injected: { file: string }[],
+  records: { read: boolean }[],
+): string[] {
+  return injected.filter((_, i) => records[i]?.read === true).map((m) => m.file);
+}
