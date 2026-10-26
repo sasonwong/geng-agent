@@ -69,6 +69,18 @@ test("outbox items keep message order and are acked into sent/", () => {
   assert.equal(readdirSync(join(dir, "sent")).length, 1);
 });
 
+test("a private chat beats a group as home, and only the first of each counts", () => {
+  const chats: import("../internal/gateway.ts").Chats = { known: {} };
+  noteChat(chats, { kind: "group", title: "群" }, -222, true);
+  assert.equal(chats.home, -222, "第一个声音是群时，先当 home");
+  noteChat(chats, { kind: "private", who: "telegram:@owner" }, 111, false);
+  assert.equal(chats.home, 111, "私聊出现后应当接管");
+  noteChat(chats, { kind: "group", title: "另一个群" }, -333, true);
+  assert.equal(chats.home, 111);
+  noteChat(chats, { kind: "private", who: "telegram:@other" }, 444, false);
+  assert.equal(chats.home, 111, "第二个私聊不能抢");
+});
+
 test("home is learned once: a later group must not steal an unprompted word", () => {
   const chats: import("../internal/gateway.ts").Chats = { known: {} };
   noteChat(chats, { kind: "private", who: "telegram:@owner" }, 111, false);

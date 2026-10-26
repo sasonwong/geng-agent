@@ -91,7 +91,12 @@ export function noteChat(chats: Chats, chat: KnownChat, id: number, seen: boolea
   const key = String(id);
   const before = JSON.stringify(known[key] ?? null);
   known[key] = seen ? { ...chat } : (known[key] ?? chat);
-  chats.home ??= id;
+  // An unprompted word must not land in a room with an audience, so a private chat beats
+  // a group as home — but only the first of each: whoever spoke last still decides nothing.
+  const homeIsPrivate =
+    chats.home !== undefined && known[String(chats.home)]?.kind === "private";
+  if (chats.home === undefined) chats.home = id;
+  else if (chat.kind === "private" && !homeIsPrivate) chats.home = id;
   return JSON.stringify(known[key]) !== before;
 }
 
