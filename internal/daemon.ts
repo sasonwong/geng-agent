@@ -71,6 +71,19 @@ async function sleepUntil(dueAtMs: number, paths: Paths, parked: boolean): Promi
   return "time";
 }
 
+/** True once, if the last round was cut by a restart rather than by a crash. */
+function takeInterrupted(paths: Paths): boolean {
+  let files: string[];
+  try {
+    files = readdirSync(paths.meta).filter((f) => f.startsWith("interrupted-") && f.endsWith(".json"));
+  } catch {
+    return false;
+  }
+  if (files.length === 0) return false;
+  for (const f of files) rmSync(join(paths.meta, f), { force: true });
+  return true;
+}
+
 function recoverIntent(paths: Paths): boolean {
   if (!existsSync(paths.intent)) return false;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
@@ -162,6 +175,17 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     releaseLock = acquirePidLock(join(paths.data, "daemon.pid"));
     const onSignal = () => {
       abortActive();
+      // A restart is not a crash. Leaving intent.json behind makes the next start report
+      // "上一轮没过完就断了" into ops and put a crash note on the page — one scary message
+      // per deploy. It is put aside as interrupted instead, and no ops line is written.
+      if (existsSync(paths.intent)) {
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        try {
+          renameSync(paths.intent, join(paths.meta, `interrupted-${stamp}.json`));
+        } catch {
+          // whatever happens, exiting is more important than tidying
+        }
+      }
       releaseLock?.();
       process.exit(0);
     };
@@ -187,6 +211,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const statePath = at("/state", paths.palimpsest);
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
   let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
+  const interrupted = o.dry ? false : takeInterrupted(paths);
   if (crashed) writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
   let escalation: Escalation = loadEscalation(paths);
 
@@ -306,6 +331,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         };
       })(),
       crashed,
+      interrupted,
       longGap,
       hint: plan.hint,
       lowPending: pendingLow(paths),

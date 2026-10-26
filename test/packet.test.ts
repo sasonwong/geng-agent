@@ -31,6 +31,7 @@ function fixture(): {
     timezone: "Asia/Shanghai",
     places: [{ id: -1001234567890, label: "群「测试」", home: false }],
     attention: null,
+    interrupted: false,
     filesPath: "/files",
     filesForgotten: 0,
     filesPruned: 0,
@@ -307,4 +308,14 @@ test("a line that answers another one says so, without a lookup", () => {
   );
   assert.match(text, /对方：年糕不吃那个（回：鱿鱼和年糕都挑食）/);
   assert.match(text, /你：鱿鱼和年糕都挑食\n/);
+});
+
+test("a restart is told apart from a crash", () => {
+  const f = fixture();
+  const restarted = buildPacket(f.input({ interrupted: true }));
+  assert.match(restarted, /上一轮是被重启打断的。没出错，可能停在一半。/);
+  assert.doesNotMatch(restarted, /进程被杀或宿主机重启/);
+  const crashed = buildPacket(f.input({ interrupted: false, crashed: true }));
+  assert.match(crashed, /上一轮没过完就断了/);
+  assert.doesNotMatch(crashed, /被重启打断/);
 });
