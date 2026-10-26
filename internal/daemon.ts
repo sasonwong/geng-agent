@@ -15,7 +15,8 @@ import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
-import { activeSince, lastSaidIn, readSaid } from "./people.ts";
+import { activeSince, lastSaidIn, readSaid, waitingOn } from "./people.ts";
+import { knownPlaces } from "./gateway.ts";
 import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
@@ -287,6 +288,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       parked: plan.parked,
       policyLine: policySummary(policy),
       searchLeft: searchQuota(paths.root, paths.secrets)?.left ?? null,
+      places: knownPlaces(paths.root, o.instance),
+      waiting: waitingOn(paths.data),
     });
 
     if (o.dry) {

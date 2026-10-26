@@ -43,6 +43,8 @@ function fixture(): {
     lastCycle: null,
     lastWords: null,
     thread: null,
+    places: [],
+    waiting: [],
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
 }
@@ -220,4 +222,28 @@ test("a mute is stated as state, and says plainly that it changes nothing", () =
   assert.match(text, /你静音了 chat:-1001234（到 2026-03-02T09:00:00Z）/);
   assert.match(text, /不改变投递/);
   assert.doesNotMatch(buildPacket(input({ mutes: {} })), /静音/);
+});
+
+test("the page says who is still waiting, and where it may speak", () => {
+  const text = buildPacket(
+    fixture().input({
+      waiting: [
+        { who: "群「g」", at: "2026-03-02T08:59:00Z" },
+        { who: "telegram:@owner", at: "2026-03-02T08:00:00Z" },
+      ],
+      places: [
+        { id: 111, label: "私聊 telegram:@owner", home: true },
+        { id: -222, label: "群「g」", home: false },
+      ],
+    }),
+  );
+  assert.match(text, /还没回的：群「g」（1m前）、telegram:@owner（1\.0h前）。/);
+  assert.match(text, /能说话的地方：私聊 telegram:@owner（111，默认）、群「g」（-222）。say 不写 to 就发到私聊 telegram:@owner。/);
+});
+
+test("with only one place, no sentence is spent on it", () => {
+  const text = buildPacket(
+    fixture().input({ places: [{ id: 111, label: "私聊 telegram:@owner", home: true }] }),
+  );
+  assert.doesNotMatch(text, /能说话的地方/);
 });

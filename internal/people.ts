@@ -63,6 +63,31 @@ export function lastSaidIn(
   return { chat: best.chat, who, at: last.at, tail };
 }
 
+/**
+ * Conversations where the last thing said was theirs, not ours: somebody is waiting.
+ * Purely positional — no reading of what was said.
+ */
+export function waitingOn(data: string): { who: string; at: string }[] {
+  let chats: string[];
+  try {
+    chats = readdirSync(peopleDir(data)).filter((f) => f.endsWith(".jsonl"));
+  } catch {
+    return [];
+  }
+  const out: { who: string; at: string }[] = [];
+  for (const f of chats) {
+    const chat = Number(f.replace(/\.jsonl$/, ""));
+    if (Number.isNaN(chat)) continue;
+    const tail = readSaid(data, chat, 20)?.tail ?? [];
+    const last = tail[tail.length - 1];
+    if (!last || last.dir !== "in") continue;
+    const who =
+      last.from ?? tail.filter((l) => l.dir === "in").pop()?.from ?? `chat ${chat}`;
+    out.push({ who, at: last.at });
+  }
+  return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
 /** Everybody whose conversation moved since `sinceMs` — however many that turns out to be. */
 export function activeSince(data: string, sinceMs: number): { chat: number; who: string }[] {
   let chats: string[];

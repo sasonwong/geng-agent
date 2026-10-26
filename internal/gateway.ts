@@ -54,6 +54,56 @@ export interface GatewayOptions {
   log?: (line: string) => void;
 }
 
+/**
+ * One entry per chat this instance has ever been seen in. `home` is learned once and
+ * then left alone: whoever spoke last must not decide where an unprompted word lands.
+ */
+export interface KnownChat {
+  kind: "private" | "group";
+  who?: string;
+  title?: string;
+}
+
+export interface Chats {
+  home?: number;
+  known?: Record<string, KnownChat>;
+}
+
+export function readChats(file: string): Record<string, Chats> {
+  const raw = readJson<Record<string, unknown>>(file, {});
+  const out: Record<string, Chats> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    // the first shape was a bare chat id per instance
+    if (typeof value === "number") out[key] = { home: value, known: {} };
+    else if (value && typeof value === "object") out[key] = value as Chats;
+  }
+  return out;
+}
+
+export function noteChat(chats: Chats, chat: KnownChat, id: number, seen: boolean): boolean {
+  const known = (chats.known ??= {});
+  const key = String(id);
+  const before = JSON.stringify(known[key] ?? null);
+  known[key] = seen ? { ...chat } : (known[key] ?? chat);
+  chats.home ??= id;
+  return JSON.stringify(known[key]) !== before;
+}
+
+/** What the daemon shows the agent about where it may speak. */
+export function knownPlaces(
+  root: string,
+  key: string,
+): { id: number; label: string; home: boolean }[] {
+  const chats = readChats(join(root, "data", "_gateway", "chats.json"))[key];
+  if (!chats) return [];
+  const home = chats.home;
+  return Object.entries(chats.known ?? {}).map(([id, c]) => ({
+    id: Number(id),
+    label: c.kind === "private" ? `私聊${c.who ? ` ${c.who}` : ""}` : `群「${c.title ?? id}」`,
+    home: Number(id) === home,
+  }));
+}
+
 const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 30;
 const REPEAT_LIMIT = 10;
@@ -78,7 +128,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const { ops } = ensureGatewayDirs(root);
   const chatsFile = join(root, "data", "_gateway", "chats.json");
   const offsetsFile = join(root, "data", "_gateway", "offsets.json");
-  const chats = readJson<Record<string, number>>(chatsFile, {});
+  const chats = readChats(chatsFile);
   const offsets = readJson<Record<string, number>>(offsetsFile, {});
   const watch = new Map<string, SendWatch>();
 
@@ -124,11 +174,19 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
   };
 
-  const deliver = async (key: string, texts: string[]): Promise<boolean> => {
+  const deliver = async (key: string, texts: string[], want?: number): Promise<boolean> => {
     const cfg = bots[key];
     if (!cfg) return false;
-    const chat = cfg.chat ?? chats[key];
+    const mine = (chats[key] ??= { known: {} });
+    // bots.json can pin the home; otherwise the first chat it ever heard from is home,
+    // and a later group must be named explicitly to be spoken into
+    const home = cfg.chat ?? mine.home;
+    const chat = want ?? home;
     if (typeof chat !== "number") return false;
+    if (want !== undefined && !mine.known?.[String(want)]) {
+      writeOps(ops, "gateway", `${key} 要发给不认识的 chat ${want}，没发。`);
+      return true; // acknowledged: retrying will never make it known
+    }
     if (trip(key, texts)) return false;
     for (const text of texts) await sendMessage(cfg.token, chat, text);
     const p = instanceData(key);
@@ -143,8 +201,16 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const handleUpdate = async (key: string, me: BotIdentity, update: TgUpdate): Promise<void> => {
     const message = update.message;
     if (!message || !message.text) return;
-    chats[key] = message.chat.id;
-    writeJson(chatsFile, chats);
+    const mine = (chats[key] ??= { known: {} });
+    const seen = noteChat(
+      mine,
+      message.chat.type === "private"
+        ? { kind: "private", who: senderName(message) }
+        : { kind: "group", title: message.chat.title ?? `chat ${message.chat.id}` },
+      message.chat.id,
+      message.chat.type !== "private",
+    );
+    if (seen) writeJson(chatsFile, chats);
 
     if (key === "ops") {
       log(`ops 收到消息（不处理）：${senderName(message)}`);
@@ -203,7 +269,10 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const cfg = bots[key];
     if (!cfg) return;
     const me = await getMe(cfg.token);
-    log(`${key} 上线：@${me.username}${cfg.listen ? ` listen=${cfg.listen}` : ""}`);
+    log(
+      `${key} 上线：@${me.username}${cfg.listen ? ` listen=${cfg.listen}` : ""}` +
+        ` home=${cfg.chat ?? chats[key]?.home ?? "未知"}`,
+    );
     for (;;) {
       const updates = await getUpdates(cfg.token, offsets[key] ?? 0);
       for (const update of updates) {
@@ -230,7 +299,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
             continue;
           }
           try {
-            if (await deliver(key, item.messages)) {
+            if (await deliver(key, item.messages, item.chat)) {
               ackOutbox(dir, item.file);
             }
           } catch (err) {

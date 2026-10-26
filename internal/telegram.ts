@@ -17,7 +17,7 @@ export interface TgEntity {
 export interface TgMessage {
   message_id: number;
   from?: { id: number; username?: string; first_name?: string };
-  chat: { id: number; type: "private" | "group" | "supergroup" | "channel" };
+  chat: { id: number; type: "private" | "group" | "supergroup" | "channel"; title?: string };
   text?: string;
   entities?: TgEntity[];
   reply_to_message?: { from?: { id: number } };

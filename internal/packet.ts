@@ -54,6 +54,10 @@ export interface PacketInput {
   lastWords: { dir: "in" | "out"; text: string; at: string; who: string } | null;
   /** What was last said to and by it on the address that knocked, if any. */
   thread: ThreadInput | null;
+  /** Where it can speak, and which one an unaddressed word goes to. */
+  places: { id: number; label: string; home: boolean }[];
+  /** Conversations whose last word was theirs. */
+  waiting: { who: string; at: string }[];
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -115,7 +119,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, places, waiting } = input;
 
   const out: string[] = [];
 
@@ -169,6 +173,19 @@ export function buildPacket(input: PacketInput): string {
       : "未闭合的事：（没有未闭合的事）",
   );
 
+  if (waiting.length > 0) {
+    const shown = waiting.slice(0, 3).map((w) => `${w.who}（${formatDuration(nowMs - Date.parse(w.at))}前）`);
+    const more = waiting.length > 3 ? `，还有 ${waiting.length - 3} 个` : "";
+    out.push("", `还没回的：${shown.join("、")}${more}。`);
+  }
+  if (places.length > 1) {
+    // one place needs no sentence; several do, because an unaddressed word must not
+    // silently land in a room with an audience
+    const list = places
+      .map((p) => `${p.label}（${p.id}${p.home ? "，默认" : ""}）`)
+      .join("、");
+    out.push(`能说话的地方：${list}。say 不写 to 就发到${places.find((p) => p.home)?.label ?? "默认那个"}。`);
+  }
   if (thread) out.push("", ...renderThread(thread, peoplePath));
   if (inbox.length > 0) {
     // the thread block above shows one conversation; say how many people are actually

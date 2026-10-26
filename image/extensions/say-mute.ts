@@ -30,21 +30,33 @@ const sayTool = defineTool({
   name: "say",
   label: "Say",
   description:
-    "对一个人说话。一次调用里的几句会一起送到；分几次调用就是隔一阵说一句。没人问你的时候也可以说。",
+    "说话。一次调用里的几句会一起送到；分几次调用就是隔一阵说一句。没人问你的时候也可以说。不写 to 就是私聊。",
   parameters: Type.Object({
     messages: Type.Array(Type.String(), {
       minItems: 1,
       maxItems: 20,
       description: "要说的话，一句一个元素。",
     }),
+    to: Type.Optional(
+      Type.String({
+        description: "发给哪个 chat 的 id（见唤醒纸「能说话的地方」）。不写就是私聊。",
+      }),
+    ),
   }),
   async execute(_toolCallId, params) {
     const messages = params.messages.filter((m) => m.trim() !== "");
     if (messages.length === 0) {
       return { content: [{ type: "text", text: "没说什么。" }], details: undefined };
     }
+    const chat = params.to === undefined ? undefined : Number(params.to);
+    if (params.to !== undefined && !Number.isFinite(chat)) {
+      return { content: [{ type: "text", text: `to 要写 chat 的 id：${params.to} 不是。` }], details: undefined };
+    }
     const id = nextId();
-    writeAtomic(join(OUTBOX, `${id}.json`), JSON.stringify({ id, messages }) + "\n");
+    writeAtomic(
+      join(OUTBOX, `${id}.json`),
+      JSON.stringify({ id, messages, ...(chat === undefined ? {} : { chat }) }) + "\n",
+    );
     return {
       content: [{ type: "text", text: `说了 ${messages.length} 句。` }],
       details: { id, count: messages.length },
