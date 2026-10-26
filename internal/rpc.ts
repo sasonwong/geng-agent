@@ -18,6 +18,9 @@ export interface Repeat {
 export interface SessionStats {
   cost: number | null;
   tokens: number | null;
+  /** Tokens the provider served from its cache: the one number that says whether keeping
+   * the system prompt stable is worth anything. */
+  cacheRead: number | null;
   contextPercent: number | null;
 }
 
@@ -280,12 +283,17 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
       | undefined;
     if (text && typeof text.text === "string") finalText = text.text;
     const s = (await send({ type: "get_session_stats" })) as
-      | { cost?: number; tokens?: { total?: number }; contextUsage?: { percent?: number | null } }
+      | {
+          cost?: number;
+          tokens?: { total?: number; cacheRead?: number };
+          contextUsage?: { percent?: number | null };
+        }
       | undefined;
     if (s) {
       stats = {
         cost: typeof s.cost === "number" ? s.cost : null,
         tokens: typeof s.tokens?.total === "number" ? s.tokens.total : null,
+        cacheRead: typeof s.tokens?.cacheRead === "number" ? s.tokens.cacheRead : null,
         contextPercent:
           typeof s.contextUsage?.percent === "number" ? s.contextUsage.percent : null,
       };

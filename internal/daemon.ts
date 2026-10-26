@@ -20,6 +20,7 @@ import { activeSince, lastSaidIn, readSaid, waitingOn } from "./people.ts";
 import { knownPlaces } from "./gateway.ts";
 import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
+import { systemFacts } from "./packet.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
@@ -126,6 +127,7 @@ function logLine(
       `cost=${spent ? spent.cost.toFixed(4) : "-"}`,
       `timedout=${r.timedOut ? "yes" : "no"}`,
       `ctx=${r.stats?.contextPercent != null ? `${r.stats.contextPercent}%` : "-"}`,
+      `cache=${r.stats?.cacheRead ?? "-"}/${spent ? spent.tokens : "-"}`,
     );
   }
   parts.push(`inbox=${inboxCount}`);
@@ -199,7 +201,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const at = (inContainer: string, host: string): string =>
     policy.runner === "docker" ? inContainer : host;
   const statePath = at("/state", paths.palimpsest);
-  const systemPrompt = systemPromptFor(paths);
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
   let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
   if (crashed) writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
@@ -247,6 +248,13 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     if (inbox.length > 0) reason = "knock";
 
     const nowMs = Date.now();
+    // The system prompt carries the two facts that only change when the operator does
+    // something — where it may speak, and its own knobs — so the tools block underneath
+    // it stays cacheable from one waking to the next.
+    const systemPrompt = systemPromptFor(
+      paths,
+      systemFacts(knownPlaces(paths.root, o.instance), policySummary(policy)),
+    );
     const longGap = typeof meta.lastWakeMs === "number" && nowMs - meta.lastWakeMs > longGapMs;
     const wakes24h = readJson<number[]>(join(paths.meta, "wakes.json"), []).filter(
       (t) => nowMs - t < DAY_MS,
@@ -292,9 +300,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       lowPending: pendingLow(paths),
       wakes24h: wakes24h + 1,
       parked: plan.parked,
-      policyLine: policySummary(policy),
+
       searchLeft: searchQuota(paths.root, paths.secrets)?.left ?? null,
-      places: knownPlaces(paths.root, o.instance),
       waiting: waitingOn(paths.data),
     });
 

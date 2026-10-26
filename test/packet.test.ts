@@ -36,14 +36,12 @@ function fixture(): {
     wakes24h: 1,
     parked: false,
     lowPending: 0,
-    policyLine: "defaultWakeMinutes=30",
     searchLeft: 12,
     envChanged: null,
     lastSaid: null,
     lastCycle: null,
     lastWords: null,
     thread: null,
-    places: [],
     waiting: [],
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
@@ -70,14 +68,18 @@ test("the page carries no identity: that is the system prompt's last section", (
   assert.doesNotMatch(text, /identity\.md/);
 });
 
-test("knock and timer read differently, and a knock is addressed", () => {
+test("one sentence says why it is awake and whether anyone is there", () => {
   const { input } = fixture();
   const knocked = buildPacket(
     input({ reason: "knock", inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you" }] }),
   );
-  assert.match(knocked, /有人敲门/);
-  assert.match(knocked, /说句话回去/);
-  assert.doesNotMatch(knocked, /现在没人在跟你说话/);
+  assert.match(knocked, /有人敲门，所以你现在醒了，现在有人在跟你说话。/);
+  // the permission is always true, so it stands alone and never varies with the reason
+  assert.match(knocked, /你可以什么都不做，那不算失败。/);
+  assert.doesNotMatch(knocked, /说句话回去/);
+
+  const timed = buildPacket(input({ reason: "timer" }));
+  assert.match(timed, /你是被自己定的闹钟叫醒的，现在没人在跟你说话。/);
 });
 
 test("nudge admits it was woken by default rather than by an alarm", () => {
@@ -224,26 +226,14 @@ test("a mute is stated as state, and says plainly that it changes nothing", () =
   assert.doesNotMatch(buildPacket(input({ mutes: {} })), /静音/);
 });
 
-test("the page says who is still waiting, and where it may speak", () => {
+test("the page says who is still waiting", () => {
   const text = buildPacket(
     fixture().input({
       waiting: [
         { who: "群「g」", at: "2026-03-02T08:59:00Z" },
         { who: "telegram:@owner", at: "2026-03-02T08:00:00Z" },
       ],
-      places: [
-        { id: 111, label: "私聊 telegram:@owner", home: true },
-        { id: -222, label: "群「g」", home: false },
-      ],
     }),
   );
   assert.match(text, /还没回的：群「g」（1m前）、telegram:@owner（1\.0h前）。/);
-  assert.match(text, /能说话的地方：私聊 telegram:@owner（111，默认）、群「g」（-222）。say 不写 to 就发到私聊 telegram:@owner。/);
-});
-
-test("with only one place, no sentence is spent on it", () => {
-  const text = buildPacket(
-    fixture().input({ places: [{ id: 111, label: "私聊 telegram:@owner", home: true }] }),
-  );
-  assert.doesNotMatch(text, /能说话的地方/);
 });

@@ -34,7 +34,6 @@ export interface PacketInput {
   /** Ambient messages waiting in inbox/low, which did not wake it. */
   lowPending: number;
   /** The settings it is allowed to renegotiate, shown so it can renegotiate them. */
-  policyLine: string;
   /** Searches left today; null when no search endpoint is configured. */
   searchLeft: number | null;
   /** Set when the image or the program changed since the last waking. */
@@ -54,8 +53,6 @@ export interface PacketInput {
   lastWords: { dir: "in" | "out"; text: string; at: string; who: string } | null;
   /** What was last said to and by it on the address that knocked, if any. */
   thread: ThreadInput | null;
-  /** Where it can speak, and which one an unaddressed word goes to. */
-  places: { id: number; label: string; home: boolean }[];
   /** Conversations whose last word was theirs. */
   waiting: { who: string; at: string }[];
   /** More time passed than any alarm explains — the machine was probably suspended. */
@@ -107,10 +104,33 @@ const LAST_WAKE: Record<WakeReason, string> = {
 };
 
 const REASON_LINE: Record<WakeReason, string> = {
-  timer: "你是被自己定的闹钟叫醒的。",
-  knock: "有人敲门，所以你现在醒了。",
-  nudge: "你上次没有留下下次什么时候醒，所以被按默认间隔叫醒了。",
+  timer: "你是被自己定的闹钟叫醒的",
+  knock: "有人敲门，所以你现在醒了",
+  nudge: "你上次没有留下下次什么时候醒，所以被按默认间隔叫醒了",
 };
+
+/** Whether anyone is on the other end — the same fact from the other side. */
+function whoLine(inboxCount: number): string {
+  return inboxCount > 0 ? "，现在有人在跟你说话。" : "，现在没人在跟你说话。";
+}
+
+/** The rare-changing half of the picture: where it may speak, and its own knobs. */
+export function systemFacts(
+  places: { id: number; label: string; home: boolean }[],
+  policyLine: string,
+): string {
+  const out: string[] = [];
+  if (places.length > 1) {
+    const list = places
+      .map((p) => `${p.label}（${p.id}${p.home ? "，默认" : ""}）`)
+      .join("、");
+    out.push(
+      `能说话的地方：${list}。say 不写 to 就发到${places.find((p) => p.home)?.label ?? "默认那个"}。`,
+    );
+  }
+  out.push(`可以调的运行参数：${policyLine}。`);
+  return out.join("\n");
+}
 
 /** One line, so a multi-paragraph sign-off does not take over the page. */
 function flatten(text: string): string {
@@ -119,14 +139,12 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, policyLine, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, places, waiting } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting } = input;
 
   const out: string[] = [];
 
   // Only what changed since last time: the constants live in the system prompt, and the
   // identity it wrote is its last section there.
-  if (waking <= 1) out.push("这是你第一次醒来。");
-
   const since =
     lastWakeMs === null ? "第一次醒来" : `距上次醒来 ${formatDuration(nowMs - lastWakeMs)}`;
   out.push(`现在：${new Date(nowMs).toISOString()} · ${since}`);
@@ -178,14 +196,6 @@ export function buildPacket(input: PacketInput): string {
     const more = waiting.length > 3 ? `，还有 ${waiting.length - 3} 个` : "";
     out.push("", `还没回的：${shown.join("、")}${more}。`);
   }
-  if (places.length > 1) {
-    // one place needs no sentence; several do, because an unaddressed word must not
-    // silently land in a room with an audience
-    const list = places
-      .map((p) => `${p.label}（${p.id}${p.home ? "，默认" : ""}）`)
-      .join("、");
-    out.push(`能说话的地方：${list}。say 不写 to 就发到${places.find((p) => p.home)?.label ?? "默认那个"}。`);
-  }
   if (thread) out.push("", ...renderThread(thread, peoplePath));
   if (inbox.length > 0) {
     // the thread block above shows one conversation; say how many people are actually
@@ -208,19 +218,16 @@ export function buildPacket(input: PacketInput): string {
     out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");
   }
 
-  // nobody set an alarm yet on the first waking
-  if (waking > 1) out.push("", REASON_LINE[reason]);
-  out.push(
-    inbox.length > 0
-      ? "说句话回去，或者做你的事。"
-      : "现在没人在跟你说话。你可以什么都不做，那不算失败。",
-  );
+  // one sentence: why it is awake, and whether anyone is on the other end. Then the
+  // standing permission, alone, because it is the only line that is always true.
+  out.push("", `${waking <= 1 ? "这是你第一次醒来" : REASON_LINE[reason]}${whoLine(inbox.length)}`);
+  out.push("你可以什么都不做，那不算失败。");
 
   if (searchLeft !== null) {
     out.push("", searchLeft === 0 ? "今天的搜索用完了。" : `今天还能搜 ${searchLeft} 次。`);
   }
 
-  out.push("", `你现在的运行参数：${policyLine}`);
+
 
   // No truncation: nothing that grows with the outside world is pasted any more,
   // so the page is bounded by construction rather than by cutting it in half.
