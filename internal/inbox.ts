@@ -17,7 +17,15 @@ export interface InboxMsg {
 
 function parseFile(dir: string, name: string): InboxMsg | null {
   const msg = readJson<InboxMsg | null>(join(dir, name), null);
-  if (!msg || typeof msg.text !== "string" || msg.text.trim() === "") return null;
+  if (!msg || typeof msg.text !== "string") return null;
+  const attachments = Array.isArray(msg.attachments)
+    ? msg.attachments.filter((a) => a && typeof a === "object" && typeof a.kind === "string")
+    : [];
+  // A picture or a document with no caption has no words, and that is not a broken
+  // message: the gateway writes text:"" for exactly that. Rejecting it left a file that
+  // peekInbox skipped but inboxPending still counted, so the daemon knocked on it every
+  // twenty seconds for hours — around sixty cycles — handing over nothing each time.
+  if (msg.text.trim() === "" && attachments.length === 0) return null;
   return {
     id: typeof msg.id === "string" ? msg.id : name.replace(/\.json$/, ""),
     file: name,
@@ -25,6 +33,7 @@ function parseFile(dir: string, name: string): InboxMsg | null {
     from: msg.from,
     at: msg.at,
     chat: typeof msg.chat === "number" ? msg.chat : undefined,
+    ...(attachments.length === 0 ? {} : { attachments }),
   };
 }
 
@@ -77,4 +86,28 @@ export function markSeen(dirs: string[], seenDir: string, files: string[]): void
       break;
     }
   }
+}
+
+/** How many messages it could actually hand over. The count that decides "did someone knock". */
+export function inboxCount(dir: string): number {
+  return peekInbox(dir).length;
+}
+
+/**
+ * A file nobody can read used to knock forever: inboxPending counted names while
+ * peekInbox skipped the content, so every waking handed over nothing and the file stayed.
+ * Anything unparseable is moved aside once, with a line in the log.
+ */
+export function quarantine(dir: string, seenDir: string): string[] {
+  const bad: string[] = [];
+  for (const f of jsonFiles(dir)) {
+    if (parseFile(dir, f) !== null) continue;
+    try {
+      renameSync(join(dir, f), join(seenDir, `${f}.bad`));
+      bad.push(f);
+    } catch {
+      // if it cannot be moved it will simply be skipped again
+    }
+  }
+  return bad;
 }

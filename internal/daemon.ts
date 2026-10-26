@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
-import { markSeen, peekInbox } from "./inbox.ts";
+import { inboxCount, markSeen, peekInbox, quarantine } from "./inbox.ts";
 import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
@@ -50,12 +50,8 @@ function pendingLow(p: Paths): number {
 }
 
 function inboxPending(p: Paths): boolean {
-  try {
-    // only the top level counts as a knock; inbox/low is drained but never wakes
-    return readdirSync(p.inbox).some((f) => f.endsWith(".json"));
-  } catch {
-    return false;
-  }
+  // the parser, not a directory listing: a file nothing can read must not be able to knock
+  return inboxCount(p.inbox) > 0;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
@@ -202,6 +198,13 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       parseForget(readJson<unknown>(paths.filesForget, null)),
     );
     rmSync(paths.filesForget, { force: true });
+    // A message nothing can read is moved aside instead of being skipped forever. Before
+    // this, one caption-less document knocked 58 times in an hour and handed over nothing.
+    const junk = [
+      ...quarantine(paths.inbox, paths.inboxSeen),
+      ...quarantine(paths.inboxLow, paths.inboxSeen),
+    ];
+    if (junk.length > 0) log(`丢弃了 ${junk.length} 条读不出来的消息：${junk.join("、")}`);
     const pruned = pruneFiles(paths.filesDir, policy.files, Date.now());
     const filesUsed = filesUsage(paths.filesDir);
 
