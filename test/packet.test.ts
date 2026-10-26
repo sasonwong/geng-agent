@@ -49,6 +49,7 @@ function fixture(): {
     lastWords: null,
     thread: null,
     waiting: [],
+    identity: null,
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
 }
@@ -65,13 +66,18 @@ test("birth packet says only what is new, and nothing about who it is", () => {
   assert.doesNotMatch(text, /waiting\.json/);
 });
 
-test("the page carries no identity: that is the system prompt's last section", () => {
+test("its own words are pasted verbatim, labelled, just before the reason it is awake", () => {
   const { input } = fixture();
-  const i = input({});
-  writeText(i.paths.identity, "# 我是谁\n我是 alice。");
+  const i = input({ identity: "# 我是谁\n我是 alice。" });
   const text = buildPacket(i);
-  assert.doesNotMatch(text, /我是 alice/);
-  assert.doesNotMatch(text, /identity\.md/);
+  // labelled, or the page reads as one authored document and it mistakes its own words
+  // for something the environment said
+  assert.match(text, /你写下的自己（\/state\/identity\.md）：\n\n# 我是谁\n我是 alice。/);
+  // and placed last: the last two things it reads are who it decided it is, and why it is
+  // awake
+  const at = text.indexOf("我是 alice。");
+  assert.ok(at > text.indexOf("未闭合的事"), "identity 应该排在事实之后");
+  assert.ok(at < text.indexOf("你可以什么都不做"));
 });
 
 test("one sentence says why it is awake and whether anyone is there", () => {

@@ -66,6 +66,9 @@ export interface PacketInput {
   thread: ThreadInput | null;
   /** Conversations whose last word was theirs. */
   waiting: { who: string; at: string }[];
+  /** What it wrote about itself; pasted verbatim, because a read it skips is a waking
+   * with no self at all. */
+  identity: string | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -150,7 +153,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
 
   const out: string[] = [];
 
@@ -255,6 +258,13 @@ export function buildPacket(input: PacketInput): string {
 
   if (crashed) {
     out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");
+  }
+
+  // Its own words, verbatim, right before the reason it is awake: the last two things it
+  // reads are who it decided it is and what it is supposed to be doing right now.
+  if (identity !== null && identity.trim() !== "") {
+    out.push("", `你写下的自己（${statePath}/identity.md）：`);
+    out.push("", identity.trim());
   }
 
   // one sentence: why it is awake, and whether anyone is on the other end. Then the

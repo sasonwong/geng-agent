@@ -11,7 +11,7 @@ import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from
 import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
 import { formatDuration, readWaiting, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
-import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
+import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
@@ -306,6 +306,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
       searchLeft: searchQuota(paths.root, paths.secrets)?.left ?? null,
       waiting: waitingOn(paths.data),
+      identity: readText(paths.identity),
     });
 
     if (o.dry) {
