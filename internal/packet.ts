@@ -5,6 +5,8 @@ import { excerpt, readJson, readText } from "./state.ts";
 import { KIND_WORD } from "./attach.ts";
 import { formatDuration } from "./schedule.ts";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 export type WakeReason = "timer" | "knock" | "nudge";
 
 export interface PacketInput {
@@ -36,6 +38,12 @@ export interface PacketInput {
   lowPending: number;
   /** Where files people sent it live; injected so neither runner hardcodes a path. */
   filesPath: string;
+  /** Applied before this waking: what it asked to forget, and what the cap took. */
+  filesForgotten: number;
+  filesPruned: number;
+  filesOldestPrunedMs: number | null;
+  filesUsedBytes: number;
+  filesCapMb: number;
   /** The settings it is allowed to renegotiate, shown so it can renegotiate them. */
   /** Searches left today; null when no search endpoint is configured. */
   searchLeft: number | null;
@@ -142,7 +150,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, filesPath, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting } = input;
 
   const out: string[] = [];
 
@@ -216,6 +224,18 @@ export function buildPacket(input: PacketInput): string {
     .filter(([kind]) => kind !== "voice")
     .map(([kind, n]) => `${n}${KIND_WORD[kind as keyof typeof KIND_WORD] ?? "个文件"}`);
   if (files.length > 0) out.push(`一起发来的还有 ${files.join("、")}，在 ${filesPath}/。`);
+  if (filesForgotten > 0) {
+    out.push(`按你说的删了 ${filesForgotten} 个文件。`);
+  }
+  if (filesPruned > 0) {
+    const age =
+      filesOldestPrunedMs === null
+        ? ""
+        : `（最老的一个 ${Math.max(1, Math.round((nowMs - filesOldestPrunedMs) / DAY_MS))} 天前）`;
+    out.push(`地方不够了，清掉 ${filesPruned} 个最老的${age}。`);
+  } else if (filesCapMb > 0 && filesUsedBytes > filesCapMb * 1024 * 1024 * 0.85) {
+    out.push(`${filesPath} 里 ${Math.round(filesUsedBytes / 1024 / 1024)} MB，上限 ${filesCapMb} MB。`);
+  }
   const voice = kinds.get("voice") ?? 0;
   if (voice > 0) {
     // no transcription exists here, so the honest thing is that the words are not

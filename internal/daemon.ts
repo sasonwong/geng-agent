@@ -8,6 +8,7 @@ import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
+import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
 import { formatDuration, readWaiting, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
@@ -94,6 +95,7 @@ function logLine(
   interventions: string[],
   backup: BackupOutcome | null,
   spent: { tokens: number; cost: number } | null,
+  files: { pruned: number; forgot: number },
 ): string {
   const parts = [
     new Date().toISOString(),
@@ -119,6 +121,8 @@ function logLine(
     const unread = r.injections.filter((i) => !i.read).length;
     parts.push(unread > 0 ? `inj=${r.injections.length}(unread=${unread})` : `inj=${r.injections.length}`);
   }
+  if (files.pruned > 0) parts.push(`pruned=${files.pruned}`);
+  if (files.forgot > 0) parts.push(`forgot=${files.forgot}`);
   if (backup) parts.push(`backup=${backup.status}${backup.detail ? `(${backup.detail})` : ""}`);
   return parts.join(" ");
 }
@@ -190,6 +194,16 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   let escalation: Escalation = loadEscalation(paths);
 
   for (;;) {
+    // Only while it is not running: a file vanishing under a read is the failure this
+    // must not have. Its own requests go first, then the cap.
+    const forgot = forgetFiles(
+      paths.filesDir,
+      parseForget(readJson<unknown>(paths.filesForget, null)),
+    );
+    rmSync(paths.filesForget, { force: true });
+    const pruned = pruneFiles(paths.filesDir, policy.files, Date.now());
+    const filesUsed = filesUsage(paths.filesDir);
+
     let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
     const plan: Plan = planFor(escalation);
@@ -255,6 +269,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       inboxPath: at("/inbox", paths.inbox),
       peoplePath: at("/people", paths.people),
       filesPath: at("/files", paths.filesDir),
+      filesForgotten: forgot,
+      filesPruned: pruned.removed,
+      filesOldestPrunedMs: pruned.oldestRemovedMs,
+      filesUsedBytes: filesUsed.bytes,
+      filesCapMb: policy.files.maxMb,
       inbox,
       mutes: readMutes(paths.mute, nowMs),
       lastSaid: meta.lastSaid ?? null,
@@ -397,6 +416,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       result.interventions,
       backup,
       spent,
+      { pruned: pruned.removed, forgot },
     );
     appendLine(paths.daemonLog, line);
     log(line);

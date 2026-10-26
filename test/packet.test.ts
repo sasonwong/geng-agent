@@ -29,6 +29,11 @@ function fixture(): {
     inboxPath: "/inbox",
     peoplePath: "/people",
     filesPath: "/files",
+    filesForgotten: 0,
+    filesPruned: 0,
+    filesOldestPrunedMs: null,
+    filesUsedBytes: 0,
+    filesCapMb: 500,
     inbox: [],
     mutes: {},
     crashed: false,
@@ -237,4 +242,24 @@ test("the page says who is still waiting", () => {
     }),
   );
   assert.match(text, /还没回的：群「g」（1m前）、telegram:@owner（1\.0h前）。/);
+});
+
+test("files it asked to forget, and files the cap took, are stated as what happened", () => {
+  const forgotten = buildPacket(fixture().input({ filesForgotten: 2 }));
+  assert.match(forgotten, /按你说的删了 2 个文件。/);
+
+  const pruned = buildPacket(
+    fixture().input({ filesPruned: 3, filesOldestPrunedMs: Date.parse("2026-02-01T09:00:00Z") }),
+  );
+  assert.match(pruned, /地方不够了，清掉 3 个最老的（最老的一个 29 天前）。/);
+
+  // near the cap it says how full, so "worth deleting something" is a decision it can weigh
+  const full = buildPacket(
+    fixture().input({ filesUsedBytes: 460 * 1024 * 1024, filesCapMb: 500 }),
+  );
+  assert.match(full, /\/files 里 460 MB，上限 500 MB。/);
+
+  // and when nothing happened, the page says nothing at all
+  const quiet = buildPacket(fixture().input({}));
+  assert.doesNotMatch(quiet, /删了|清掉|上限/);
 });

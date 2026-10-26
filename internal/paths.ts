@@ -17,6 +17,8 @@ export interface Paths {
   outbox: string;
   /** Files people sent it. Read-only inside the container, never its business to write. */
   filesDir: string;
+  /** What it asked to have forgotten; the daemon applies this before the next waking. */
+  filesForget: string;
   daemonLog: string;
   /** Outside the book on purpose: the rules it lives under are not something it reads
    * or writes. The negotiable values reach it through the wake page instead. */
@@ -50,6 +52,7 @@ export function makePaths(root: string, instance: string): Paths {
   const inbox = join(data, "inbox");
   const outbox = join(data, "outbox");
   const filesDir = join(data, "files");
+  const filesForget = join(palimpsest, "files.forget.json");
   const journal = join(palimpsest, "journal");
   return {
     root: r,
@@ -65,6 +68,7 @@ export function makePaths(root: string, instance: string): Paths {
     inboxLow: join(inbox, "low"),
     outbox,
     filesDir,
+    filesForget,
     daemonLog: join(data, "daemon.log"),
     policy: join(data, "policy.json"),
     identity: join(palimpsest, "identity.md"),

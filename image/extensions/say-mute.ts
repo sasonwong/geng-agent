@@ -14,6 +14,7 @@ const STATE = process.env.GENG_STATE ?? "/state";
 // its mountpoint inside the bind, which lands in the agent's own book as a root-owned dir
 const OUTBOX = process.env.GENG_OUTBOX ?? "/outbox";
 const MUTE = join(STATE, "mute.json");
+const FORGET = join(STATE, "files.forget.json");
 
 function writeAtomic(file: string, text: string): void {
   mkdirSync(join(file, ".."), { recursive: true });
@@ -81,6 +82,38 @@ const sayTool = defineTool({
   },
 });
 
+const forgetTool = defineTool({
+  name: "forget",
+  label: "Forget files",
+  description:
+    "删掉 /files 里的文件，为了腾地方。下一轮醒来之前生效——这一轮你还能读到它们。",
+  parameters: Type.Object({
+    files: Type.Array(Type.String(), {
+      minItems: 1,
+      maxItems: 50,
+      description: "要删的文件，写 /files 里的路径，例如 /files/123456789-1-photo.jpg。",
+    }),
+  }),
+  async execute(_toolCallId, params) {
+    const files = params.files.map((f) => f.trim()).filter((f) => f !== "");
+    if (files.length === 0) {
+      return { content: [{ type: "text", text: "没说要删什么。" }], details: undefined };
+    }
+    let current: { files?: string[] } = {};
+    try {
+      current = JSON.parse(readFileSync(FORGET, "utf8")) as { files?: string[] };
+    } catch {
+      current = {};
+    }
+    const all = [...new Set([...(current.files ?? []), ...files])];
+    writeAtomic(FORGET, JSON.stringify({ files: all, at: new Date().toISOString() }, null, 2) + "\n");
+    return {
+      content: [{ type: "text", text: `下一轮醒来前删掉 ${files.length} 个。` }],
+      details: { files },
+    };
+  },
+});
+
 const muteTool = defineTool({
   name: "mute",
   label: "Mute",
@@ -113,5 +146,6 @@ const muteTool = defineTool({
 export default function (pi: ExtensionAPI) {
   if (!existsSync(STATE)) return;
   pi.registerTool(sayTool);
+  pi.registerTool(forgetTool);
   pi.registerTool(muteTool);
 }

@@ -15,6 +15,12 @@ export interface Policy {
   };
   /** Off if you don't want snapshots; also skipped automatically when rustic or its password is missing. */
   backup: { enabled: boolean };
+  /** What arrives from people does not accumulate forever. */
+  files: {
+    /** 0 clears nothing by age: the size cap then governs alone. */
+    maxAgeDays: number;
+    maxMb: number;
+  };
   container: {
     image: string;
     memory: string;
@@ -31,6 +37,7 @@ export function defaultPolicy(): Policy {
     runner: "local",
     cycle: { timeoutSec: 1200, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
     backup: { enabled: true },
+    files: { maxAgeDays: 0, maxMb: 500 },
     container: {
       image: "geng-agent:latest",
       memory: "2g",
@@ -87,6 +94,10 @@ export function loadPolicy(file: string): Policy {
       repeatThreshold: num(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
     backup: { enabled: p.backup?.enabled !== false },
+    files: {
+      maxAgeDays: num(p.files?.maxAgeDays ?? d.files.maxAgeDays, "files.maxAgeDays", 0),
+      maxMb: num(p.files?.maxMb ?? d.files.maxMb, "files.maxMb", 1),
+    },
     container: {
       image: str(container.image, "container.image"),
       memory: str(container.memory, "container.memory"),
