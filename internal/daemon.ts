@@ -7,7 +7,7 @@ import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
-import { onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
+import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 import { formatDuration, readWaiting, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, writeJson, writeText } from "./state.ts";
@@ -142,6 +142,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const paths = makePaths(o.root, o.instance);
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   ensureDirs(requiredDirs(paths));
+  ensurePolicyLocation(paths);
   const conflict = schemaConflict(onDiskSchema(paths));
   if (conflict !== null) throw new ExpectedError(conflict);
   // it is mounted read-only into the container, and docker materialises a missing

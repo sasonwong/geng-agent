@@ -16,6 +16,8 @@ export interface Paths {
   inboxLow: string;
   outbox: string;
   daemonLog: string;
+  /** Outside the book on purpose: the rules it lives under are not something it reads
+   * or writes. The negotiable values reach it through the wake page instead. */
   policy: string;
   identity: string;
   /** A directory, one file per unfinished thing: the count is the filesystem's job. */
@@ -60,7 +62,7 @@ export function makePaths(root: string, instance: string): Paths {
     inboxLow: join(inbox, "low"),
     outbox,
     daemonLog: join(data, "daemon.log"),
-    policy: join(palimpsest, "policy.json"),
+    policy: join(data, "policy.json"),
     identity: join(palimpsest, "identity.md"),
     openLoops: join(palimpsest, "open-loops"),
     people: join(data, "people"),

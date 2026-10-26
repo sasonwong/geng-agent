@@ -14,13 +14,17 @@ test("the container's /outbox is the directory the gateway reads", () => {
 
   assert.notEqual(args.indexOf(`${paths.outbox}:/outbox`), -1, "outbox 没有挂进容器：say 写的话没人读");
 })
-test("the page points at inbox and daemon.log, so both are mounted read-only", () => {
+test("only what the page points at is mounted, and never the rules", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
   const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…").args.join(" ");
   assert.match(argv, new RegExp(`-v ${paths.inbox}:/inbox:ro`));
-  assert.match(argv, new RegExp(`-v ${paths.daemonLog}:/daemon.log:ro`));
   assert.match(argv, new RegExp(`-v ${paths.people}:/people:ro`));
+  // the rules it lives under are not exposed at all: no mount, and the file now lives
+  // outside the book, so the /state bind cannot carry it in either
+  assert.equal(argv.includes("/daemon.log"), false, "daemon.log 不挂了");
+  assert.equal(argv.includes("policy.json"), false, "policy.json 不该出现在容器里");
+  assert.equal(paths.policy.startsWith(paths.palimpsest), false, "policy.json 不在 /state 里");
   // nothing may be nested under the /state bind: docker would create the mountpoint
   // through it, as root, inside the agent's own book
   for (const target of [":/state/inbox", ":/state/daemon.log", ":/state/people", ":/state/outbox"]) {

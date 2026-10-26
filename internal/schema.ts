@@ -1,6 +1,7 @@
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
-import { readJson } from "./state.ts";
+import { readJson, writeJson } from "./state.ts";
 
 /**
  * The version of the files the daemon writes. Bump it when a shape changes, never when a
@@ -28,4 +29,15 @@ export function schemaConflict(found: number | null): string | null {
     return `这个生命是更新版本写的（stateSchema ${found} > ${STATE_SCHEMA}）：不要用旧代码跑它。`;
   }
   return null; // older: readable, and a migration can upgrade it when one exists
+}
+
+/**
+ * policy.json used to live in the book it governs, mounted read-only to stop it editing
+ * it. Moving the file out of the mount is the honest fix; this carries an old instance over.
+ */
+export function ensurePolicyLocation(paths: Paths): void {
+  const old = join(paths.palimpsest, "policy.json");
+  if (!existsSync(old)) return;
+  if (!existsSync(paths.policy)) writeJson(paths.policy, readJson<unknown>(old, {}));
+  rmSync(old, { force: true });
 }

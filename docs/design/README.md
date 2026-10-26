@@ -266,7 +266,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 
 | 文件 | 写者 | 形状 |
 |---|---|---|
-| `palimpsest/policy.json` | 操作者 | `{schema, runner, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,network}}` |
+| `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | `{schema, runner, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,network}}` |
 | `palimpsest/policy.proposal.json` | 它 | 同一形状，只允许白名单里的键，越界即拒绝 |
 | `palimpsest/waiting.json` | 它 | `{wake:{after:"20m"}\|{at:"ISO"},\ why}` 或 `null` |
 | `palimpsest/mute.json` | 它 | `{"*"\|"dm"\|"chat:<id>": {until:"ISO", why}}` |
@@ -289,6 +289,19 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 
 要改它的书只有一个合法动作：**在系统提示词里告诉它新路径，让它自己搬。** 我们动手搬
 等于替它改写记忆。
+
+### 挂载表
+
+容器只看见这些：`/state`（书，读写）、`/work`、`/outbox`、`/inbox`（只读）、`/people`（只读）、
+自己的 session 目录、只读的 `settings.json`。
+
+**看不见的**：`daemon.log`（纸上的「上一轮」「24 小时醒了 N 次」已经说过）、`policy.json`
+（它活在什么规矩下不是它要读的书；可协商的那几个值由纸印出来）、`meta/`、`usage/`、`backup/`、
+`secrets/`。
+
+policy.json 因此从 `palimpsest/` 挪到了 `data/<inst>/`：只要它还在书里，`/state` 那个 bind 就
+会把它带进容器，而"给书里的文件套一个只读挂载"是在跟自己的挂载表打架。挪出去之后它既看不见
+也写不着，规则又回到了"只属于操作者"。
 
 ### 输入状态
 

@@ -217,7 +217,8 @@ const PROBE = [
   "sh",
   "-c",
   [
-    'if (echo x >> /state/policy.json) 2>/dev/null; then echo POLICY_WRITABLE; else echo POLICY_READONLY; fi',
+    'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
+    'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
     // the positive control: without it, "everything blocked" passes every check below
     'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
@@ -266,9 +267,9 @@ async function probe(root: string, instance: string): Promise<Check[]> {
       : "通",
   });
   checks.push({
-    name: "policy.json 只读",
-    ok: out.includes("POLICY_READONLY"),
-    detail: out.includes("POLICY_WRITABLE") ? "容器能改 policy.json —— 只读挂载没生效" : "写不进去",
+    name: "policy.json 不可见",
+    ok: out.includes("POLICY_HIDDEN"),
+    detail: out.includes("POLICY_VISIBLE") ? "容器里能看到 policy.json —— 它不该在自己的书里读规则" : "看不见",
   });
   checks.push({
     name: "云元数据不可达",
