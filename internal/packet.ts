@@ -97,7 +97,13 @@ export interface ThreadInput {
   chat: number;
   total: number;
   bytes: number;
-  lines: { dir: "in" | "out"; text: string; at: string }[];
+  lines: {
+    dir: "in" | "out";
+    text: string;
+    at: string;
+    /** The line this one answered, when the person replied to a specific message. */
+    quote?: { id: string; from?: string; text?: string };
+  }[];
 }
 
 function renderThread(t: ThreadInput, peoplePath: string): string[] {
@@ -105,7 +111,8 @@ function renderThread(t: ThreadInput, peoplePath: string): string[] {
   const age = Number.isNaN(oldest) ? "" : `，最早的一句在 ${formatDuration(Date.now() - oldest)}前`;
   const out = [`你和 ${t.who} 说过 ${t.total} 句，下面是最新的 ${t.lines.length} 句${age}：`];
   for (const line of t.lines) {
-    out.push(`  ${line.dir === "out" ? "你" : "对方"}：${excerpt(line.text, 200)}`);
+    const back = line.quote?.text ? `（回：${excerpt(line.quote.text, 60)}）` : "";
+    out.push(`  ${line.dir === "out" ? "你" : "对方"}：${excerpt(line.text, 200)}${back}`);
   }
   out.push(`全部在 ${peoplePath}/${t.chat}.jsonl（${t.total} 句，${Math.round(t.bytes / 1024)} KB）。`);
   return out;

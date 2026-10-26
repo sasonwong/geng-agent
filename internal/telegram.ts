@@ -41,7 +41,12 @@ export interface TgMessage {
   sticker?: TgFileRef;
   voice?: TgFileRef;
   entities?: TgEntity[];
-  reply_to_message?: { from?: { id: number } };
+  reply_to_message?: {
+    message_id?: number;
+    from?: { id: number; username?: string; first_name?: string };
+    text?: string;
+    caption?: string;
+  };
   message_thread_id?: number;
 }
 
@@ -211,8 +216,13 @@ export function isReplyToBot(m: TgMessage, me: BotIdentity): boolean {
   return m.reply_to_message?.from?.id === me.id;
 }
 
+/** One spelling of a person's name, so a quote and a message never disagree. */
+export function nameOf(from?: { username?: string; first_name?: string }): string | null {
+  if (from?.username) return `telegram:@${from.username}`;
+  if (from?.first_name) return `telegram:${from.first_name}`;
+  return null;
+}
+
 export function senderName(m: TgMessage): string {
-  if (m.from?.username) return `telegram:@${m.from.username}`;
-  if (m.from?.first_name) return `telegram:${m.from.first_name}`;
-  return `telegram:${m.chat.id}`;
+  return nameOf(m.from) ?? `telegram:${m.chat.id}`;
 }

@@ -281,3 +281,30 @@ test("a window it opened is stated on the page, and vanishes when it has passed"
   const expired = f.input({ attention: { chats: [-1001234567890], untilMs: now - 1000 } });
   assert.doesNotMatch(buildPacket(expired), /你在听/);
 });
+
+test("a line that answers another one says so, without a lookup", () => {
+  const f = fixture();
+  const text = buildPacket(
+    f.input({
+      reason: "knock",
+      inbox: [{ id: "1", file: "x", at: "2026-03-02T09:00:00Z", text: "说的就是这句", from: "telegram:@you", chat: -100 }],
+      thread: {
+        who: "telegram:@you",
+        chat: -100,
+        total: 2,
+        bytes: 200,
+        lines: [
+          { at: "2026-03-02T08:00:00Z", dir: "out", text: "原文在这" },
+          {
+            at: "2026-03-02T09:00:00Z",
+            dir: "in",
+            text: "说的就是这句",
+            quote: { id: "-100-7", from: "telegram:@you", text: "原文在这" },
+          },
+        ],
+      },
+    }),
+  );
+  assert.match(text, /对方：说的就是这句（回：原文在这）/);
+  assert.match(text, /你：原文在这\n/);
+});

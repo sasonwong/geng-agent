@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { attentionActive, parseAttention } from "./attention.ts";
-import { quoteFor } from "./quote.ts";
+import { quoteFor, quotedOf } from "./quote.ts";
 import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
@@ -22,6 +22,7 @@ import {
   sendMessage,
   sendTyping,
   senderName,
+  nameOf,
   type BotConfig,
   type BotIdentity,
   type TgMessage,
@@ -312,6 +313,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
 
     const dir = decision.high ? p.inbox : p.inboxLow;
+    const quoted = quotedOf(message.chat.id, message.reply_to_message, nameOf);
     const id = `${message.chat.id}-${message.message_id}`;
     const at = new Date().toISOString();
     const file = join(dir, `${id}.json`);
@@ -326,6 +328,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       chat: message.chat.id,
       route: decision.reason,
       ...(att ? { attachments: [att] } : {}),
+      ...(quoted ? { quote: quoted } : {}),
     });
     // Only what was actually delivered: a message the policy chose not to forward must
     // not reappear later in the transcript.
@@ -338,6 +341,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         text: said,
         from: senderName(message),
         id,
+        ...(quoted ? { quote: quoted } : {}),
       });
     }
     log(
