@@ -19,6 +19,7 @@ function rpc(over: Partial<RpcResult>): RpcResult {
     finalText: "好",
     stats: null,
     interventions: [],
+    injections: [],
     stderrTail: "",
     durationMs: 1000,
     ...over,

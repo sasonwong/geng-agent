@@ -2,6 +2,6 @@
   "$schema": "https://pi.dev/schemas/settings.schema.json",
   "defaultProvider": "opencode-go",
   "defaultModel": "deepseek-v4.1-flash",
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "high",
   "packages": []
 }

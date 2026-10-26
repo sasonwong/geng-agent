@@ -2,6 +2,7 @@ import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { markSeen, peekInbox } from "./inbox.ts";
+import { freshForSteer, INJECT_CAP, injectionText } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -129,6 +130,7 @@ function logLine(
   }
   parts.push(`inbox=${inboxCount}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
+  if (r && r.injections.length > 0) parts.push(`inj=${r.injections.length}`);
   if (backup) parts.push(`backup=${backup.status}${backup.detail ? `(${backup.detail})` : ""}`);
   return parts.join(" ");
 }
@@ -317,7 +319,18 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     recordWake(paths, nowMs);
 
     const startedMs = Date.now();
+    // the page already showed these; only what arrives from here on is pushed in
+    const shown = new Set(inbox.map((m) => m.id));
+    const injected: { id: string; file: string; text: string; from?: string }[] = [];
     const result = await runWaking({
+      drain: () => {
+        const fresh = freshForSteer(peekInbox(paths.inbox), shown, INJECT_CAP - injected.length);
+        for (const m of fresh) {
+          shown.add(m.id); // do not hand it the same words twice
+          injected.push({ id: m.id, file: m.file, text: m.text, from: m.from });
+        }
+        return fresh.map(injectionText);
+      },
       command: buildCommand(paths, policy, sessionId, systemPrompt),
       instance: paths.instance,
       isDocker: policy.runner === "docker",
@@ -347,8 +360,12 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     const symptom = classify(result);
     // Only a wake that ran to the end has read them. Anything else leaves the messages
     // in place so the next wake hands them over again rather than losing them.
-    if (symptom === "ok" && inbox.length > 0) {
-      markSeen([paths.inbox, paths.inboxLow], paths.inboxSeen, inbox.map((m) => m.file));
+    if (symptom === "ok" && inbox.length + injected.length > 0) {
+      markSeen(
+        [paths.inbox, paths.inboxLow],
+        paths.inboxSeen,
+        [...inbox.map((m) => m.file), ...injected.map((m) => m.file)],
+      );
     }
     escalation = advance(escalation, symptom, result);
     saveEscalation(paths, escalation);

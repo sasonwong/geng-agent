@@ -33,6 +33,8 @@ export interface RpcResult {
   finalText: string;
   stats: SessionStats | null;
   interventions: string[];
+  /** Messages pushed into this waking while it ran. */
+  injections: string[];
   stderrTail: string;
   durationMs: number;
 }
@@ -44,6 +46,8 @@ export interface RpcOptions {
   timeoutMs: number;
   prompt: string;
   repeatThreshold: number;
+  /** Messages that arrived mid-waking, polled while it runs. */
+  drain?: () => string[];
 }
 
 const OUTPUT_CAP = 16 * 1024;
@@ -131,6 +135,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   let compacted = false;
   let finalText = "";
   let stats: SessionStats | null = null;
+  const injections: string[] = [];
   let resolveSettled: () => void = () => {};
   const pending = new Map<string, (data: unknown) => void>();
   let nextId = 0;
@@ -248,7 +253,19 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     resolveSettled();
   }
 
+  // A live message lands after the current turn's tool calls, before the next model
+  // call: exactly the gap between actions. It cannot cut into a running bash command.
+  const drainTimer = setInterval(() => {
+    if (settled || timedOut || startFailed || !o.drain) return;
+    for (const message of o.drain()) {
+      fire({ type: "steer", message });
+      injections.push(message);
+    }
+  }, 2_000);
+  drainTimer.unref();
+
   await settledPromise;
+  clearInterval(drainTimer);
 
   if (!timedOut && !startFailed) {
     const text = (await send({ type: "get_last_assistant_text" })) as
@@ -294,6 +311,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     finalText,
     stats,
     interventions,
+    injections,
     stderrTail,
     durationMs: Date.now() - started,
   };
