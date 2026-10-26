@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+
 /**
  * A message that arrives while a waking is running can be handed to it mid-flight
  * instead of waiting for the next one. Only messages the gateway marked as a knock:
@@ -34,4 +36,32 @@ export function deliveredFiles(
   records: { read: boolean }[],
 ): string[] {
   return injected.filter((_, i) => records[i]?.read === true).map((m) => m.file);
+}
+
+/**
+ * What it said when it answered without calling `say`. A reply to whoever knocked needs
+ * no tool — but only the tool used to write anything, so an answer written as plain text
+ * used to vanish.
+ */
+export function spokenOutbox(
+  reason: string,
+  finalText: string,
+  chat: number | undefined,
+  sayHappened: boolean,
+): { id: string; messages: string[]; chat: number } | null {
+  if (reason !== "knock") return null; // nobody is waiting on a timer wake
+  if (sayHappened) return null; // it already spoke; the last text is a summary
+  if (typeof chat !== "number") return null;
+  const text = finalText.trim();
+  if (text === "") return null;
+  return { id: `${Date.now()}-spoken`, messages: [text], chat };
+}
+
+/** How many messages are waiting to go out; used only to notice that one was written. */
+export function countOutbox(dir: string, count = 0): number {
+  try {
+    return readdirSync(dir).filter((f) => f.endsWith(".json")).length;
+  } catch {
+    return count;
+  }
 }

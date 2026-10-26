@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "../internal/inject.ts";
+import { countOutbox, deliveredFiles, freshForSteer, INJECT_CAP, injectionText, spokenOutbox } from "../internal/inject.ts";
 
 const msg = (id: string) => ({ id, file: `${id}.json`, text: `话 ${id}`, from: "telegram:@x" });
 
@@ -28,4 +28,20 @@ test("an injection no turn followed is not counted as delivered", () => {
   assert.deepEqual(deliveredFiles(injected, [{ read: true }, { read: false }]), ["a.json"]);
   assert.deepEqual(deliveredFiles(injected, []), []);
   assert.deepEqual(deliveredFiles([], [{ read: true }]), []);
+});
+
+test("an answer written without say still goes to whoever knocked", () => {
+  const out = spokenOutbox("knock", " 醒了五十次 ", 111, false);
+  assert.deepEqual(out?.messages, ["醒了五十次"]);
+  assert.equal(out?.chat, 111);
+  // it already spoke through say: the trailing text is a summary, not a message
+  assert.equal(spokenOutbox("knock", "说完了", 111, true), null);
+  // nobody is waiting on a timer wake
+  assert.equal(spokenOutbox("timer", "今天想到一件事", 111, false), null);
+  assert.equal(spokenOutbox("knock", "", 111, false), null);
+  assert.equal(spokenOutbox("knock", "在", undefined, false), null);
+});
+
+test("an outbox count tolerates a missing directory", () => {
+  assert.equal(countOutbox("/nonexistent-geng-outbox"), 0);
 });
