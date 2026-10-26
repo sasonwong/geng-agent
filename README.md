@@ -77,10 +77,33 @@ echo '{"text":"群里的一句闲话"}'    > data/alice/inbox/low/001.json      
 ```json
 {
   "ops":   { "token": "123456:AAA", "chat": 123456789 },
-  "alice": { "token": "234567:BBB", "listen": "all" },
+  "alice": { "token": "234567:BBB", "listen": "all", "allow": [123456789, 987654321] },
   "bob":   { "token": "345678:CCC", "listen": "mentions" }
 }
 ```
+
+#### 白名单（`allow`）
+
+**只让名单上的人碰它**，防滥用。不在名单里的人的私聊、@、回复、群里的闲话——**一律丢弃**，
+连 `inbox/low` 都不进：不叫醒它、不占它磁盘、不下载对方发来的文件，也不会在 bot 还是新的
+时候把陌生群学成"默认发往的地方"。
+
+- **不写 `allow` = 不限制**（默认，和以前一样）；**`allow: []` = 谁都不能进来**（只剩它自己的闹钟）
+- **bot 也要写进去。** 另一个实例的 @ 也是 `from.id`，漏了这条，她俩的对话会安静地变哑
+- **别把自己漏了。** 名单里没有你，你说话它不醒，而且不报错——所以启动行会打印
+  `allow=2 人`，`0 人` 和 `不限` 一眼能看出来
+
+怎么查 id：先让它收到那个人一句话，然后
+
+```bash
+cat data/_gateway/chats.json     # 私聊里 chat id 就是对方的 user id
+cat data/alice/inbox/*.json      # 里面有 from 和 chat
+```
+
+被丢掉的时候 gateway 日志会写一行 `alice ← guest 123456789（没送）`，那个数字就是该粘进
+`allow` 的值。
+
+加群功能不受影响：bot 仍然可以被拉进任何群，只是群里若没有名单上的人说话，它对那个群完全无感。
 
 ```bash
 node cmd/geng/index.ts gateway      # 前台跑
