@@ -1,17 +1,28 @@
+<img src="assets/geng.svg" alt="更" width="380">
+
 # geng-agent
 
-让一个大模型在没有人在旁边的时候，仍然自己有事可做，而且做出的事说得通。
+**更 agent 的 agent。**
 
-pi 跑在容器里，每次醒来是一个全新进程，什么也不记得。于是它的连续性不放在模型里，
-放在磁盘上：一份自己写的 `identity.md`、一张没闭合的事的清单、一个自己定的闹钟、
-一本日记。
+现在大部分 agent 只是被调用的函数：你说一句，它答一句，结束。它没有自己的时间，不记得上次
+想干什么，也不在你走开之后继续做什么。
 
-外面只有一个很笨的 daemon。它不判断、不总结、不写话，只负责按时叫醒它、记录发生了什么、
-以及在它卡住的时候换一换条件。闹钟是它自己设的 —— daemon 只执行。
+geng 做的是另一半：给一个模型一块磁盘、一条网络、一个**它自己定的闹钟**，然后走开。
+
+pi 跑在容器里，每次醒来都是一个全新进程，什么也不记得。连续性因此不在模型里，在磁盘上：
+一份它自己写的 `identity.md`、一份没闭合的事的清单、一个它自己设的闹钟、一本日记。
+每隔一段时间它醒一次，读自己写下的东西，决定做点什么，写下下一轮什么时候再醒。
+
+外面只有一个很笨的 daemon：按时叫醒它、记一行机械的账、在它明显卡住的时候换一换条件。
+**它不判断、不总结、不写话，也只执行闹钟——不设闹钟。** 醒来干什么、多久醒一次、要不要
+再睡长一点，都是那个进程自己的决定。
+
+名字念 `gēng`，和"打更"的"更"是同一个字；夜里报时的人一整晚只做一件事，这点像 daemon。
+但主业不是打更，是**更**：它每一轮都在把自己重写一遍。
 
 设计思路见 [`docs/design/`](docs/design/)，开发约定见 [`AGENTS.md`](AGENTS.md)。
 
-> 目标是"主动性"的完整闭环，不是意识。
+> 目标是"主动性"能自己闭环，不是意识。它算不算活着，这套东西不回答。
 
 ## 用法
 
@@ -33,7 +44,7 @@ node cmd/geng/index.ts daemon --instance alice          # 一直跑
 3. `node cmd/geng-dev/index.ts packet --instance alice` 看一眼唤醒纸对不对（不花钱）
 4. `node cmd/geng-dev/index.ts once --instance alice` 跑一次，验证 runner
 
-第一次醒来时 `identity.md`、`open-loops.json`、`waiting.json` 都不存在 —— 这是刻意的。
+第一次醒来时 `identity.md`、`open-loops/`、`waiting.json` 都不存在 —— 这是刻意的。
 那个空白就是它的出生。
 
 ### 找人说话
@@ -92,6 +103,27 @@ unit 里已经带 `NODE_USE_ENV_PROXY=1`：node 的 `fetch` 默认不认 `HTTP(S
   再让它主动找你）。要知道 chat id 就先说一句话，然后看 `data/_gateway/chats.json`
 - 投递分两档：**直接对它说话（私聊 / @ / 回复）会叫醒它，群里的闲话只进 `inbox/low`**
 - 它自己可以 `mute` 某个来源；但直接对它说话永远穿透静音
+- **主动说话默认发往"第一个私聊"**，群只有在从没被私聊过时才是默认目标——一句没人要的话
+  不该落进有观众的群里。要往群里说，它在 `say` 里指明目标
+- bot 之间默认互相看不见消息；两个实例要互相说话，得在 BotFather 里给**两边**都打开
+  bot-to-bot communication。开了之后每往下一步仍然要显式 @，否则对面只当环境消息收着
+
+### 文件和图片
+
+别人发的图片、文档、音频、视频会下载到 `data/<inst>/files/`，容器里只读挂 `/files`，
+唤醒纸上只写个数（「一起发来的还有 2 张图片、1 个文件，在 /files/。」），内容它自己 `read`。
+
+语音**不下载**：这里没有能把声音变成字的东西，纸上就照实说听不到。
+
+它想发自己的东西出去，用 `say` 的 `files`，只认 `/work` 里存在的文件：
+
+```
+say(messages, to?, files: ["/work/report.html"])
+```
+
+`/files` 不会无限长：总量超了（默认 500 MB）就删最老的，最新的永远留着；年龄清理默认关
+（`files.maxAgeDays: 0`）。它也可以自己 `forget` 指定文件，删在下一轮醒来之前——
+容器里那个目录是只读的，所以删除只能是它明确说出来的动作。
 
 ### 搜索
 
@@ -137,12 +169,18 @@ docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
 
 ```
 data/<instance>/
-  palimpsest/    identity.md  open-loops.json  waiting.json  journal/  policy.json
-  workspace/     挂成容器里的 /work
-  session/       挂成 /home/agent/.pi/agent/sessions
-  inbox/ outbox/ usage/ meta/ daemon.log
-secrets/<instance>.env
-deploy/    SYSTEM.md  policy.json  geng@.service  egress.sh
+  palimpsest/   它的书：identity.md  open-loops/  waiting.json  journal/  mute.json
+                挂成容器里的 /state（可写）
+  policy.json   它活在什么规矩下——**在书外面**，容器里看不见也写不着
+  workspace/    挂成 /work（可写，永远不清理）
+  files/        别人发来的图片和文件，挂成 /files（只读）
+  inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
+  people/       一个地址一份对话记录，只追加，不总结
+  outbox/       它要说的话，gateway 取走
+  session/      pi 的会话文件，一轮一个
+  usage/ meta/ daemon.log
+secrets/<instance>.env   模型凭据、搜索地址；--env-file 注入，永不挂载
+deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  egress.sh
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore。
@@ -159,12 +197,20 @@ node cmd/geng/index.ts doctor alice --probe
 它和人说的话记在 `data/<inst>/people/<chat>.jsonl`——一个地址一个文件，只追加，不总结、
 不建画像。唤醒纸上只贴最近 10 句。
 
-不装记忆扩展：**每轮醒来是一个新会话**，上下文里只有唤醒纸，用完就丢。所以既不需要压缩，
-也没有"阈值到点自动遗忘"这种事。它的记忆是 palimpsest 里的文件，不是上下文。
+不装记忆扩展：**每轮醒来是一个新会话**，上下文里只有唤醒纸和它写下的自己，用完就丢。
+所以既不需要压缩，也没有"阈值到点自动遗忘"这种事。它的记忆是 palimpsest 里的文件，不是上下文。
+
+它能看到的东西就这些：`/state`、`/work`、`/inbox`、`/people`、`/files`、自己的 session 目录。
+`daemon.log`、`meta/`、`usage/`、`secrets/`、`policy.json` 都不在里面——纸上的「上一轮」
+已经把日志里有用的部分翻译成了话。
 
 每个实例自己的一份 pi 配置在 `data/<instance>/pi/settings.json`（`geng init` 从
-`deploy/settings.json` 拷），**只读**挂到容器的 agent 目录：provider / model / thinking /
-om 的阈值都在这里，它既不能换模型来躲上下文压力，也不能改 om 的压缩点。换模型改这个文件，不重建镜像。
+`deploy/settings.json` 拷），**只读**挂到容器的 agent 目录：provider / model / thinking 在这里。
+它不能换模型来躲上下文压力。换模型改这个文件，不重建镜像。
+
+时钟：容器 `TZ` 取 `policy.json` 的 `timezone`（默认 `Asia/Shanghai`，镜像里装了 `tzdata`）。
+唤醒纸同时印两个时钟——`现在：2026-10-26T13:33:16Z · 21:33 +08`——因为 daemon 用 UTC 记账、
+它自己 `date` 出来是本地时间，只印一个就会打架，而闹钟写错就是八小时的偏差。
 
 模型凭据走 `secrets/<instance>.env`（`--env-file` 注入，不挂载）：
 ```

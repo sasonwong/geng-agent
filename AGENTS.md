@@ -71,6 +71,25 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 6. 迁移的测试对象是**真实数据的副本**（`rsync -a data/<inst>/ /tmp/copy/` 再跑 doctor），
    不是手写的 fixture——fixture 总会漏掉真实数据里恰好存在的那个前提。
 
+## 路径与目录
+
+- 每一条能写进代码的路径都从 `internal/paths.ts` 来。渲染进唤醒纸的路径一律**注入**
+  （`statePath`、`inboxPath`、`filesPath`…），不在模板里写死——本地 runner 和 docker 的
+  路径不一样，写死的那一半会在另一半上指向不存在的目录。
+- 要建的目录只有一份清单：`requiredDirs(p)`。`init` 和 daemon 都调它。两份列表会在加目录
+  的时候悄悄分叉，症状是"init 建了、daemon 没建"。
+- **预览不能碰状态**：`--dry`、`geng-dev packet` 这类路径不写 lastwake、不 append daemon.log、
+  不动收件箱（用 `peekInbox`，不用会搬文件的 `takeInbox`）。预览不是一轮，这条靠代码路径保证，
+  不靠自觉。
+
+## policy 字段
+
+加一个字段等于同时改四处：`defaultPolicy()`、`loadPolicy()` 的校验、`deploy/policy.json`、
+以及文档里的表。少一处就会出现"默认有、老实例没有"或"文档说有、代码不认"。
+
+只有时机和阈值进可协商白名单（`proposal.ts` 的 clamp 表）；runner、容器限额、网络、超时、
+`backup.enabled`、`files.*`、`timezone` 都不进——那是框，不是设置。
+
 ## 收件箱的可见性
 
 消息在送达之前一直算未读：`markSeen` 只标记**这一轮真正交给它的**（唤醒纸上的 + 运行中注入的）。
@@ -87,10 +106,6 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 - `docs/design/` 只写设计思路和下一步，不写"已完成"
 - 本文件只写怎么开发，不写既成事实
 - 全项目不写开发日志
-
-## 提交
-
-提交信息只描述相对于父提交的 diff，不叙述跨分支的对比。
 
 ## 提交
 

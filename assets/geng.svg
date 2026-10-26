@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-label="更">
+  <title>更</title>
+  <!-- 楷体没有跨平台保证，所以按常见名排一串；都没有时退回系统衬线体，字形仍然是这个字。
+       浅色底是有意的：GitHub 深色模式下透明背景上的墨色字会看不见。 -->
+  <style>
+    .ink { fill: #1b1a17; }
+    .kai { font-family: "Kaiti SC", "STKaiti", "KaiTi", "楷体", "AR PL UKai CN", "AR PL KaitiM GB", "Noto Serif CJK SC", serif; }
+  </style>
+  <rect width="1200" height="360" fill="#f6f3ec"/>
+  <text x="600" y="266" class="kai ink" font-size="248" text-anchor="middle" letter-spacing="8">更</text>
+  <line x1="470" y1="312" x2="730" y2="312" stroke="#1b1a17" stroke-opacity="0.35" stroke-width="2"/>
+</svg>
