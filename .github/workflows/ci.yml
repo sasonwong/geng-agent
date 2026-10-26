@@ -1,0 +1,21 @@
+# The one check that is not self-reported: it runs the same two gates a human runs
+# (`npm run check`, `npm test`) on a machine that has no stake in the answer.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      # tests that need docker or rustic skip themselves; nothing here needs them
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
