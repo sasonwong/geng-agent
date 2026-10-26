@@ -50,6 +50,13 @@ export function peekInbox(dir: string): InboxMsg[] {
  * Anything unparseable is quarantined as *.bad — one broken message must never block
  * a whole waking.
  */
+/** The newest knock, for the sake of showing "working on it" in the right chat. */
+export function newestKnock<T extends { at?: string; chat?: number }>(messages: T[]): T | null {
+  const withChat = messages.filter((m) => typeof m.chat === "number");
+  if (withChat.length === 0) return null;
+  return withChat.reduce((a, b) => ((Date.parse(b.at ?? "") || 0) > (Date.parse(a.at ?? "") || 0) ? b : a));
+}
+
 export function markSeen(dirs: string[], seenDir: string, files: string[]): void {
   for (const file of files) {
     for (const dir of dirs) {

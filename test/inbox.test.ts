@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { markSeen, peekInbox } from "../internal/inbox.ts";
+import { markSeen, newestKnock, peekInbox } from "../internal/inbox.ts";
 
 function inbox(): { dir: string; seen: string } {
   const base = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -62,4 +62,14 @@ test("an empty-text message is not handed over, and stays where it is", () => {
   assert.equal(peekInbox(dir).length, 0);
   markSeen([dir], seen, ["001.json"]);
   assert.ok(readdirSync(seen).some((f) => f.endsWith(".bad")));
+});
+
+test("the typing indicator follows the newest knock, in its own chat", () => {
+  const msgs = [
+    { id: "1", at: "2026-03-02T08:00:00Z", chat: 111 },
+    { id: "2", at: "2026-03-02T08:05:00Z", chat: -222 },
+    { id: "3", at: "2026-03-02T08:01:00Z" },
+  ];
+  assert.equal(newestKnock(msgs)?.id, "2");
+  assert.equal(newestKnock([{ id: "4", at: "2026-03-02T08:00:00Z" }]), null);
 });

@@ -4,6 +4,7 @@ import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
 import { appendSaid } from "./people.ts";
+import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -13,6 +14,7 @@ import {
   isMentioned,
   isReplyToBot,
   sendMessage,
+  sendTyping,
   senderName,
   type BotConfig,
   type BotIdentity,
@@ -289,9 +291,41 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
   };
 
+  // "working on it" is worth 4 seconds of a person's patience at a time; the state is
+  // deliberately in memory, because a gateway restart should just stop typing.
+  const typedAt = new Map<string, number>();
+  const TYPING_REFRESH_MS = 4_000;
+
+  const showTyping = async (key: string): Promise<void> => {
+    const p = instanceData(key);
+    const cfg = bots[key];
+    if (!p || !cfg) return;
+    // intent.json exists exactly while a waking is in flight, and only then is anybody
+    // waiting for an answer
+    const intent = readJson<{ startedAt?: string } | null>(p.intent, null);
+    if (intent === null) return;
+    const since = Date.parse(intent.startedAt ?? "");
+    if (Number.isFinite(since) && Date.now() - since > 30 * 60_000) return; // a dead cycle must not type forever
+    const knock = newestKnock(peekInbox(p.inbox));
+    if (!knock || typeof knock.chat !== "number") return;
+    const last = typedAt.get(key) ?? 0;
+    if (Date.now() - last < TYPING_REFRESH_MS) return;
+    typedAt.set(key, Date.now());
+    try {
+      await sendTyping(cfg.token, knock.chat);
+    } catch {
+      // a status is not worth failing the sweep over
+    }
+  };
+
   const sweep = async (): Promise<void> => {
     for (;;) {
       for (const key of keys) {
+        try {
+          await showTyping(key);
+        } catch {
+          // ignore
+        }
         const dir = key === "ops" ? outboxDir(join(root, "data", "_ops")) : outboxDir(join(root, "data", key));
         for (const item of readOutbox(dir)) {
           if (item.messages.length === 0) {

@@ -110,6 +110,14 @@ export async function sendMessage(
   }
 }
 
+/**
+ * "I am working on it" for up to five seconds; clients clear it the moment a message
+ * arrives. Not a read receipt — the Bot API has no such thing for bots.
+ */
+export async function sendTyping(token: string, chat: number): Promise<void> {
+  await call(token, "sendChatAction", { chat_id: chat, action: "typing" });
+}
+
 export function isMentioned(m: TgMessage, me: BotIdentity): boolean {
   const text = m.text ?? "";
   for (const e of m.entities ?? []) {
