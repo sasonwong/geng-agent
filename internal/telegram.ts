@@ -5,6 +5,14 @@ import { basename, dirname } from "node:path";
 
 export interface BotConfig {
   token: string;
+  /**
+   * Who may reach it at all — Telegram user ids, bots included. Absent means everybody
+   * (the old behaviour); an empty list means nobody but its own alarms.
+   *
+   * This is a pure whitelist: anyone else is dropped before the chat is even recorded,
+   * so a stranger can neither wake it nor leave words in its inbox nor decide its home.
+   */
+  allow?: number[];
   /** Which inbound messages are forwarded at all. Direct address always wins. */
   listen?: "all" | "mentions";
   /** Where to send unprompted messages; learned from the first inbound chat if absent. */

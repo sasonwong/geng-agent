@@ -9,35 +9,35 @@ import { writeJson } from "../internal/state.ts";
 import { makePaths } from "../internal/paths.ts";
 
 test("direct address is always high and always delivered", () => {
-  assert.deepEqual(route({ isDm: true, isMention: false, isReply: false, listen: "mentions", muted: true, listening: false }), {
+  assert.deepEqual(route({ isDm: true, isMention: false, isReply: false, listen: "mentions", muted: true, listening: false, allowed: true }), {
     deliver: true,
     high: true,
     reason: "dm",
   });
   assert.equal(
-    route({ isDm: false, isMention: true, isReply: false, listen: "mentions", muted: true, listening: false }).high,
+    route({ isDm: false, isMention: true, isReply: false, listen: "mentions", muted: true, listening: false, allowed: true }).high,
     true,
   );
   assert.equal(
-    route({ isDm: false, isMention: false, isReply: true, listen: "mentions", muted: false, listening: false }).reason,
+    route({ isDm: false, isMention: false, isReply: true, listen: "mentions", muted: false, listening: false, allowed: true }).reason,
     "reply",
   );
 });
 
 test("ambient group chatter is low, and a mute only silences that", () => {
-  assert.deepEqual(route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: false, listening: false }), {
+  assert.deepEqual(route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: false, listening: false, allowed: true }), {
     deliver: true,
     high: false,
     reason: "ambient",
   });
   assert.equal(
-    route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: true, listening: false }).reason,
+    route({ isDm: false, isMention: false, isReply: false, listen: "all", muted: true, listening: false, allowed: true }).reason,
     "muted",
   );
 });
 
 test("a window it asked for turns plain talk into a knock", () => {
-  assert.deepEqual(route({ isDm: false, isMention: false, isReply: false, listen: "mentions", muted: true, listening: true }), {
+  assert.deepEqual(route({ isDm: false, isMention: false, isReply: false, listen: "mentions", muted: true, listening: true, allowed: true }), {
     deliver: true,
     high: true,
     reason: "listen",
@@ -46,7 +46,7 @@ test("a window it asked for turns plain talk into a knock", () => {
 
 test("listen=mentions drops ambient entirely", () => {
   assert.equal(
-    route({ isDm: false, isMention: false, isReply: false, listen: "mentions", muted: false, listening: false }).deliver,
+    route({ isDm: false, isMention: false, isReply: false, listen: "mentions", muted: false, listening: false, allowed: true }).deliver,
     false,
   );
 });
@@ -142,4 +142,19 @@ test("a quote only applies inside the chat it came from", async () => {
   // an item written by an older/broken sender still reads as "no quote"
   writeJson(join(paths.outbox, "2-y.json"), { id: "2-y", messages: ["哈"], replyTo: "151" });
   assert.equal(readOutbox(paths.outbox)[1]?.replyTo, undefined);
+});
+
+test("a pure whitelist drops a stranger before anything is kept", () => {
+  for (const shape of [
+    { isDm: true, isMention: false, isReply: false },   // a DM is direct address
+    { isDm: false, isMention: true, isReply: false },    // so is an @
+    { isDm: false, isMention: false, isReply: true },     // and so is a reply
+    { isDm: false, isMention: false, isReply: false },    // and plain group chatter
+  ]) {
+    assert.deepEqual(
+      route({ ...shape, listen: "all", muted: false, listening: true, allowed: false }),
+      { deliver: false, high: false, reason: "guest" },
+      JSON.stringify(shape),
+    );
+  }
 });

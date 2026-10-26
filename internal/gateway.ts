@@ -29,9 +29,11 @@ import {
   type TgUpdate,
 } from "./telegram.ts";
 
-export type RouteReason = "dm" | "mention" | "reply" | "listen" | "ambient" | "muted" | "skip";
+export type RouteReason = "dm" | "mention" | "reply" | "listen" | "ambient" | "muted" | "guest" | "skip";
 
 export interface RouteInput {
+  /** False: not on the whitelist, so nothing about it is kept at all. */
+  allowed: boolean;
   isDm: boolean;
   isMention: boolean;
   isReply: boolean;
@@ -53,6 +55,9 @@ export interface Route {
  * delivery policy: high frequency calls it, low frequency waits for it.
  */
 export function route(i: RouteInput): Route {
+  // before everything else, including silent-looking ambient: a stranger must not even
+  // be able to land in the pull bucket
+  if (!i.allowed) return { deliver: false, high: false, reason: "guest" };
   if (i.isDm) return { deliver: true, high: true, reason: "dm" };
   if (i.isMention) return { deliver: true, high: true, reason: "mention" };
   if (i.isReply) return { deliver: true, high: true, reason: "reply" };
@@ -248,6 +253,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const handleUpdate = async (key: string, me: BotIdentity, update: TgUpdate): Promise<void> => {
     const message = update.message;
     if (!message) return;
+    const cfg = bots[key];
+    if (!cfg) return;
+    // A pure whitelist, checked before anything else: a stranger must not be able to wake
+    // it, fill its inbox, download a file into /files, or — while the bot is new — become
+    // the home that unprompted words are later sent to.
+    const allowed = !cfg.allow || cfg.allow.includes(message.from?.id ?? 0);
+    if (!allowed) {
+      // the id is printed because it is exactly what has to be pasted into bots.json
+      log(`${key} ← guest ${message.from?.id ?? "?"}（没送）`);
+      return;
+    }
     // text, or a caption on an attachment; anything else still has to be accounted for
     const words = message.text ?? message.caption ?? "";
     const att = attachmentOf(message);
@@ -276,14 +292,13 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       return;
     }
 
-    const cfg = bots[key];
-    if (!cfg) return;
     const listen = cfg.listen ?? "all";
     const mutes = readMutes(join(p.palimpsest, "mute.json"), Date.now());
     const attention = parseAttention(readJson(join(p.palimpsest, "attention.json"), null));
     const muted = isMuted(mutes, { chatId: message.chat.id, isDm: message.chat.type === "private" });
 
     const decision = route({
+      allowed,
       isDm: message.chat.type === "private",
       isMention: isMentioned(message, me),
       isReply: isReplyToBot(message, me),
@@ -353,8 +368,16 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const cfg = bots[key];
     if (!cfg) return;
     const me = await getMe(cfg.token);
+    // the whitelist is printed because a wrong one is silent: too few and nobody can
+    // wake it, one missing id and its conversation partner quietly stops reaching it
+    const allow =
+      cfg.allow === undefined
+        ? "allow=不限"
+        : cfg.allow.length === 0
+          ? "allow=0（谁都进不来）"
+          : `allow=${cfg.allow.length} 人`;
     log(
-      `${key} 上线：@${me.username}${cfg.listen ? ` listen=${cfg.listen}` : ""}` +
+      `${key} 上线：@${me.username}${cfg.listen ? ` listen=${cfg.listen}` : ""} ${allow}` +
         ` home=${cfg.chat ?? chats[key]?.home ?? "未知"}`,
     );
     for (;;) {
