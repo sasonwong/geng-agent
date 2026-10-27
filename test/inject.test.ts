@@ -29,3 +29,14 @@ test("an injection no turn followed is not counted as delivered", () => {
   assert.deepEqual(deliveredFiles(injected, []), []);
   assert.deepEqual(deliveredFiles([], [{ read: true }]), []);
 });
+
+test("a message that is only a file still says something", () => {
+  const said = injectionText({
+    id: "9",
+    file: "9.json",
+    text: "",
+    from: "telegram:@x",
+    attachments: [{ kind: "document", path: "/files/9.md" }],
+  });
+  assert.equal(said, "[刚收到] telegram:@x：没写字，只带了 1 个附件，去看一眼。");
+});
