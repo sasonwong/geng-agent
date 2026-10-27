@@ -43,7 +43,7 @@ test("a message that is only a file still says something", () => {
     from: "telegram:@x",
     attachments: [{ kind: "document", path: "/files/9.md" }],
   });
-  assert.equal(said, "[刚收到] telegram:@x：没写字，只带了 1 个附件。");
+  assert.equal(said, "[刚收到] telegram:@x：没写字，只带了 1个文件。");
 });
 
 test("an inbox message reaches the injected line with its attachment intact", () => {
@@ -59,5 +59,12 @@ test("an inbox message reaches the injected line with its attachment intact", ()
   const handed = freshForSteer(peekInbox(dir), new Set(), INJECT_CAP);
   assert.equal(handed.length, 1);
   assert.deepEqual(handed[0]?.attachments, [{ kind: "document", path: "/files/1-9.md" }]);
-  assert.equal(injectionText(handed[0]!), "[刚收到] telegram:@x：没写字，只带了 1 个附件。");
+  assert.equal(injectionText(handed[0]!), "[刚收到] telegram:@x：没写字，只带了 1个文件。");
+});
+
+test("a voice note says it cannot be listened to, because it never lands in /files", () => {
+  // the only attachment that is deliberately not fetched: a bare count would send it
+  // looking for a file that does not exist
+  const said = injectionText({ id: "9", file: "9.json", text: "", from: "telegram:@x", attachments: [{ kind: "voice", note: "没有转写" }] });
+  assert.equal(said, "[刚收到] telegram:@x：没写字，只带了 1条语音（没有转写）。");
 });

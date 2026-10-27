@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { attachmentOf, hostPathForWorkPath, safeName } from "../internal/attach.ts";
+import { attachmentOf, attachmentWords, hostPathForWorkPath, placeholderFor, safeName } from "../internal/attach.ts";
 
 test("a photo uses its largest size, and a document keeps its own name", () => {
   const photo = attachmentOf({
@@ -55,4 +55,19 @@ test("only /work files can be sent out, and only if they exist", () => {
   assert.equal(hostPathForWorkPath(root, "/state/identity.md"), null);
   assert.equal(hostPathForWorkPath(root, "/work/../policy.json"), null);
   assert.equal(hostPathForWorkPath(root, "/work/missing.txt"), null);
+});
+
+test("an attachment is said in words, and an unknown kind does not become undefined", () => {
+  assert.equal(attachmentWords({ kind: "document" }), "1个文件");
+  assert.equal(attachmentWords({ kind: "photo" }), "1张图片");
+  // the note is the only place "this cannot be listened to" lives
+  assert.equal(attachmentWords({ kind: "voice", note: "没有转写" }), "1条语音（没有转写）");
+  // a kind from a newer Telegram than this code must not print `1undefined`
+  assert.equal(attachmentWords({ kind: "brand_new_kind" }), "1个文件");
+});
+
+test("the transcript placeholder names the thing, or says there was nothing", () => {
+  assert.equal(placeholderFor([]), "[空消息]");
+  assert.equal(placeholderFor([{ kind: "document" }]), "[1个文件]");
+  assert.equal(placeholderFor([{ kind: "voice", note: "没有转写" }]), "[1条语音（没有转写）]");
 });

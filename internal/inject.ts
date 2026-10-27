@@ -1,3 +1,5 @@
+import { attachmentWords } from "./attach.ts";
+
 /**
  * A message that arrives while a waking is running can be handed to it mid-flight
  * instead of waiting for the next one. Only messages the gateway marked as a knock:
@@ -27,8 +29,9 @@ export function injectionText(m: LiveMsg): string {
   if (text === "") {
     // a photo, a document or a voice note often comes with nothing typed; "empty"
     // would read as a glitch rather than as something that needs a look
-    const carried = m.attachments?.length ?? 0;
-    return `[刚收到] ${who}：没写字，只带了 ${carried} 个附件。`;
+    const carried = m.attachments ?? [];
+    const what = carried.length === 1 ? attachmentWords(carried[0]!) : `${carried.length} 个附件`;
+    return `[刚收到] ${who}：没写字，只带了 ${what}。`;
   }
   return `[刚收到] ${who}：${text.length > 400 ? text.slice(0, 400) + "…" : text}`;
 }
