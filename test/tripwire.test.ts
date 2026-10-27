@@ -21,7 +21,7 @@ test("too fast trips, and the pause holds for its whole length", () => {
 
 test("retrying while paused never inflates the window — that was the lockup", () => {
   // the sweep retries an undelivered item every two seconds; if those retries counted,
-  // the window stayed over the limit and the queue never drained (1001 → 2147 → 2379)
+  // the window stayed over the limit and the queue never drained
   const t = new Tripwire({ ...opts, repeat: 999 });
   const start = 1_000_000;
   for (let i = 0; i < 8; i++) t.check(["hi"], start + i * 500);

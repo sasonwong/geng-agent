@@ -28,10 +28,10 @@ test("the quoted message comes through with its words, not just its id", () => {
   const chat = -1001234567890;
   const q = quotedOf(
     chat,
-    { message_id: 8, from: { username: "sasonwong" }, text: "  鱿鱼和年糕\n都挑食 " },
+    { message_id: 8, from: { username: "someone_else" }, text: "  原文在这\n你说过 " },
     nameOf,
   );
-  assert.deepEqual(q, { id: "-1001234567890-8", from: "telegram:@sasonwong", text: "鱿鱼和年糕 都挑食" });
+  assert.deepEqual(q, { id: "-1001234567890-8", from: "telegram:@someone_else", text: "原文在这 你说过" });
   // a photo carries its words in the caption
   assert.equal(quotedOf(chat, { message_id: 9, caption: "图" }, nameOf)?.text, "图");
   // nothing to point at → no quote at all

@@ -288,26 +288,26 @@ test("a line that answers another one says so, without a lookup", () => {
   const text = buildPacket(
     f.input({
       reason: "knock",
-      inbox: [{ id: "1", file: "x", at: "2026-03-02T09:00:00Z", text: "年糕不吃那个", from: "telegram:@you", chat: -100 }],
+      inbox: [{ id: "1", file: "x", at: "2026-03-02T09:00:00Z", text: "说的就是这句", from: "telegram:@you", chat: -100 }],
       thread: {
         who: "telegram:@you",
         chat: -100,
         total: 2,
         bytes: 200,
         lines: [
-          { at: "2026-03-02T08:00:00Z", dir: "out", text: "鱿鱼和年糕都挑食" },
+          { at: "2026-03-02T08:00:00Z", dir: "out", text: "原文在这" },
           {
             at: "2026-03-02T09:00:00Z",
             dir: "in",
-            text: "年糕不吃那个",
-            quote: { id: "-100-7", from: "telegram:@you", text: "鱿鱼和年糕都挑食" },
+            text: "说的就是这句",
+            quote: { id: "-100-7", from: "telegram:@you", text: "原文在这" },
           },
         ],
       },
     }),
   );
-  assert.match(text, /对方：年糕不吃那个（回：鱿鱼和年糕都挑食）/);
-  assert.match(text, /你：鱿鱼和年糕都挑食\n/);
+  assert.match(text, /对方：说的就是这句（回：原文在这）/);
+  assert.match(text, /你：原文在这\n/);
 });
 
 test("a restart is told apart from a crash", () => {

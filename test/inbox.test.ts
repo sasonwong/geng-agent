@@ -104,7 +104,7 @@ test("a file with neither words nor attachments is set aside, and never knocks",
   mkdirSync(seen, { recursive: true });
   writeFileSync(join(inbox, "-100-10.json"), JSON.stringify({ id: "-100-10", text: "" }));
   // the knock count is the parser's, not a directory listing: this is the loop that cost
-  // 58 cycles and $0.33 in an hour
+  // around sixty cycles in an hour
   assert.equal(inboxCount(inbox), 0);
   assert.deepEqual(quarantine(inbox, seen), ["-100-10.json"]);
   assert.equal(existsSync(join(seen, "-100-10.json.bad")), true);

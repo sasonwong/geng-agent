@@ -5,7 +5,7 @@
  * item every two seconds, and the old check recorded the attempt *before* looking at the
  * pause — so a paused key kept inflating its own rate window, and when the pause expired
  * the window was already over the limit. It re-tripped immediately with a bigger number
- * every time (1001 → 1926 → 2147 → 2379), and the ops queue never drained again.
+ * every time, and the ops queue never drained again.
  */
 export type Trip = "paused" | "rate" | "repeat" | null;
 

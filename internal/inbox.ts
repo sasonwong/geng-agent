@@ -24,7 +24,7 @@ function parseFile(dir: string, name: string): InboxMsg | null {
   // A picture or a document with no caption has no words, and that is not a broken
   // message: the gateway writes text:"" for exactly that. Rejecting it left a file that
   // peekInbox skipped but inboxPending still counted, so the daemon knocked on it every
-  // twenty seconds for an hour — 58 cycles, $0.33 — handing over nothing each time.
+  // twenty seconds for hours — around sixty cycles — handing over nothing each time.
   if (msg.text.trim() === "" && attachments.length === 0) return null;
   return {
     id: typeof msg.id === "string" ? msg.id : name.replace(/\.json$/, ""),
