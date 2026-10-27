@@ -336,7 +336,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     // not reappear later in the transcript.
     if (!redelivered) {
       // the transcript keeps a placeholder so a file does not read as silence
-      const said = words !== "" ? words : `[${att ? KIND_WORD[att.kind] : "空消息"}]`;
+      const said = words !== "" ? words : att ? `[1${KIND_WORD[att.kind]}]` : "[空消息]";
       appendSaid(p.data, message.chat.id, {
         at,
         dir: "in",

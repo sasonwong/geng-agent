@@ -8,6 +8,8 @@ export interface LiveMsg {
   file: string;
   text: string;
   from?: string;
+  /** What came with it: a message may be nothing but a file. */
+  attachments?: { kind: string; path?: string; note?: string; bytes?: number }[];
 }
 
 /** How many messages may be pushed into one waking. Beyond this they wait. */
@@ -22,6 +24,12 @@ export function freshForSteer(pending: LiveMsg[], shown: Set<string>, room: numb
 export function injectionText(m: LiveMsg): string {
   const who = m.from ?? "有人";
   const text = m.text.replace(/\s+/g, " ").trim();
+  if (text === "") {
+    // a photo, a document or a voice note often comes with nothing typed; "empty"
+    // would read as a glitch rather than as something that needs a look
+    const carried = m.attachments?.length ?? 0;
+    return `[刚收到] ${who}：没写字，只带了 ${carried} 个附件。`;
+  }
   return `[刚收到] ${who}：${text.length > 400 ? text.slice(0, 400) + "…" : text}`;
 }
 
