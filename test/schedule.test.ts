@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { knockable, readWaiting } from "../internal/schedule.ts";
+import { alarmSpent, knockable, readWaiting } from "../internal/schedule.ts";
 
 function tmpFile(content: string): string {
   const dir = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -42,4 +42,12 @@ test("a message already handed over does not knock again inside the floor", () =
   assert.equal(knockable(["chat-1.json"], hold, 1_000), true, "the floor expires");
   assert.equal(knockable(["chat-2.json"], hold, 0), true, "a new message does not queue behind it");
   assert.equal(knockable(["chat-1.json"], null, 0), true, "no floor set: knock as before");
+});
+
+test("an alarm is spent only once its moment arrives", () => {
+  const due = Date.parse("2026-03-02T01:00:00Z");
+  const alarm = { dueAtMs: due, why: "等 CI" };
+  assert.equal(alarmSpent(alarm, due - 1), false, "an earlier knock must not cancel the alarm");
+  assert.equal(alarmSpent(alarm, due), true, "a wake at the appointed time spends it");
+  assert.equal(alarmSpent(null, due), false, "no alarm: nothing to spend");
 });

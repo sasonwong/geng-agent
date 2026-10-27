@@ -66,6 +66,18 @@ export function readWaiting(file: string): WaitSpec | null {
  * failed to answer them. The floor is per message, not per inbox: anything that arrived
  * since still knocks at once.
  */
+/**
+ * An alarm is spent when the waking happened at or after the moment it asked for.
+ *
+ * A knock that arrives earlier is a waking that replaced the sleep, not one that
+ * answered it: if this waking dies before writing a new alarm, the old one is still
+ * the last thing it said about when to come back. Consuming it on any wake meant a
+ * message arriving fifty seconds after "wake me in twenty minutes" quietly deleted it.
+ */
+export function alarmSpent(wait: WaitSpec | null, nowMs: number): boolean {
+  return wait !== null && nowMs >= wait.dueAtMs;
+}
+
 export interface KnockHold {
   files: string[];
   untilMs: number;
