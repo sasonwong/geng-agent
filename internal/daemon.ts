@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
-import { inboxCount, markSeen, peekInbox, quarantine } from "./inbox.ts";
+import { markSeen, peekInbox, quarantine } from "./inbox.ts";
 import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
@@ -9,7 +9,7 @@ import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
-import { formatDuration, readWaiting, type WaitSpec } from "./schedule.ts";
+import { formatDuration, knockable, readWaiting, type KnockHold, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
@@ -49,24 +49,28 @@ function pendingLow(p: Paths): number {
   }
 }
 
-function inboxPending(p: Paths): boolean {
+function pendingFiles(p: Paths): string[] {
   // the parser, not a directory listing: a file nothing can read must not be able to knock
-  return inboxCount(p.inbox) > 0;
+  return peekInbox(p.inbox).map((m) => m.file);
+}
+
+function inboxPending(p: Paths): boolean {
+  return pendingFiles(p).length > 0;
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.max(0, ms)));
 
-async function sleepUntil(dueAtMs: number, paths: Paths, parked: boolean): Promise<"time" | "knock"> {
+async function sleepUntil(dueAtMs: number, knock: () => boolean, parked: boolean): Promise<"time" | "knock"> {
   if (parked) {
     // only a knock can wake a parked instance; no timer
     for (;;) {
       await sleep(5_000);
-      if (inboxPending(paths)) return "knock";
+      if (knock()) return "knock";
     }
   }
   while (Date.now() < dueAtMs) {
     await sleep(Math.min(POLL_MS, dueAtMs - Date.now()));
-    if (inboxPending(paths)) return "knock";
+    if (knock()) return "knock";
   }
   return "time";
 }
@@ -238,13 +242,13 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
     let pendingWait: WaitSpec | null;
+    const minWakeMs = policy.cycle.minWakeMinutes * 60_000;
 
     if (o.once || o.dry) {
       reason = inboxPending(paths) ? "knock" : "timer";
       pendingWait = readWaiting(paths.waiting);
     } else {
       pendingWait = readWaiting(paths.waiting);
-      const minWakeMs = policy.cycle.minWakeMinutes * 60_000;
       const backoffMs = policy.cycle.defaultWakeMinutes * 60_000 * plan.backoff;
       const firstWake = (meta.wakings ?? 0) === 0;
       const dueAt =
@@ -256,7 +260,12 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
             : pendingWait
               ? Math.max(pendingWait.dueAtMs, Date.now() + minWakeMs)
               : Date.now() + backoffMs;
-      const outcome = await sleepUntil(dueAt, paths, plan.parked);
+      const hold = (meta.knockHold ?? null) as KnockHold | null;
+      const outcome = await sleepUntil(
+        dueAt,
+        () => knockable(pendingFiles(paths), hold, Date.now()),
+        plan.parked,
+      );
       reason = outcome === "knock" ? "knock" : pendingWait ? "timer" : "nudge";
     }
 
@@ -424,8 +433,12 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     escalation = advance(escalation, symptom, result);
     saveEscalation(paths, escalation);
 
+    // a message that has already been handed over gets a floor before it may knock
+    // again; anything that arrives in the meantime does not wait behind it
+    const handed = [...inbox.map((m) => m.file), ...read];
     meta = {
       ...meta,
+      knockHold: handed.length === 0 ? null : { files: handed, untilMs: Date.now() + minWakeMs },
       lastCycle: {
         at: new Date().toISOString(),
         wake: reason,

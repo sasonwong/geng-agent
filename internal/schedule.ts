@@ -56,6 +56,27 @@ export function readWaiting(file: string): WaitSpec | null {
   return null;
 }
 
+/**
+ * Messages already handed over, and the earliest moment they may knock again.
+ *
+ * A waking that dies before it reads the inbox leaves the message on disk on purpose:
+ * losing what a person said is worse than reading it twice. But a message that never
+ * gets through (an empty cycle, a timeout) then knocked again seconds later, and again
+ * — dozens of wakings an hour, each handing the same words to a model that had already
+ * failed to answer them. The floor is per message, not per inbox: anything that arrived
+ * since still knocks at once.
+ */
+export interface KnockHold {
+  files: string[];
+  untilMs: number;
+}
+
+export function knockable(pending: string[], hold: KnockHold | null, nowMs: number): boolean {
+  if (pending.length === 0) return false;
+  if (!hold || nowMs >= hold.untilMs) return true;
+  return pending.some((f) => !hold.files.includes(f));
+}
+
 export function formatDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 60) return `${s}s`;
