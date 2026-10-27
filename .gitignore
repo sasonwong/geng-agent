@@ -3,5 +3,8 @@
 /backup/
 /secrets/
 
+# 隐私审计报告为了说明"清掉了什么"，必然把值原样抄一遍——不进仓库
+/audit/
+
 /node_modules/
 *.log
