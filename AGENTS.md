@@ -33,6 +33,10 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 `waiting.json` 的解析。要加测试时按这个标准挑，别给 getter 写测试。
 验收标准不是覆盖率，是"连跑一周不自燃"。
 
+**示例值按构造合成，不从运行现场抄。** 聊天 ID 用 `fakeChat(n)` 生成，handle 用 `@someone`，
+邮箱用 `something@example.invalid`。仓库是公开的，而 `data/` 里的东西是真实世界的抄录——
+一旦抄进 `test/` 或文档，它就成了永久公开的东西，而且删不掉（见 `CONTRIBUTING.md`）。
+
 ## 镜像
 
 用 `deploy/build.sh` 构建，不要手写 `docker build`：代理只在那个脚本里配对了（构建容器在
@@ -111,8 +115,10 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
   所以它必须是最小权限、只对一个仓库。
 - **没有 token 也能贡献**：`git format-patch` 出补丁，用 `say` 的 `files` 发给主人，宿主机上
   `git am` 落地。这条路随时可用，不依赖任何凭据。
-- 提交身份用 `git -c user.name=… -c user.email=…` 传：`HOME` 每轮都会被丢掉，写进
-  `~/.gitconfig` 的东西活不过这一次醒来。
+- 提交身份用 `git -c user.name=… -c user.email=<id>+<login>@users.noreply.github.com` 传：
+  `HOME` 每轮都会被丢掉，写进 `~/.gitconfig` 的东西活不过这一次醒来。**邮箱只能是 noreply 或
+  `*.invalid`**——真实域名会进历史、进 squash 提交、进每一份 clone，而提交元数据不在任何 diff
+  里，逐行扫描器永远看不见它。
 
 ## 文档
 
