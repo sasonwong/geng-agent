@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readWaiting } from "../internal/schedule.ts";
+import { knockable, readWaiting } from "../internal/schedule.ts";
 
 function tmpFile(content: string): string {
   const dir = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -33,4 +33,13 @@ test("readWaiting returns null when no alarm was set", () => {
   assert.equal(readWaiting(tmpFile("{not json")), null);
   assert.equal(readWaiting(tmpFile(JSON.stringify({ why: "我忘了" }))), null);
   assert.equal(readWaiting(tmpFile(JSON.stringify({ wake: { after: "20 minutes" } }))), null);
+});
+
+test("a message already handed over does not knock again inside the floor", () => {
+  const hold = { files: ["chat-1.json"], untilMs: 1_000 };
+  assert.equal(knockable([], hold, 0), false, "nothing pending cannot knock");
+  assert.equal(knockable(["chat-1.json"], hold, 0), false, "the same words again wait");
+  assert.equal(knockable(["chat-1.json"], hold, 1_000), true, "the floor expires");
+  assert.equal(knockable(["chat-2.json"], hold, 0), true, "a new message does not queue behind it");
+  assert.equal(knockable(["chat-1.json"], null, 0), true, "no floor set: knock as before");
 });

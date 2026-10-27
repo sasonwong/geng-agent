@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { readJson, writeJson } from "./state.ts";
 import { STATE_SCHEMA } from "./schema.ts";
+import type { KnockHold } from "./schedule.ts";
 
 /**
  * Everything the daemon counts about itself. One reader, used by the daemon, by
@@ -34,6 +35,8 @@ export interface Meta {
     touched: number;
   };
   env?: Env;
+  /** Messages already delivered once; they may not knock again before this time. */
+  knockHold?: KnockHold | null;
 }
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
