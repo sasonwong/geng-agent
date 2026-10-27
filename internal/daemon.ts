@@ -2,7 +2,7 @@ import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { inboxCount, markSeen, peekInbox, quarantine } from "./inbox.ts";
-import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "./inject.ts";
+import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -370,13 +370,15 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     const startedMs = Date.now();
     // the page already showed these; only what arrives from here on is pushed in
     const shown = new Set(inbox.map((m) => m.id));
-    const injected: { id: string; file: string; text: string; from?: string }[] = [];
+    // the whole message, not a copy of the field list: a builder here would silently
+    // drop any field added later (attachments was the one that went missing)
+    const injected: LiveMsg[] = [];
     const result = await runWaking({
       drain: () => {
         const fresh = freshForSteer(peekInbox(paths.inbox), shown, INJECT_CAP - injected.length);
         for (const m of fresh) {
           shown.add(m.id); // do not hand it the same words twice
-          injected.push({ id: m.id, file: m.file, text: m.text, from: m.from });
+          injected.push(m); // InboxMsg is a structural superset of LiveMsg
         }
         return fresh.map(injectionText);
       },

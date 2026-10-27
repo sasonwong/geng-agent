@@ -28,7 +28,7 @@ export function injectionText(m: LiveMsg): string {
     // a photo, a document or a voice note often comes with nothing typed; "empty"
     // would read as a glitch rather than as something that needs a look
     const carried = m.attachments?.length ?? 0;
-    return `[刚收到] ${who}：没写字，只带了 ${carried} 个附件，去看一眼。`;
+    return `[刚收到] ${who}：没写字，只带了 ${carried} 个附件。`;
   }
   return `[刚收到] ${who}：${text.length > 400 ? text.slice(0, 400) + "…" : text}`;
 }
