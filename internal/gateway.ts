@@ -7,7 +7,7 @@ import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
 import { appendSaid } from "./people.ts";
-import { attachmentOf, hostPathForWorkPath, KIND_WORD, safeName } from "./attach.ts";
+import { attachmentOf, hostPathForWorkPath, placeholderFor, safeName } from "./attach.ts";
 import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
@@ -336,7 +336,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     // not reappear later in the transcript.
     if (!redelivered) {
       // the transcript keeps a placeholder so a file does not read as silence
-      const said = words !== "" ? words : `[${att ? KIND_WORD[att.kind] : "空消息"}]`;
+      const said = words !== "" ? words : placeholderFor(att ? [att] : []);
       appendSaid(p.data, message.chat.id, {
         at,
         dir: "in",

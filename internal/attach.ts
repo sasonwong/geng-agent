@@ -68,6 +68,21 @@ export const KIND_WORD: Record<Attachment["kind"], string> = {
   voice: "条语音",
 };
 
+/**
+ * One attachment said in words. A bare count cannot tell the reader that a voice note here
+ * can never be listened to, and the note is the only place that fact lives. Unknown kinds
+ * fall back instead of printing `undefined`.
+ */
+export function attachmentWords(a: { kind: string; note?: string }): string {
+  const word = KIND_WORD[a.kind as Attachment["kind"]] ?? "个文件";
+  return `1${word}${a.note ? `（${a.note}）` : ""}`;
+}
+
+/** The transcript's stand-in for a message that arrived with no words at all. */
+export function placeholderFor(atts: { kind: string; note?: string }[]): string {
+  return atts.length === 0 ? "[空消息]" : `[${attachmentWords(atts[0]!)}]`;
+}
+
 /** `/work/report.html` from inside the container is `data/<inst>/workspace/report.html`. */
 export function hostPathForWorkPath(workRoot: string, given: string): string | null {
   if (!given.startsWith("/work/")) return null;
