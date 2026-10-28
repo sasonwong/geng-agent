@@ -19,6 +19,9 @@ export interface Paths {
   filesDir: string;
   /** What it asked to have forgotten; the daemon applies this before the next waking. */
   filesForget: string;
+  /** The feeder's own book, in nobody else's. A file here is not one it wrote, and
+   * removing one must not look the same as the world standing still. */
+  feedDir: string;
   daemonLog: string;
   /** Outside the book on purpose: the rules it lives under are not something it reads
    * or writes. The negotiable values reach it through the wake page instead. */
@@ -53,6 +56,7 @@ export function makePaths(root: string, instance: string): Paths {
   const outbox = join(data, "outbox");
   const filesDir = join(data, "files");
   const filesForget = join(palimpsest, "files.forget.json");
+  const feedDir = join(data, "feed");
   const journal = join(palimpsest, "journal");
   return {
     root: r,
@@ -69,6 +73,7 @@ export function makePaths(root: string, instance: string): Paths {
     outbox,
     filesDir,
     filesForget,
+    feedDir,
     daemonLog: join(data, "daemon.log"),
     policy: join(data, "policy.json"),
     identity: join(palimpsest, "identity.md"),
@@ -113,5 +118,6 @@ export function requiredDirs(p: Paths): string[] {
     p.openLoops,
     p.people,
     p.filesDir,
+    p.feedDir,
   ];
 }

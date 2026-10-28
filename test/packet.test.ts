@@ -87,7 +87,10 @@ test("its own words are pasted verbatim, labelled, just before the reason it is 
 test("one sentence says why it is awake and whether anyone is there", () => {
   const { input } = fixture();
   const knocked = buildPacket(
-    input({ reason: "knock", inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you" }] }),
+    input({
+      reason: "knock",
+      inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you", chat: 111 }],
+    }),
   );
   assert.match(knocked, /有人敲门，所以你现在醒了，现在有人在跟你说话。/);
   // the permission is always true, so it stands alone and never varies with the reason
@@ -96,6 +99,26 @@ test("one sentence says why it is awake and whether anyone is there", () => {
 
   const timed = buildPacket(input({ reason: "timer" }));
   assert.match(timed, /你是被自己定的闹钟叫醒的，现在没人在跟你说话。/);
+});
+
+test("an event in the inbox is counted as an event, not as somebody talking", () => {
+  const { input } = fixture();
+  const event = { id: "github-7-ci-red", file: "github-7-ci-red.json", text: "PR #7 ci 红了", from: "github" };
+  const text = buildPacket(input({ reason: "knock", inbox: [event] }));
+  // a red build is not a person: saying so would make it answer into an empty room
+  assert.match(text, /1 件不是对话（feed 写的），也在 \/inbox\/。/);
+  assert.match(text, /收件箱里进了事件（不是对话），所以你现在醒了。/);
+  assert.doesNotMatch(text, /有人在跟你说话/);
+
+  const both = buildPacket(
+    input({
+      reason: "knock",
+      inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you", chat: 111 }, event],
+    }),
+  );
+  // counted separately, or the page credits the machine's news to the person
+  assert.match(both, /有人在跟你说话：1 条，在 \/inbox\/。/);
+  assert.match(both, /1 件不是对话（feed 写的）/);
 });
 
 test("nudge admits it was woken by default rather than by an alarm", () => {
