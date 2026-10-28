@@ -99,11 +99,6 @@ export function makePaths(root: string, instance: string): Paths {
   };
 }
 
-/** The agent sees this directory as /state; the daemon sees the same files. */
-export const STATE_MOUNT = "/state";
-export const WORK_MOUNT = "/work";
-export const HOME_MOUNT = "/home/agent";
-
 /**
  * One list, because two lists drift exactly when you are debugging: init and the daemon
  * both create the state tree, and a directory added to one but not the other fails

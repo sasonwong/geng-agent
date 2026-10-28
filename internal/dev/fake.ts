@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "../paths.ts";
-import { ensureDirs, readText, writeJson, writeText } from "../state.ts";
+import { ensureDirs, writeJson, writeText } from "../state.ts";
 
 function identityFor(instance: string): string {
   return `我是 ${instance}，一个跑在这台服务器上的进程。
@@ -78,9 +78,4 @@ export function writeFakeState(p: Paths, o: FakeOptions = {}): string[] {
     created.push(inboxFile);
   }
   return created;
-}
-
-export function describeState(p: Paths): string {
-  const identity = readText(p.identity);
-  return identity ? `identity ${Buffer.byteLength(identity, "utf8")}B` : "identity （无）";
 }
