@@ -11,11 +11,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # the identity check reads every commit; depth 1 would scan nothing and pass
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
       # tests that need docker or rustic skip themselves; nothing here needs them
       - run: npm ci
+      - run: npm run gate
       - run: npm run check
       - run: npm test

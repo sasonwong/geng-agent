@@ -6,6 +6,7 @@
 # 隐私审计报告为了说明"清掉了什么"，必然把值原样抄一遍——不进仓库
 /audit/
 
-/node_modules/
+# no trailing slash: a symlink is a file, and `/node_modules/` let one through
+node_modules
 /deploy/mail-worker/node_modules/
 *.log
