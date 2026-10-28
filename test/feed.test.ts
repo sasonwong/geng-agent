@@ -7,6 +7,7 @@ import {
   ciOf,
   eventsOf,
   fileNameOf,
+  mergeSeen,
   parsePrs,
   seenOf,
   textOf,
@@ -138,7 +139,6 @@ test("a knock lands in the inbox and a note lands in low, one file per state", (
   const knockFile = join(paths.inbox, fileNameOf(events[0]!));
   const written = JSON.parse(readFileSync(knockFile, "utf8"));
   assert.equal(written.from, "github");
-  assert.equal(written.route, "github");
   assert.match(written.text, /PR #7 可以合了/);
   assert.equal(existsSync(paths.inboxLow) ? readdirSync(paths.inboxLow).length : 0, 0);
 
@@ -147,4 +147,22 @@ test("a knock lands in the inbox and a note lands in low, one file per state", (
   writeEvents(paths, quiet);
   assert.equal(readdirSync(paths.inboxLow).length, 1);
   assert.equal(fileNameOf(quiet[0]!), "github-7-ci-green.json");
+});
+
+test("a pass that sees nothing does not erase what was known", () => {
+  // an empty list is what a token that is not the account's own returns, every pass,
+  // for as long as it runs. Overwriting would make that look exactly like a quiet world.
+  const before = seenOf([pr({ review: "REVIEW_REQUIRED" })]);
+  assert.deepEqual(mergeSeen(before, []), before);
+
+  // a PR can also drop out of --limit and come back later; its baseline has to survive
+  const merged = mergeSeen(seenOf([pr({ review: "REVIEW_REQUIRED" }), pr({ number: 8, review: "" })]), [
+    pr({ review: "APPROVED" }),
+  ]);
+  assert.equal(Object.keys(merged).length, 2);
+  assert.equal(merged["7"]?.review, "APPROVED");
+  assert.equal(merged["8"]?.review, "");
+
+  // and the transition nobody announced still shows up after the empty pass
+  assert.equal(eventsOf(mergeSeen(before, []), [pr({ review: "APPROVED" })]).length, 1);
 });

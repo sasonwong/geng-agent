@@ -160,8 +160,9 @@ const REASON_LINE: Record<WakeReason, string> = {
  */
 function whoLine(inbox: InboxMsg[]): string {
   if (inbox.length === 0) return "，现在没人在跟你说话。";
-  // an inbox that only holds events says nothing about whether anyone is there
-  return inbox.some((m) => typeof m.chat === "number") ? "，现在有人在跟你说话。" : "";
+  // an inbox that only holds events says nothing about whether anyone is there — but
+  // the sentence still ends, and the full stop is this function's to add, not the line's.
+  return inbox.some((m) => typeof m.chat === "number") ? "，现在有人在跟你说话。" : "。";
 }
 
 /** The rare-changing half of the picture: where it may speak, and its own knobs. */

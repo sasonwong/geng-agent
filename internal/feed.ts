@@ -188,7 +188,6 @@ export function writeEvents(p: Paths, events: FeedEvent[], now: Date = new Date(
       text: textOf(e),
       from: "github",
       at: now.toISOString(),
-      route: "github",
     });
     written.push(join(dir, `${id}.json`));
   }
@@ -206,7 +205,7 @@ export interface FeedEnv {
 export function readFeedEnv(env: NodeJS.ProcessEnv = process.env): FeedEnv | null {
   const repo = (env.GENG_GITHUB_REPO ?? "").trim();
   if (repo === "") return null;
-  return { repo, token: (env.GH_TOKEN ?? env.GENG_GITHUB_TOKEN ?? "").trim() };
+  return { repo, token: (env.GH_TOKEN ?? "").trim() };
 }
 
 const FIELDS = "number,title,url,state,isDraft,reviewDecision,headRefOid,statusCheckRollup";
@@ -244,6 +243,11 @@ function runGh(args: string[], env: NodeJS.ProcessEnv, timeoutMs: number): Promi
   });
 }
 
+/**
+ * `--limit` bounds how many PRs one pass can see. A PR that falls off the window keeps
+ * its snapshot entry (see `mergeSeen`), so coming back later is a comparison, not a
+ * first sight: otherwise the approve that pushed it back into view is the silent one.
+ */
 export async function listOwnPrs(
   o: { repo: string; token: string; limit?: number; timeoutMs?: number },
 ): Promise<PrFacts[]> {
@@ -276,6 +280,18 @@ export async function listOwnPrs(
   }
 }
 
+/**
+ * Union, never replacement. Two ways a pass can show fewer PRs than it knows about:
+ * one falls outside `--limit` after the window shifts, or the call resolves to nobody
+ * at all (a token that is not the account's own, an installation token, `@me` with no
+ * answer). Overwriting would treat every one of them as first sight, and a first sight
+ * is not news — that is the silence this feeder exists to remove. Only `undefined` is a
+ * real baseline. Cost: an entry per PR ever seen (~50 bytes) that is never pruned.
+ */
+export function mergeSeen(before: Seen, prs: PrFacts[]): Seen {
+  return { ...before, ...seenOf(prs) };
+}
+
 export interface FeedRun {
   paths: Paths;
   repo: string;
@@ -290,10 +306,13 @@ export interface FeedRun {
 export async function runGithubFeed(o: FeedRun): Promise<FeedEvent[]> {
   const log = o.log ?? (() => {});
   const prs = await listOwnPrs({ repo: o.repo, token: o.token });
-  const seenFile = join(o.paths.palimpsest, "github.seen.json");
-  const events = eventsOf(readJson<Seen>(seenFile, {}), prs);
+  const seenFile = join(o.paths.feedDir, "github.seen.json");
+  const before = readJson<Seen>(seenFile, {});
+  const events = eventsOf(before, prs);
   writeEvents(o.paths, events);
-  writeJson(seenFile, seenOf(prs));
+  writeJson(seenFile, mergeSeen(before, prs));
+  // "no PR at all" and "nothing moved" read the same from the outside; say which.
+  if (prs.length === 0) log("一条 PR 都没取到——token 是不是自己账号的？");
   for (const e of events) log(`${e.knock ? "敲门" : "记下"}  PR #${e.pr.number} ${e.kind}`);
   return events;
 }

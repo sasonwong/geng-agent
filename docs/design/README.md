@@ -436,8 +436,11 @@ gh pr list --author @me  ──定时器每 5 分钟──▶  feat：只挑状�
 - **两档，和通道同一套：** 有人等你动手的（APPROVED、CHANGES_REQUESTED）和它自己的
   checks 红了，敲门；合并/关闭/转绿进 `inbox/low`，等它下次自己看。自己 push 把 approve
   冲掉（APPROVED → REVIEW_REQUIRED）不算事，也不出声。
-- **第一次见到的 PR 是基线，不是新闻。** 状态存在 `palimpsest/github.seen.json`，事件是
-  跟它比出来的差分，所以同一个状态只会说一次；新装一个 feeder 也不会把历史倒一地。
+- **第一次见到的 PR 是基线，不是新闻。** 状态存在 `data/<inst>/feed/github.seen.json`（feeder
+  自己的一本账，不在 `palimpsest/` 里：`/state` 它可写，一本能被它删掉的账等于一条能被
+  自己关掉且不留痕迹的通道），事件是跟它比出来的差分，所以同一个状态只会说一次；新装一个
+  feeder 也不会把历史倒一地。这本账**只并集、不整张重写**：一趟什么都没取到（token 不是
+  自己的账号、installation token）或某个 PR 掉出 `--limit` 窗口，都不能被当成「第一次见到」。
 
 喂进来的东西没有 `chat`：**它不是人说的**。所以纸上分两行写「有人在跟你说话：N 条」和
 「M 件不是对话（feed 写的）」，为什么醒也用单独的句子——一页把红灯说成"有人找你"，它就会

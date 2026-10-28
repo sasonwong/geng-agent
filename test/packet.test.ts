@@ -107,7 +107,7 @@ test("an event in the inbox is counted as an event, not as somebody talking", ()
   const text = buildPacket(input({ reason: "knock", inbox: [event] }));
   // a red build is not a person: saying so would make it answer into an empty room
   assert.match(text, /1 件不是对话（feed 写的），也在 \/inbox\/。/);
-  assert.match(text, /收件箱里进了事件（不是对话），所以你现在醒了/);
+  assert.match(text, /收件箱里进了事件（不是对话），所以你现在醒了。/);
   assert.doesNotMatch(text, /有人在跟你说话/);
 
   const both = buildPacket(

@@ -160,7 +160,9 @@ systemctl --user enable --now geng-feed@alice.timer
 
 两件事是刻意的：**它不是 daemon 的一部分**（daemon 仍然不碰网络，网断了不会留下一个坏掉的
 闹钟），**第一次见到的 PR 是基线而不是新闻**（新装一个 feeder 不会把历史倒一地）。
-一个 PR 一种状态只会说一次，去重靠 `palimpsest/github.seen.json` 的差分。
+一个 PR 一种状态只会说一次，去重靠 `data/<instance>/feed/github.seen.json` 的差分：
+那是 feeder 自己的一本账，跟它的书分开写（`/state` 是它可写的，它的书每个文件只有一个作者）。
+这本账只增不删——掉出 `--limit` 窗口的 PR 回来时还得跟旧状态比，不然那次转移就没人说。
 
 ### 文件和图片
 
@@ -238,6 +240,7 @@ data/<instance>/
   policy.json   它活在什么规矩下——**在书外面**，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）
   files/        别人发来的图片和文件，挂成 /files（只读）
+  feed/         feeder 自己的账（github.seen.json）：不算它写的文件，也不归它读
   inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
