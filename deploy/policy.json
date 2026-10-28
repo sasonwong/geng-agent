@@ -2,7 +2,7 @@
   "schema": 1,
   "runner": "local",
   "cycle": {
-    "timeoutSec": 1200,
+    "timeoutSec": 1800,
     "defaultWakeMinutes": 30,
     "minWakeMinutes": 1,
     "repeatThreshold": 3
