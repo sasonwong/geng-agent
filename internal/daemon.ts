@@ -292,9 +292,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // something — where it may speak, and its own knobs — so the tools block underneath
     // it stays cacheable from one waking to the next.
     const places = knownPlaces(paths.root, o.instance);
+    const capMinutes = Math.max(1, Math.round(policy.cycle.timeoutSec / 60));
     const systemPrompt = systemPromptFor(
       paths,
-      systemFacts(places, policySummary(policy)),
+      systemFacts(places, policySummary(policy), capMinutes),
     );
     const longGap = typeof meta.lastWakeMs === "number" && nowMs - meta.lastWakeMs > longGapMs;
     const wakes24h = readJson<number[]>(join(paths.meta, "wakes.json"), []).filter(

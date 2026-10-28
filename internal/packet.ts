@@ -173,6 +173,7 @@ function whoLine(inbox: InboxMsg[]): string {
 export function systemFacts(
   places: { id: number; label: string; home: boolean }[],
   policyLine: string,
+  capMinutes: number,
 ): string {
   const out: string[] = [];
   if (places.length === 1) {
@@ -187,6 +188,9 @@ export function systemFacts(
     );
   }
   out.push(`可以调的运行参数：${policyLine}。`);
+  // The wall, not a knob: it is the operator's frame, so it is stated as a fact. A model
+  // cannot see a clock any more than it can see its own token count.
+  out.push(`每一轮最多 ${capMinutes} 分钟，到点会被杀掉。`);
   return out.join("\n");
 }
 
