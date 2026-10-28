@@ -84,6 +84,10 @@ export function buildCommand(
       // not be something it can edit
       "-v",
       `${paths.filesDir}:/files:ro`,
+      // every mail ever received, read-only and never moved: "read" is a list in its
+      // own book, so the mailbox is nothing it can delete or rewrite
+      "-v",
+      `${paths.mail}:/mail:ro`,
       "-v",
       `${paths.workspace}:/work`,
       "-w",

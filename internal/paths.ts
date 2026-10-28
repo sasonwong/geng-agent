@@ -14,6 +14,11 @@ export interface Paths {
   inbox: string;
   inboxSeen: string;
   inboxLow: string;
+  /** Every mail it ever received, one file each. Mounted read-only and never moved:
+   * "read" is a list in its own book, not a place files are put. */
+  mail: string;
+  /** The mail ids it has declared read, written only by the `mail` tool. */
+  mailRead: string;
   outbox: string;
   /** Files people sent it. Read-only inside the container, never its business to write. */
   filesDir: string;
@@ -50,6 +55,7 @@ export function makePaths(root: string, instance: string): Paths {
   const data = join(r, "data", instance);
   const palimpsest = join(data, "palimpsest");
   const inbox = join(data, "inbox");
+  const mail = join(data, "mail");
   const outbox = join(data, "outbox");
   const filesDir = join(data, "files");
   const filesForget = join(palimpsest, "files.forget.json");
@@ -66,6 +72,8 @@ export function makePaths(root: string, instance: string): Paths {
     inbox,
     inboxSeen: join(inbox, "seen"),
     inboxLow: join(inbox, "low"),
+    mail,
+    mailRead: join(palimpsest, "mail.read.json"),
     outbox,
     filesDir,
     filesForget,
@@ -108,6 +116,7 @@ export function requiredDirs(p: Paths): string[] {
     p.inbox,
     p.inboxSeen,
     p.inboxLow,
+    p.mail,
     p.outbox,
     p.piDir,
     p.openLoops,
