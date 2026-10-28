@@ -136,6 +136,32 @@ unit 里已经带 `NODE_USE_ENV_PROXY=1`：node 的 `fetch` 默认不认 `HTTP(S
 - bot 之间默认互相看不见消息；两个实例要互相说话，得在 BotFather 里给**两边**都打开
   bot-to-bot communication。开了之后每往下一步仍然要显式 @，否则对面只当环境消息收着
 
+### 它自己的 PR
+
+有人在说话这条线之外还有一类变化没人出声：它的 PR 被批了、checks 红了、被合了或关掉了。
+补这一半的是 **feeder**：一个 oneshot 定时器，每趟只发一条 `gh pr list --author @me`，
+把状态转移写进收件箱——有人等它动手的（APPROVED / CHANGES_REQUESTED / ci 红）敲门，
+其余的（合并、关闭、转绿）进 `inbox/low`，等它下次自己看。
+
+```bash
+cat > secrets/feed.env <<'EOF'
+GENG_GITHUB_REPO=owner/name
+GH_TOKEN=...            # 或者 GH_CONFIG_DIR=/这里/gh 的配置目录
+EOF
+
+node cmd/geng/index.ts feed github --instance alice    # 手动跑一趟
+
+sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
+  deploy/geng-feed@.service > ~/.config/systemd/user/geng-feed@alice.service
+sed -e "s|@ROOT@|$PWD|g" deploy/geng-feed@.timer > ~/.config/systemd/user/geng-feed@alice.timer
+systemctl --user daemon-reload
+systemctl --user enable --now geng-feed@alice.timer
+```
+
+两件事是刻意的：**它不是 daemon 的一部分**（daemon 仍然不碰网络，网断了不会留下一个坏掉的
+闹钟），**第一次见到的 PR 是基线而不是新闻**（新装一个 feeder 不会把历史倒一地）。
+一个 PR 一种状态只会说一次，去重靠 `palimpsest/github.seen.json` 的差分。
+
 ### 文件和图片
 
 别人发的图片、文档、音频、视频会下载到 `data/<inst>/files/`，容器里只读挂 `/files`，
