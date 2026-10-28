@@ -35,8 +35,6 @@ export interface PacketInput {
   /** The previous waking died mid-flight. */
   /** How the round before this one ended, when it did not end on its own. */
   cut: CutRecord | null;
-  /** The wall a round runs into, in minutes: stated once and quoted when a round hits it. */
-  capMinutes: number;
   /** A [观察] block explaining how the last waking ended, if it did not end well. */
   hint: string | null;
   /** Wakings in the last 24 hours, including this one. */
@@ -86,8 +84,6 @@ export interface PacketInput {
   identity: string | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
-  /** The last round was cut short by a restart, not by a crash: same fact, calmer cause. */
-
 }
 
 /**
@@ -209,7 +205,7 @@ const WAKE_WORD: Record<string, string> = {
  * How the round before this one ended. Three facts, no advice: what killed it, which
  * waking it was, and — when the daemon outlived it — what it was doing at the moment.
  */
-function cutLine(cut: CutRecord, capMinutes: number): string {
+function cutLine(cut: CutRecord): string {
   const which = cut.waking > 0 ? `（第 ${cut.waking} 次醒来，${WAKE_WORD[cut.reason] ?? cut.reason}）` : "";
   if (cut.kind === "interrupted") return `上一轮是被重启打断的，不是出错${which}。`;
   if (cut.kind === "crashed") return `上一轮没过完就断了${which}。不知道它停在哪。`;
@@ -218,7 +214,11 @@ function cutLine(cut: CutRecord, capMinutes: number): string {
     cut.openMs !== undefined && cut.openMs >= 60_000
       ? `，最后一个已经跑了 ${formatDuration(cut.openMs)}`
       : "";
-  const head = `上一轮跑到 ${capMinutes} 分钟的上限被杀了${which}。`;
+  // the cap that was in force when it was killed, not the one in force now
+  const head =
+    cut.capMinutes === undefined
+      ? `上一轮跑到时间上限被杀了${which}。`
+      : `上一轮跑到 ${cut.capMinutes} 分钟的上限被杀了${which}。`;
   return acts === "" ? head : `${head}最后的动作：${acts}${open}。`;
 }
 
@@ -229,7 +229,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, cut, capMinutes, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
+  const { inbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
 
   const out: string[] = [];
 
@@ -350,7 +350,7 @@ export function buildPacket(input: PacketInput): string {
     out.push("", "[观察]", hint);
   }
 
-  if (cut) out.push("", cutLine(cut, capMinutes));
+  if (cut) out.push("", cutLine(cut));
 
   // Its own words, verbatim, right before the reason it is awake: the last two things it
   // reads are who it decided it is and what it is supposed to be doing right now.

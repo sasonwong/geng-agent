@@ -32,7 +32,6 @@ function fixture(): {
     places: [{ id: -1001234567890, label: "群「测试」", home: false }],
     attention: null,
     cut: null,
-    capMinutes: 20,
     filesPath: "/files",
     filesForgotten: 0,
     filesPruned: 0,
@@ -341,7 +340,7 @@ test("a round that died says which of the three ways, and what it was doing", ()
 
   const killed = buildPacket(
     f.input({
-      cut: { ...base, kind: "timeout", tools: ["bash md5sum v8.md", "say"], openMs: 12 * 60_000 },
+      cut: { ...base, kind: "timeout", capMinutes: 20, tools: ["bash md5sum v8.md", "say"], openMs: 12 * 60_000 },
     }),
   );
   assert.match(killed, /上一轮跑到 20 分钟的上限被杀了（第 7 次醒来，被消息叫醒）。/);
@@ -361,7 +360,7 @@ test("a round that died says which of the three ways, and what it was doing", ()
   }
   // the unknown case must not invent facts
   const bare = buildPacket(f.input({ cut: { ...base, kind: "timeout", waking: 0, reason: "timer" } }));
-  assert.match(bare, /^上一轮跑到 20 分钟的上限被杀了。$/m);
+  assert.match(bare, /^上一轮跑到时间上限被杀了。$/m);
 });
 
 test("nothing is said when the last round ended on its own", () => {

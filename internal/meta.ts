@@ -59,6 +59,8 @@ export interface CutRecord {
   tools?: string[];
   /** How long the still-running action had been going when the round was killed. */
   openMs?: number;
+  /** The cap that was in force then, not the one in force when the note is read. */
+  capMinutes?: number;
 }
 
 export function readMeta(paths: Paths): Meta {

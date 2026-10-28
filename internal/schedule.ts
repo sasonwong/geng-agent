@@ -99,8 +99,21 @@ export interface KnockHold {
  * otherwise a message nobody can answer keeps waking it forever, because the message only
  * counts as read when a round ends cleanly. New messages are unaffected either way.
  */
-export function knockFloorMs(clean: boolean, minMs: number, backoffMs: number): number {
-  return clean ? minMs : Math.max(minMs, backoffMs);
+/** The only rung with no timer behind it still needs a floor with teeth. */
+export const PARKED_FLOOR_MS = 12 * 60 * 60_000;
+
+export function knockFloorMs(
+  clean: boolean,
+  minMs: number,
+  backoffMs: number,
+  parked = false,
+): number {
+  if (clean) return minMs;
+  // parked is backoff 0, so without this branch the tightest rung of the ladder is also
+  // the loosest: the parked loop has no timer, so a one-minute floor means every minute
+  // forever on the messages it cannot answer.
+  if (parked) return Math.max(minMs, PARKED_FLOOR_MS);
+  return Math.max(minMs, backoffMs);
 }
 
 export function knockable(pending: string[], hold: KnockHold | null, nowMs: number): boolean {
