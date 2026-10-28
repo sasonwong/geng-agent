@@ -57,6 +57,25 @@ export function readWaiting(file: string): WaitSpec | null {
 }
 
 /**
+ * An alarm is spent when the waking happened at or after the moment it asked for.
+ *
+ * A knock that arrives earlier is a waking that replaced the sleep, not one that
+ * answered it: if this waking dies before writing a new alarm, the old one is still
+ * the last thing it said about when to come back. Consuming it on any wake meant a
+ * message arriving fifty seconds after "wake me in twenty minutes" quietly deleted it.
+ *
+ * For a timer wake the alarm is still renamed out of the way, and that rename has to
+ * stay: it is not a record (nothing reads waiting.consumed.json), it is what stops a
+ * past-due alarm from pinning `dueAt`. With the file still present every iteration
+ * computes `max(dueAtMs, now + minWakeMinutes)` — one minute later — so a forgotten
+ * alarm would wake the daemon every minute forever. The file's absence is the switch
+ * that hands the wait back to defaultWakeMinutes.
+ */
+export function alarmSpent(wait: WaitSpec | null, nowMs: number): boolean {
+  return wait !== null && nowMs >= wait.dueAtMs;
+}
+
+/**
  * Messages already handed over, and the earliest moment they may knock again.
  *
  * A waking that dies before it reads the inbox leaves the message on disk on purpose:
@@ -66,18 +85,6 @@ export function readWaiting(file: string): WaitSpec | null {
  * failed to answer them. The floor is per message, not per inbox: anything that arrived
  * since still knocks at once.
  */
-/**
- * An alarm is spent when the waking happened at or after the moment it asked for.
- *
- * A knock that arrives earlier is a waking that replaced the sleep, not one that
- * answered it: if this waking dies before writing a new alarm, the old one is still
- * the last thing it said about when to come back. Consuming it on any wake meant a
- * message arriving fifty seconds after "wake me in twenty minutes" quietly deleted it.
- */
-export function alarmSpent(wait: WaitSpec | null, nowMs: number): boolean {
-  return wait !== null && nowMs >= wait.dueAtMs;
-}
-
 export interface KnockHold {
   files: string[];
   untilMs: number;

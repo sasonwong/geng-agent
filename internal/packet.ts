@@ -14,7 +14,7 @@ export interface PacketInput {
   paths: Paths;
   nowMs: number;
   reason: WakeReason;
-  /** What it said it was waiting for, carried over from the consumed waiting.json. */
+  /** What it said it was waiting for, from the waiting.json still on disk (a knock does not consume it). */
   waitWhy: string | null;
   lastWakeMs: number | null;
   /** 1-based: how many times this instance has woken. */
