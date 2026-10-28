@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths } from "../internal/paths.ts";
-import { DAY_MS, readMeta, readWakes, recordWake, writeMeta } from "../internal/meta.ts";
+import { clearCut, DAY_MS, readCut, readMeta, readWakes, recordWake, writeCut, writeMeta } from "../internal/meta.ts";
 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -34,4 +34,51 @@ test("wake history keeps only the last 24 hours", () => {
   const count = recordWake(paths, now);
   assert.equal(count, 2);
   assert.equal(readWakes(paths, now).length, 2);
+});
+
+test("a cut note is written, read back whole, and cleared", () => {
+  const paths = fixture();
+  assert.equal(readCut(paths), null, "nothing was written yet");
+
+  const rec = {
+    kind: "timeout" as const,
+    at: "2026-03-02T08:30:00Z",
+    waking: 212,
+    reason: "knock",
+    tools: ["bash md5sum v8.md"],
+    openMs: 720_000,
+  };
+  writeCut(paths, rec);
+  // read back through the real reader: a field the reader drops is a field that never
+  // reached the page, which is how attachments once went missing
+  assert.deepEqual(readCut(paths), rec);
+
+  clearCut(paths);
+  assert.equal(readCut(paths), null);
+});
+
+test("a cut note that nothing can read is worth less than a waking that starts", () => {
+  const paths = fixture();
+  writeCut(paths, { kind: "timeout", at: "x", waking: 1, reason: "timer" });
+  // someone hand-edited it into something that is not a note
+  writeFileSync(join(paths.meta, "cut.json"), '{"kind":"nonsense"}');
+  assert.equal(readCut(paths), null);
+});
+
+test("a hand-written cut note cannot break the page that reads it", () => {
+  const paths = fixture();
+  // `/state` is writable from inside, so every field is an input, not a promise: `tools`
+  // used to arrive as a string and throw on `.join` while a waking was being assembled
+  writeFileSync(
+    join(paths.meta, "cut.json"),
+    JSON.stringify({ kind: "timeout", tools: "bash ls", capMinutes: "20", openMs: null, waking: "7" }),
+  );
+  const rec = readCut(paths);
+  assert.equal(rec?.kind, "timeout");
+  assert.equal(rec?.tools, undefined, "a string is not a list of actions");
+  assert.equal(rec?.capMinutes, undefined);
+  assert.equal(rec?.openMs, undefined);
+  assert.equal(rec?.waking, 0, "nothing to claim it was the seventh waking");
+  // and the page still renders
+  assert.equal(typeof rec?.kind, "string");
 });

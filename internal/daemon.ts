@@ -10,12 +10,30 @@ import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
-import { alarmSpent, formatDuration, knockable, readWaiting, type KnockHold, type WaitSpec } from "./schedule.ts";
+import {
+  alarmSpent,
+  formatDuration,
+  knockable,
+  knockFloorMs,
+  readWaiting,
+  type KnockHold,
+  type WaitSpec,
+} from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
-import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
+import {
+  clearCut,
+  DAY_MS,
+  readCut,
+  readMeta,
+  recordWake,
+  writeCut,
+  writeMeta,
+  type CutRecord,
+  type Meta,
+} from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { activeSince, lastSaidIn, readSaid, waitingOn } from "./people.ts";
@@ -77,28 +95,71 @@ async function sleepUntil(dueAtMs: number, knock: () => boolean, parked: boolean
   return "time";
 }
 
-/** True once, if the last round was cut by a restart rather than by a crash. */
-function takeInterrupted(paths: Paths): boolean {
-  let files: string[];
-  try {
-    files = readdirSync(paths.meta).filter((f) => f.startsWith("interrupted-") && f.endsWith(".json"));
-  } catch {
-    return false;
+/**
+ * The round before this daemon start, if it never finished.
+ *
+ * A leftover intent.json means the daemon itself was killed mid-round, so nothing about
+ * the round's actions survived with it. A restart leaves one too, renamed aside so it is
+ * not mistaken for a crash; older daemons also left `intent.aborted.*` files, which mean
+ * the same thing. `consume` is what separates a preview from a start: the preview reads
+ * the same note and deletes nothing.
+ */
+function leftoverCut(paths: Paths, consume: boolean): CutRecord | null {
+  const intent = readJson<{ waking?: number; reason?: string } | null>(paths.intent, null);
+  const interrupted = filesIn(paths.meta, "interrupted-");
+  const legacy = filesIn(paths.meta, "intent.aborted.");
+
+  const fromFile = (name: string | undefined): { waking: number; reason: string } => {
+    const rec = name === undefined
+      ? null
+      : readJson<{ waking?: number; reason?: string } | null>(join(paths.meta, name), null);
+    return { waking: numOr(rec?.waking, 0), reason: strOr(rec?.reason, "timer") };
+  };
+
+  let cut: CutRecord | null = null;
+  if (intent !== null) {
+    // the intent still in place is the newest thing we know about
+    cut = { ...cutOf("crashed"), waking: numOr(intent.waking, 0), reason: strOr(intent.reason, "timer") };
+  } else if (interrupted.length > 0) {
+    cut = { ...cutOf("interrupted"), ...fromFile(interrupted[interrupted.length - 1]) };
+  } else if (legacy.length > 0) {
+    cut = { ...cutOf("crashed"), ...fromFile(legacy[legacy.length - 1]) };
   }
-  if (files.length === 0) return false;
-  for (const f of files) rmSync(join(paths.meta, f), { force: true });
-  return true;
+
+  if (consume) {
+    rmSync(paths.intent, { force: true });
+    for (const f of [...interrupted, ...legacy]) rmSync(join(paths.meta, f), { force: true });
+  }
+  return cut;
 }
 
-function recoverIntent(paths: Paths): boolean {
-  if (!existsSync(paths.intent)) return false;
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+function filesIn(dir: string, prefix: string): string[] {
   try {
-    renameSync(paths.intent, join(paths.meta, `intent.aborted.${stamp}.json`));
+    return readdirSync(dir).filter((f) => f.startsWith(prefix) && f.endsWith(".json")).sort();
   } catch {
-    rmSync(paths.intent, { force: true });
+    return [];
   }
-  return true;
+}
+
+function cutOf(kind: CutRecord["kind"]): CutRecord {
+  return { kind, at: new Date().toISOString(), waking: 0, reason: "timer" };
+}
+
+const numOr = (v: unknown, fallback: number): number => (typeof v === "number" ? v : fallback);
+const strOr = (v: unknown, fallback: string): string => (typeof v === "string" ? v : fallback);
+
+/** What a round killed at the wall left behind: where it was, and what it was doing. */
+function cutOfTimeout(r: RpcResult, waking: number, reason: WakeReason, capMinutes: number): CutRecord {
+  const recent = r.toolCalls.slice(-3).map((c) => `${c.name} ${c.preview}`.trim().slice(0, 80));
+  const openMs = r.openCall ? Date.now() - r.openCall.atMs : undefined;
+  return {
+    ...cutOf("timeout"),
+    waking,
+    reason,
+    capMinutes,
+    ...(recent.length > 0 ? { tools: recent } : {}),
+    ...(openMs === undefined ? {} : { openMs }),
+  };
 }
 
 function logLine(
@@ -216,9 +277,15 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     policy.runner === "docker" ? inContainer : host;
   const statePath = at("/state", paths.palimpsest);
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
-  let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
-  const interrupted = o.dry ? false : takeInterrupted(paths);
-  if (crashed) writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
+  // A preview computes the same note without touching the disk: --dry must not eat what
+  // it is showing, but it must still say what a real start would say.
+  const leftover = leftoverCut(paths, !o.dry);
+  if (leftover && !o.dry) {
+    writeCut(paths, leftover);
+    if (leftover.kind === "crashed") {
+      writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
+    }
+  }
   let escalation: Escalation = loadEscalation(paths);
 
   for (;;) {
@@ -292,9 +359,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // something — where it may speak, and its own knobs — so the tools block underneath
     // it stays cacheable from one waking to the next.
     const places = knownPlaces(paths.root, o.instance);
+    const capMinutes = Math.max(1, Math.round(policy.cycle.timeoutSec / 60));
     const systemPrompt = systemPromptFor(
       paths,
-      systemFacts(places, policySummary(policy)),
+      systemFacts(places, policySummary(policy), capMinutes),
     );
     const longGap = typeof meta.lastWakeMs === "number" && nowMs - meta.lastWakeMs > longGapMs;
     const wakes24h = readJson<number[]>(join(paths.meta, "wakes.json"), []).filter(
@@ -344,8 +412,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
           lines: t.tail,
         };
       })(),
-      crashed,
-      interrupted,
+      cut: o.dry ? (leftover ?? readCut(paths)) : readCut(paths),
       longGap,
       hint: plan.hint,
       lowPending: pendingLow(paths),
@@ -407,7 +474,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     });
 
     rmSync(paths.intent, { force: true });
-    crashed = false;
 
     // Every waking is its own session, so the session total *is* this cycle's cost.
     // (It was a difference while one session spanned many wakings.)
@@ -425,6 +491,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
 
     const symptom = classify(result);
+    // The page just built already said how the last round ended, and this note is about
+    // one round: clear it, then replace it only if this round was itself cut at the wall.
+    clearCut(paths);
+    if (symptom === "timeout") writeCut(paths, cutOfTimeout(result, waking, reason, capMinutes));
     // Only a wake that ran to the end has read them. Anything else leaves the messages
     // in place so the next wake hands them over again rather than losing them.
     // An injection that no turn followed never reached the model: leaving it unseen
@@ -443,9 +513,18 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // a message that has already been handed over gets a floor before it may knock
     // again; anything that arrives in the meantime does not wait behind it
     const handed = [...inbox.map((m) => m.file), ...read];
+    // a clean round gets the minute; one that failed gets the backoff a timer would get, so
+    // the same unanswerable message cannot wake it every minute for the rest of the night
+    const rung = planFor(escalation);
+    const holdMs = knockFloorMs(
+      symptom === "ok",
+      minWakeMs,
+      policy.cycle.defaultWakeMinutes * 60_000 * rung.backoff,
+      rung.parked,
+    );
     meta = {
       ...meta,
-      knockHold: handed.length === 0 ? null : { files: handed, untilMs: Date.now() + minWakeMs },
+      knockHold: handed.length === 0 ? null : { files: handed, untilMs: Date.now() + holdMs },
       lastCycle: {
         at: new Date().toISOString(),
         wake: reason,

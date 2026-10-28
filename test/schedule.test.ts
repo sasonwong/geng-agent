@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alarmSpent, knockable, readWaiting } from "../internal/schedule.ts";
+import { alarmSpent, knockFloorMs, knockable, readWaiting } from "../internal/schedule.ts";
+import { planFor } from "../internal/escalation.ts";
 
 function tmpFile(content: string): string {
   const dir = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -50,4 +51,29 @@ test("an alarm is spent only once its moment arrives", () => {
   assert.equal(alarmSpent(alarm, due - 1), false, "an earlier knock must not cancel the alarm");
   assert.equal(alarmSpent(alarm, due), true, "a wake at the appointed time spends it");
   assert.equal(alarmSpent(null, due), false, "no alarm: nothing to spend");
+});
+
+test("a batch that keeps failing waits like a timer, not a minute", () => {
+  const minMs = 60_000;
+  assert.equal(knockFloorMs(true, minMs, 2 * 60 * 60_000), minMs, "a clean round: one minute");
+  assert.equal(knockFloorMs(false, minMs, 2 * 60 * 60_000), 2 * 60 * 60_000, "a failed one: the backoff");
+  assert.equal(knockFloorMs(false, minMs, 0), minMs, "no backoff yet: still the floor");
+});
+
+test("the knock floor never goes backwards as the ladder climbs", () => {
+  const minMs = 60_000;
+  const defMs = 30 * 60_000;
+  const floor = (level: number): number => {
+    const rung = planFor({ level, streak: level, symptom: "timeout", detail: "", updatedAt: null });
+    return knockFloorMs(false, minMs, defMs * rung.backoff, rung.parked);
+  };
+  const floors = [1, 2, 3, 4].map(floor);
+  for (let i = 1; i < floors.length; i++) {
+    assert.ok(
+      (floors[i] as number) >= (floors[i - 1] as number),
+      `level ${i + 1} (${floors[i]}) must not wait less than level ${i} (${floors[i - 1]})`,
+    );
+  }
+  // the parked rung has no timer behind it, so it must be the longest wait, not the shortest
+  assert.ok((floors[3] as number) > (floors[2] as number), "level 4 is parked: backoff is 0");
 });

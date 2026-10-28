@@ -37,7 +37,7 @@ export function defaultPolicy(): Policy {
   return {
     schema: 1,
     runner: "local",
-    cycle: { timeoutSec: 1200, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
+    cycle: { timeoutSec: 1800, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
     backup: { enabled: true },
     timezone: "Asia/Shanghai",
     files: { maxAgeDays: 0, maxMb: 500 },

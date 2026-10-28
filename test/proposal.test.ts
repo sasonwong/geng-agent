@@ -53,7 +53,7 @@ test("the frame is not negotiable", () => {
   const rejected = result?.rejected.map((r) => r.key) ?? [];
   assert.ok(rejected.includes("container.network"));
   assert.ok(rejected.includes("cycle.timeoutSec"));
-  assert.equal(loadPolicy(paths.policy).cycle.timeoutSec, 1200);
+  assert.equal(loadPolicy(paths.policy).cycle.timeoutSec, 1800);
 });
 
 test("no proposal means no work", () => {
