@@ -40,6 +40,7 @@ test("the tools are loaded from outside the agent's home", () => {
   const joined = args.join(" ");
   assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
   assert.match(joined, /-e \/opt\/geng\/extensions\/websearch\.ts/);
+  assert.match(joined, /-e \/opt\/geng\/extensions\/mail\.ts/);
 });
 
 test("every -e value is really passed to docker as an env var", () => {

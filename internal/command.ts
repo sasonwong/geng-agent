@@ -110,6 +110,8 @@ export function buildCommand(
         "/opt/geng/extensions/say-mute.ts",
         "-e",
         "/opt/geng/extensions/websearch.ts",
+        "-e",
+        "/opt/geng/extensions/mail.ts",
       ]),
     );
     return { cmd: "docker", args, env: process.env, cwd: paths.workspace };
