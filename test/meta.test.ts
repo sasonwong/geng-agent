@@ -64,3 +64,21 @@ test("a cut note that nothing can read is worth less than a waking that starts",
   writeFileSync(join(paths.meta, "cut.json"), '{"kind":"nonsense"}');
   assert.equal(readCut(paths), null);
 });
+
+test("a hand-written cut note cannot break the page that reads it", () => {
+  const paths = fixture();
+  // `/state` is writable from inside, so every field is an input, not a promise: `tools`
+  // used to arrive as a string and throw on `.join` while a waking was being assembled
+  writeFileSync(
+    join(paths.meta, "cut.json"),
+    JSON.stringify({ kind: "timeout", tools: "bash ls", capMinutes: "20", openMs: null, waking: "7" }),
+  );
+  const rec = readCut(paths);
+  assert.equal(rec?.kind, "timeout");
+  assert.equal(rec?.tools, undefined, "a string is not a list of actions");
+  assert.equal(rec?.capMinutes, undefined);
+  assert.equal(rec?.openMs, undefined);
+  assert.equal(rec?.waking, 0, "nothing to claim it was the seventh waking");
+  // and the page still renders
+  assert.equal(typeof rec?.kind, "string");
+});

@@ -79,12 +79,29 @@ export function readWakes(paths: Paths, nowMs: number): number[] {
   ).filter((t) => nowMs - t < DAY_MS);
 }
 
-/** Forgiving on purpose: a broken note is worth less than a waking that cannot start. */
+/**
+ * Forgiving on purpose: a broken note is worth less than a waking that cannot start.
+ *
+ * Every field the page reads is checked here, not at the page: `/state` is writable from
+ * inside, so a hand-written record is an ordinary input, and `tools: "bash ls"` used to
+ * pass this check and then throw on `.join` while a waking was being assembled.
+ */
 export function readCut(paths: Paths): CutRecord | null {
-  const rec = readJson<CutRecord | null>(join(paths.meta, "cut.json"), null);
+  const rec = readJson<Partial<CutRecord> | null>(join(paths.meta, "cut.json"), null);
   if (rec === null || typeof rec !== "object") return null;
   if (rec.kind !== "timeout" && rec.kind !== "crashed" && rec.kind !== "interrupted") return null;
-  return rec;
+  const tools = Array.isArray(rec.tools) ? rec.tools.filter((t) => typeof t === "string") : [];
+  const cap = typeof rec.capMinutes === "number" ? rec.capMinutes : undefined;
+  const open = typeof rec.openMs === "number" ? rec.openMs : undefined;
+  return {
+    kind: rec.kind,
+    at: typeof rec.at === "string" ? rec.at : "",
+    waking: typeof rec.waking === "number" ? rec.waking : 0,
+    reason: typeof rec.reason === "string" ? rec.reason : "timer",
+    ...(tools.length === 0 ? {} : { tools }),
+    ...(cap === undefined ? {} : { capMinutes: cap }),
+    ...(open === undefined ? {} : { openMs: open }),
+  };
 }
 
 export function writeCut(paths: Paths, rec: CutRecord): void {
