@@ -10,7 +10,15 @@ import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
-import { alarmSpent, formatDuration, knockable, readWaiting, type KnockHold, type WaitSpec } from "./schedule.ts";
+import {
+  alarmSpent,
+  formatDuration,
+  knockable,
+  knockFloorMs,
+  readWaiting,
+  type KnockHold,
+  type WaitSpec,
+} from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
@@ -496,9 +504,16 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // a message that has already been handed over gets a floor before it may knock
     // again; anything that arrives in the meantime does not wait behind it
     const handed = [...inbox.map((m) => m.file), ...read];
+    // a clean round gets the minute; one that failed gets the backoff a timer would get, so
+    // the same unanswerable message cannot wake it every minute for the rest of the night
+    const holdMs = knockFloorMs(
+      symptom === "ok",
+      minWakeMs,
+      policy.cycle.defaultWakeMinutes * 60_000 * planFor(escalation).backoff,
+    );
     meta = {
       ...meta,
-      knockHold: handed.length === 0 ? null : { files: handed, untilMs: Date.now() + minWakeMs },
+      knockHold: handed.length === 0 ? null : { files: handed, untilMs: Date.now() + holdMs },
       lastCycle: {
         at: new Date().toISOString(),
         wake: reason,

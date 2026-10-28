@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alarmSpent, knockable, readWaiting } from "../internal/schedule.ts";
+import { alarmSpent, knockFloorMs, knockable, readWaiting } from "../internal/schedule.ts";
 
 function tmpFile(content: string): string {
   const dir = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -50,4 +50,11 @@ test("an alarm is spent only once its moment arrives", () => {
   assert.equal(alarmSpent(alarm, due - 1), false, "an earlier knock must not cancel the alarm");
   assert.equal(alarmSpent(alarm, due), true, "a wake at the appointed time spends it");
   assert.equal(alarmSpent(null, due), false, "no alarm: nothing to spend");
+});
+
+test("a batch that keeps failing waits like a timer, not a minute", () => {
+  const minMs = 60_000;
+  assert.equal(knockFloorMs(true, minMs, 2 * 60 * 60_000), minMs, "a clean round: one minute");
+  assert.equal(knockFloorMs(false, minMs, 2 * 60 * 60_000), 2 * 60 * 60_000, "a failed one: the backoff");
+  assert.equal(knockFloorMs(false, minMs, 0), minMs, "no backoff yet: still the floor");
 });

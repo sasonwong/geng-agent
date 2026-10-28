@@ -90,6 +90,19 @@ export interface KnockHold {
   untilMs: number;
 }
 
+/**
+ * How long a message that has already been handed over must wait before it may knock again.
+ *
+ * After a round that ended cleanly, a minute is enough: the words were read, and the only
+ * thing a shorter floor would buy is a second delivery of the same sentence. After a round
+ * that did not, the same batch waits what a timer would wait at this escalation level —
+ * otherwise a message nobody can answer keeps waking it forever, because the message only
+ * counts as read when a round ends cleanly. New messages are unaffected either way.
+ */
+export function knockFloorMs(clean: boolean, minMs: number, backoffMs: number): number {
+  return clean ? minMs : Math.max(minMs, backoffMs);
+}
+
 export function knockable(pending: string[], hold: KnockHold | null, nowMs: number): boolean {
   if (pending.length === 0) return false;
   if (!hold || nowMs >= hold.untilMs) return true;
