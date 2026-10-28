@@ -226,7 +226,7 @@ GENG_MAIL_BIND=127.0.0.1:8788               # 只听 loopback，前面是 tunnel
 通道说清楚了，剩下的是行为：
 
 - 白名单外的发件人**在落盘之前**被丢掉，日志一行 `mail ← guest someone@example.org（没送）`，
-  那个地址就是该粘进 `allow` 的
+  那个地址就是该粘进 `allow` 的。**这是减噪，不是身份**：信封发件人一样没验过，谁都能写
 - `From` 可伪造（Cloudflare 不给 Worker 任何可信的 SPF/DKIM 结论），所以邮件**不叫醒它**，
   也没有「@ 它」这种东西
 - 已读是它自己的声明：`/mail` 只读，邮件永不移动，`/state/mail.read.json` 是它自己的名单

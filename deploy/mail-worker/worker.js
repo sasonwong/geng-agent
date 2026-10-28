@@ -51,8 +51,9 @@ export default {
       headers: { "content-type": "application/json", "x-geng-token": token },
       body: JSON.stringify({
         to: message.to,
-        // the envelope sender, not the From header: the host's whitelist is about who
-        // actually sent it
+        // the envelope sender, not the From header. Neither is authenticated to us, so
+        // the host's whitelist is noise control — it decides who may land in the mailbox,
+        // and it is never evidence that this really was that person
         from: message.from,
         subject: mail.subject ?? "",
         messageId: message.headers.get("message-id") ?? mail.messageId ?? "",
