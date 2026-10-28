@@ -152,9 +152,16 @@ const REASON_LINE: Record<WakeReason, string> = {
   nudge: "你上次没有留下下次什么时候醒，所以被按默认间隔叫醒了",
 };
 
-/** Whether anyone is on the other end — the same fact from the other side. */
-function whoLine(inboxCount: number): string {
-  return inboxCount > 0 ? "，现在有人在跟你说话。" : "，现在没人在跟你说话。";
+/**
+ * Whether anyone is on the other end — the same fact from the other side. A file in the
+ * inbox is not necessarily a person: a feeder writes events there too, and a page that
+ * called a red build "somebody talking to you" would be lying about the one thing it is
+ * supposed to get right.
+ */
+function whoLine(inbox: InboxMsg[]): string {
+  if (inbox.length === 0) return "，现在没人在跟你说话。";
+  // an inbox that only holds events says nothing about whether anyone is there
+  return inbox.some((m) => typeof m.chat === "number") ? "，现在有人在跟你说话。" : "";
 }
 
 /** The rare-changing half of the picture: where it may speak, and its own knobs. */
@@ -248,7 +255,11 @@ export function buildPacket(input: PacketInput): string {
     // waiting, or the page quietly privileges whoever spoke last
     const people = new Set(inbox.map((m) => m.chat).filter((c) => typeof c === "number"));
     const who = people.size > 1 ? `（${people.size} 个人）` : "";
-    out.push("", `有人在跟你说话：${inbox.length} 条${who}，在 ${inboxPath}/。`);
+    const fromPeople = inbox.filter((m) => typeof m.chat === "number").length;
+    const events = inbox.length - fromPeople;
+    if (fromPeople > 0) out.push("", `有人在跟你说话：${fromPeople} 条${who}，在 ${inboxPath}/。`);
+    // counted, never described: which event it is, it reads in the file
+    if (events > 0) out.push("", `${events} 件不是对话（feed 写的），也在 ${inboxPath}/。`);
   }
   // Files are counted, never described: what is in them is the agent's business to look at.
   const kinds = new Map<string, number>();
@@ -279,7 +290,7 @@ export function buildPacket(input: PacketInput): string {
   }
 
   if (lowPending > 0) {
-    out.push(`还有 ${lowPending} 条群里的消息在 ${inboxPath}/low/，它们没有叫醒你。`);
+    out.push(`还有 ${lowPending} 条不叫醒你的在 ${inboxPath}/low/（群里的闲话、feed 记下的动静）。`);
   }
   const muteLine = renderMutes(mutes);
   const attentionLine = renderAttention(attention, places, timezone, nowMs);
@@ -305,7 +316,10 @@ export function buildPacket(input: PacketInput): string {
 
   // one sentence: why it is awake, and whether anyone is on the other end. Then the
   // standing permission, alone, because it is the only line that is always true.
-  out.push("", `${waking <= 1 ? "这是你第一次醒来" : REASON_LINE[reason]}${whoLine(inbox.length)}`);
+  const knockedByEvent =
+    reason === "knock" && !inbox.some((m) => typeof m.chat === "number");
+  const why = knockedByEvent ? "收件箱里进了事件（不是对话），所以你现在醒了" : REASON_LINE[reason];
+  out.push("", `${waking <= 1 ? "这是你第一次醒来" : why}${whoLine(inbox)}`);
   out.push("你可以什么都不做，那不算失败。");
 
   if (searchLeft !== null) {
