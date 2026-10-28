@@ -445,11 +445,23 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
   if (mailCfg !== null) {
     const mailEnv = readMailEnv(root);
+    // a mailbox is a second transport: a field missing here must not take Telegram down
+    // with it, and it must not be quiet either — ops is the only place a person looks
+    const broken = (why: string): void => {
+      const line = `信箱没起来：${why}。telegram 照常。`;
+      log(line);
+      writeOps(ops, "gateway", line);
+    };
     if (mailEnv === null) {
-      throw new ExpectedError(`有 ${join(root, "secrets", "mail.json")} 但没有 token：写 secrets/mail.env 的 GENG_MAIL_TOKEN`);
+      broken(`有 ${join("secrets", "mail.json")} 但没有 token（secrets/mail.env 的 GENG_MAIL_TOKEN）`);
+    } else {
+      try {
+        await startMailServer({ root, cfg: mailCfg, env: mailEnv, log });
+        for (const line of describeConfig(mailCfg)) log(`mail 上线：${line}`);
+      } catch (err) {
+        broken((err as Error).message);
+      }
     }
-    await startMailServer({ root, cfg: mailCfg, env: mailEnv, log });
-    for (const line of describeConfig(mailCfg)) log(`mail 上线：${line}`);
   }
 
   void sweep();

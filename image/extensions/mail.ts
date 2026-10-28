@@ -11,6 +11,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const MAIL = process.env.GENG_MAIL ?? "/mail";
+const FILES = process.env.GENG_FILES ?? "/files";
 const STATE = process.env.GENG_STATE ?? "/state";
 // its own book: it may rewrite or delete this file, and then everything counts as unread
 const READ_LIST = join(STATE, "mail.read.json");
@@ -136,9 +137,14 @@ const mailTool = defineTool({
       const page = text.slice(offset, offset + PAGE);
       const rest = text.length - offset - page.length;
       const out = [`发件人 ${one.from ?? "（没有）"} · ${one.at ?? "（没有时间）"} · ${one.id}`];
-      const came = (one.attachments ?? []).map((a) =>
-        a.path ? a.path : (a.note ?? "（没取到）"),
-      );
+      // /files has its own cap and its own forget, so a path in a mail can be a file the
+      // daemon has already pruned: say so here rather than printing a lie
+      const came = (one.attachments ?? []).map((a) => {
+        if (!a.path) return a.note ?? "（没取到）";
+        return existsSync(join(FILES, a.path.replace(/^\/files\//, "")))
+          ? a.path
+          : `${a.path}（已经删掉了）`;
+      });
       if (came.length > 0) out.push(`一起发来的：${came.join("、")}`);
       out.push("", page === "" ? "（这一封没有正文）" : page);
       if (rest > 0) out.push("", `（还有 ${rest} 字，offset=${offset + page.length} 接着读）`);

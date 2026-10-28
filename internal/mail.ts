@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createServer, type Server } from "node:http";
-import { makePaths } from "./paths.ts";
+import { makePaths, type Paths } from "./paths.ts";
 import { parseEnvFile } from "./search.ts";
-import { readJson, writeJson } from "./state.ts";
+import { mtimeMs, readJson, writeJson } from "./state.ts";
 
 /**
  * Mail arrives from Cloudflare through a Worker, because a Worker is the only thing that
@@ -60,6 +60,18 @@ export function readMailEnv(root: string): MailEnv | null {
 }
 
 /**
+ * A mail can say `&#99999999;`, and a decoder that throws on it turns one bad character
+ * into a 500, a bounce, and a mail that can never be received. Anything that is not a
+ * writable code point is left exactly as it arrived.
+ */
+function decodeEntity(all: string, digits: string, radix: number): string {
+  const n = Number.parseInt(digits, radix);
+  if (!Number.isFinite(n) || n <= 0 || n > 0x10ffff) return all;
+  if (n >= 0xd800 && n <= 0xdfff) return all; // lone surrogates have no UTF-8 encoding
+  return String.fromCodePoint(n);
+}
+
+/**
  * The body of a mail is a document, not sentences: block tags have to become line breaks
  * or the whole thing arrives as one paragraph with the words run together.
  */
@@ -75,8 +87,8 @@ export function htmlToText(html: string): string {
     .replace(/&quot;/gi, '"')
     .replace(/&(?:apos|#39);/gi, "'")
     // Outlook and friends emit numeric entities for quotes and dashes
-    .replace(/&#(\d+);/g, (_all, n: string) => String.fromCodePoint(Number(n)))
-    .replace(/&#x([0-9a-f]+);/gi, (_all, n: string) => String.fromCodePoint(Number.parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (all, d: string) => decodeEntity(all, d, 10))
+    .replace(/&#x([0-9a-f]+);/gi, (all, d: string) => decodeEntity(all, d, 16))
     // last, so a mail about "&amp;" is not decoded twice
     .replace(/&amp;/gi, "&")
     .replace(/[ \t\u00a0]+/g, " ")
@@ -146,13 +158,16 @@ export type Accepted =
   | { ok: true; id: string; instance: string }
   | { ok: false; reason: "bad" | "unknown" | "guest" };
 
-const BODY_LIMIT = 200_000;
+// counting unread mail parses every file on the page of every waking, and /mail only
+// grows: 32 KB is already a very long letter, and it bounds the cost at ~500 files
+const BODY_LIMIT = 32_000;
 const ATTACHMENT_LIMIT = 5 * 1024 * 1024;
 const ATTACHMENT_TOTAL = 10 * 1024 * 1024;
 
-function fileName(id: string, name: string): string {
+function fileName(id: string, index: number, name: string): string {
   const base = basename(name).replace(/[^\w.\-]+/g, "_").slice(-80);
-  return `${id}-${base === "" ? "file" : base}`;
+  // the index is there because one mail may carry two files called screenshot.png
+  return `${id}-${index}-${base === "" ? "file" : base}`;
 }
 
 /**
@@ -197,8 +212,8 @@ export function accept(
 
   const attachments: { kind: string; path?: string; note?: string; bytes?: number }[] = [];
   let budget = ATTACHMENT_TOTAL;
-  for (const a of mail.attachments) {
-    const name = fileName(id, a.name ?? "file");
+  for (const [index, a] of mail.attachments.entries()) {
+    const name = fileName(id, index, a.name ?? "file");
     const stored = a.content === undefined ? null : Buffer.from(a.content, "base64");
     const bytes = stored === null ? undefined : stored.byteLength;
     if (stored === null || bytes === undefined) {
@@ -229,6 +244,50 @@ export function accept(
   return { ok: true, id, instance: account.instance };
 }
 
+export interface PendingMail {
+  count: number;
+  senders: string[];
+  oldestMs: number | null;
+}
+
+/**
+ * Unread mail, aged by when it arrived — not by the Date header, which is the sender's
+ * claim: one mail saying 1970 would pin "the oldest one has waited N days" forever.
+ * The file's mtime is when this host stored it, and nothing writes these files again.
+ */
+export function pendingMail(p: Paths): PendingMail {
+  let names: string[];
+  try {
+    names = readdirSync(p.mail).filter((f) => f.endsWith(".json"));
+  } catch {
+    return { count: 0, senders: [], oldestMs: null };
+  }
+  // its own file, so it can be hand-edited or truncated: anything unexpected means
+  // "nothing is read" and the mailbox reappears on the page
+  const raw = readJson<unknown>(p.mailRead, []);
+  const read = new Set(
+    Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : [],
+  );
+  const senders = new Set<string>();
+  const times: number[] = [];
+  let count = 0;
+  for (const name of names) {
+    const file = join(p.mail, name);
+    const one = readJson<{ id?: unknown; from?: unknown }>(file, {});
+    const id = typeof one.id === "string" ? one.id : name.replace(/\.json$/, "");
+    if (read.has(id)) continue;
+    count++;
+    if (typeof one.from === "string" && one.from !== "") senders.add(one.from);
+    const at = mtimeMs(file);
+    if (at !== null) times.push(at);
+  }
+  return {
+    count,
+    senders: [...senders].slice(0, 3),
+    oldestMs: times.length === 0 ? null : Math.min(...times),
+  };
+}
+
 /** A mailbox with nobody allowed is a typo, so the startup line must make it look like one. */
 export function describeConfig(cfg: MailConfig): string[] {
   return Object.entries(cfg).map(([address, a]) => {
@@ -245,6 +304,8 @@ export interface MailServerOptions {
   cfg: MailConfig;
   env: MailEnv;
   log: (line: string) => void;
+  /** Overridable so a test can prove the guard without sending 25 MB. */
+  maxBytes?: number;
 }
 
 /**
@@ -252,6 +313,7 @@ export interface MailServerOptions {
  * the mailbox", so there is nothing to route.
  */
 export async function startMailServer(o: MailServerOptions): Promise<Server> {
+  const maxBytes = o.maxBytes ?? INGEST_MAX_BYTES;
   const server = createServer((req, res) => {
     const send = (code: number, body: unknown): void => {
       res.writeHead(code, { "content-type": "application/json" });
@@ -270,10 +332,10 @@ export async function startMailServer(o: MailServerOptions): Promise<Server> {
     let size = 0;
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size <= INGEST_MAX_BYTES) chunks.push(chunk);
+      if (size <= maxBytes) chunks.push(chunk);
     });
     req.on("end", () => {
-      if (size > INGEST_MAX_BYTES) {
+      if (size > maxBytes) {
         send(413, { ok: false, error: "too big" });
         return;
       }

@@ -5,6 +5,7 @@ import { markSeen, peekInbox, quarantine } from "./inbox.ts";
 import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
+import { pendingMail } from "./mail.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
@@ -49,26 +50,6 @@ function pendingLow(p: Paths): number {
   }
 }
 
-/**
- * Mail that arrived and was never marked read. It never knocks — a stranger with an
- * envelope should not be able to start a container — so the count is all the paper gets.
- */
-function pendingMail(p: Paths): { count: number; senders: string[]; oldestMs: number | null } {
-  // its own file, so it can be hand-edited or truncated: treat anything unexpected as
-  // "nothing is read" and let the mailbox reappear on the page
-  const raw = readJson<unknown>(p.mailRead, []);
-  const read = new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
-  const unread = peekInbox(p.mail).filter((m) => !read.has(m.id));
-  const senders = [...new Set(unread.map((m) => m.from))].filter(
-    (f): f is string => typeof f === "string" && f !== "",
-  );
-  const times = unread.map((m) => Date.parse(m.at ?? "")).filter((t) => Number.isFinite(t));
-  return {
-    count: unread.length,
-    senders: senders.slice(0, 3),
-    oldestMs: times.length === 0 ? null : Math.min(...times),
-  };
-}
 
 function pendingFiles(p: Paths): string[] {
   // the parser, not a directory listing: a file nothing can read must not be able to knock
