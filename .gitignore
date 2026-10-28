@@ -7,4 +7,5 @@
 /audit/
 
 /node_modules/
+/deploy/mail-worker/node_modules/
 *.log

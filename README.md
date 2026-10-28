@@ -231,23 +231,56 @@ docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
 限额写在宿主这边，容器改不了；用完时工具会说"今天的搜索用完了"，唤醒纸上也会写着
 今天还剩几次。
 
+### 邮件
+
+给它一个真地址：Cloudflare Email Routing 收信 → 一个 Email Worker 解 MIME → POST 回宿主。
+**收信是 pull**：邮件只进 `data/<inst>/mail/`，不叫醒它，唤醒纸上报「邮件：2 封没处理」。
+
+三份配置：
+
+```bash
+# secrets/mail.json     地址 → 实例。allow 留空 = 谁都进不来（和 telegram 的白名单不同，
+#                       这里默认是关的：一个没配好的信箱不该是开放的信箱）
+{ "geng-alice-bot@example.com": { "instance": "alice", "allow": ["you@example.org"] } }
+
+# secrets/mail.env
+GENG_MAIL_TOKEN=$(openssl rand -hex 16)     # Worker 和宿主共用的那一串
+GENG_MAIL_BIND=127.0.0.1:8788               # 只听 loopback，前面是 tunnel
+```
+
+然后是 Cloudflare 那边（一次）：`deploy/mail-worker/README.md` 里四步——`wrangler deploy`、
+两个 secret、`cloudflared tunnel route dns`、Email Routing 里加一条「Send to a Worker」的规则。
+
+通道说清楚了，剩下的是行为：
+
+- 白名单外的发件人**在落盘之前**被丢掉，日志一行 `mail ← guest someone@example.org（没送）`，
+  那个地址就是该粘进 `allow` 的。**这是减噪，不是身份**：信封发件人一样没验过，谁都能写
+- `From` 可伪造（Cloudflare 不给 Worker 任何可信的 SPF/DKIM 结论），所以邮件**不叫醒它**，
+  也没有「@ 它」这种东西
+- 已读是它自己的声明：`/mail` 只读，邮件永不移动，`/state/mail.read.json` 是它自己的名单
+- **只收不回**：现在没有回信通道，`say` 只说到会话
+
 ## 目录
 
 ```
 data/<instance>/
   palimpsest/   它的书：identity.md  open-loops/  waiting.json  journal/  mute.json
-                挂成容器里的 /state（可写）
+                mail.read.json（它标过已读的邮件 id）· 挂成容器里的 /state（可写）
   policy.json   它活在什么规矩下——**在书外面**，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）
   files/        别人发来的图片和文件，挂成 /files（只读）
   feed/         feeder 自己的账（github.seen.json）：不算它写的文件，也不归它读
   inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
+  mail/         收到的邮件，一封一个文件，挂成 /mail（只读）；已读是书里的一张名单
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
   session/      pi 的会话文件，一轮一个
   usage/ meta/ daemon.log
 secrets/<instance>.env   模型凭据、搜索地址；--env-file 注入，永不挂载
-deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  egress.sh
+secrets/mail.json        信箱的地址和发件人白名单（容器看不见）
+secrets/mail.env         收信端点的 token 和监听地址
+deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-mail-tunnel.service
+           cloudflared.yml  egress.sh  mail-worker/
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore。

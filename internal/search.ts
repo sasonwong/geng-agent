@@ -15,7 +15,7 @@ export interface SearchEnv {
   dailyLimit: number;
 }
 
-function parseEnvFile(path: string): Record<string, string> {
+export function parseEnvFile(path: string): Record<string, string> {
   const out: Record<string, string> = {};
   const text = readText(path);
   if (!text) return out;

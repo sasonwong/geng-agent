@@ -10,6 +10,7 @@ import { runGateway } from "../../internal/gateway.ts";
 import { getMe } from "../../internal/telegram.ts";
 import { readJson } from "../../internal/state.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
+import { describeConfig, loadMailConfig, readMailEnv } from "../../internal/mail.ts";
 import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
 import { loadPolicy } from "../../internal/policy.ts";
 import { readFeedEnv, runGithubFeed } from "../../internal/feed.ts";
@@ -237,11 +238,26 @@ async function main(): Promise<number> {
           {},
         );
         const names = Object.keys(bots);
-        if (names.length === 0) {
-          console.error(`没有 bot：先写 ${join(args.root, "secrets", "bots.json")}`);
+        const mailCfg = loadMailConfig(args.root);
+        const mailEnv = readMailEnv(args.root);
+        if (names.length === 0 && mailCfg === null) {
+          console.error(
+            `没有 bot 也没有信箱：先写 ${join(args.root, "secrets", "bots.json")} 或 secrets/mail.json`,
+          );
           return 2;
         }
         let bad = 0;
+        if (mailCfg !== null) {
+          // a mailbox with no token accepts nothing, and it fails silently from outside
+          if (mailEnv === null) {
+            console.error("FAIL mail: 没有 token（secrets/mail.env 的 GENG_MAIL_TOKEN）");
+            bad++;
+          } else {
+            for (const line of describeConfig(mailCfg)) {
+              console.log(`ok   mail       ${line}  bind=${mailEnv.bind.host}:${mailEnv.bind.port}`);
+            }
+          }
+        }
         for (const name of names) {
           const token = bots[name]?.token ?? "";
           if (token === "") {

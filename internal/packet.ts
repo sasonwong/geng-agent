@@ -21,6 +21,10 @@ export interface PacketInput {
   waking: number;
   /** Where the agent sees the palimpsest: /state in docker, an absolute path for the local runner. */
   statePath: string;
+  /** What arrived by mail and was never marked read. Mail never knocks: it waits. */
+  mailPending: { count: number; senders: string[]; oldestMs: number | null };
+  /** Where the mailbox appears inside the container. */
+  mailPath: string;
   /** Where the read-only auxiliary mounts appear inside the container. */
   inboxPath: string;
   peoplePath: string;
@@ -193,7 +197,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, attention, interrupted, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
+  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, attention, interrupted, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
 
   const out: string[] = [];
 
@@ -292,6 +296,18 @@ export function buildPacket(input: PacketInput): string {
 
   if (lowPending > 0) {
     out.push(`还有 ${lowPending} 条不叫醒你的在 ${inboxPath}/low/（群里的闲话、feed 记下的动静）。`);
+  }
+  if (mailPending.count > 0) {
+    // counted, never summarised: the senders and how long the oldest has waited are the
+    // only two things it needs to decide whether to open any of them
+    const waited = mailPending.oldestMs === null ? null : nowMs - mailPending.oldestMs;
+    const first =
+      waited === null
+        ? ""
+        : `，最早一封 ${waited >= DAY_MS ? `${Math.round(waited / DAY_MS)} 天` : formatDuration(waited)}前`;
+    const who =
+      mailPending.senders.length === 0 ? "" : `，来自 ${mailPending.senders.join("、")}`;
+    out.push(`邮件：${mailPending.count} 封没处理${first}${who}，在 ${mailPath}/。`);
   }
   const muteLine = renderMutes(mutes);
   const attentionLine = renderAttention(attention, places, timezone, nowMs);

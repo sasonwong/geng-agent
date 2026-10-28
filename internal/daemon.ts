@@ -5,6 +5,7 @@ import { markSeen, peekInbox, quarantine } from "./inbox.ts";
 import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
+import { pendingMail } from "./mail.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
@@ -48,6 +49,7 @@ function pendingLow(p: Paths): number {
     return 0;
   }
 }
+
 
 function pendingFiles(p: Paths): string[] {
   // the parser, not a directory listing: a file nothing can read must not be able to knock
@@ -347,6 +349,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       longGap,
       hint: plan.hint,
       lowPending: pendingLow(paths),
+      mailPending: pendingMail(paths),
+      mailPath: at("/mail", paths.mail),
       wakes24h: wakes24h + 1,
       parked: plan.parked,
 

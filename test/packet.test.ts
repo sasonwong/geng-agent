@@ -46,6 +46,8 @@ function fixture(): {
     wakes24h: 1,
     parked: false,
     lowPending: 0,
+    mailPending: { count: 0, senders: [], oldestMs: null },
+    mailPath: "/mail",
     searchLeft: 12,
     envChanged: null,
     lastSaid: null,
@@ -341,4 +343,24 @@ test("a restart is told apart from a crash", () => {
   const crashed = buildPacket(f.input({ interrupted: false, crashed: true }));
   assert.match(crashed, /上一轮没过完就断了/);
   assert.doesNotMatch(crashed, /被重启打断/);
+});
+
+test("mail is counted with its senders, and never pretends to have woken it", () => {
+  const f = fixture();
+  const text = buildPacket(
+    f.input({
+      mailPending: {
+        count: 2,
+        senders: ["someone@example.org", "other@example.net"],
+        oldestMs: Date.parse("2026-02-27T09:00:00Z"),
+      },
+    }),
+  );
+  // 3 days before the page's clock, and both senders named once
+  assert.match(text, /邮件：2 封没处理，最早一封 3 天前，来自 someone@example\.org、other@example\.net，在 \/mail\/。/);
+  // mail is pull: it must not be dressed up as a conversation or as somebody waiting
+  assert.doesNotMatch(text, /有人在跟你说话/);
+  assert.doesNotMatch(text, /还没回的/);
+  assert.doesNotMatch(text, /群里的/);
+  assert.equal(buildPacket(f.input({})).includes("邮件"), false, "没有邮件时一个字都不提");
 });

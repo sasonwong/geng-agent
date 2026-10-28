@@ -20,6 +20,8 @@ test("only what the page points at is mounted, and never the rules", () => {
   const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", 0).args.join(" ");
   assert.match(argv, new RegExp(`-v ${paths.inbox}:/inbox:ro`));
   assert.match(argv, new RegExp(`-v ${paths.people}:/people:ro`));
+  // the mailbox is read-only like the rest: what a human wrote is not the agent's to delete
+  assert.match(argv, new RegExp(`-v ${paths.mail}:/mail:ro`));
   // the rules it lives under are not exposed at all: no mount, and the file now lives
   // outside the book, so the /state bind cannot carry it in either
   assert.equal(argv.includes("/daemon.log"), false, "daemon.log 不挂了");
@@ -38,6 +40,7 @@ test("the tools are loaded from outside the agent's home", () => {
   const joined = args.join(" ");
   assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
   assert.match(joined, /-e \/opt\/geng\/extensions\/websearch\.ts/);
+  assert.match(joined, /-e \/opt\/geng\/extensions\/mail\.ts/);
 });
 
 test("every -e value is really passed to docker as an env var", () => {
