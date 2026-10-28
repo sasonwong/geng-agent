@@ -1,0 +1,9 @@
+{
+  "name": "geng-mail-worker",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Email Worker: parses MIME and hands each mail to the host endpoint.",
+  "dependencies": {
+    "postal-mime": "^4.1.4"
+  }
+}

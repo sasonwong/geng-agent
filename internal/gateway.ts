@@ -9,6 +9,7 @@ import { makePaths } from "./paths.ts";
 import { appendSaid } from "./people.ts";
 import { attachmentOf, hostPathForWorkPath, placeholderFor, safeName } from "./attach.ts";
 import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
+import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./mail.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -143,8 +144,12 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const botsFile = join(root, "secrets", "bots.json");
   const bots = readJson<Record<string, BotConfig>>(botsFile, {});
   const keys = Object.keys(bots);
-  if (keys.length === 0) {
-    throw new ExpectedError(`没有 bot：先写 ${botsFile}（{ "<instance>": { "token": "..." } }）`);
+  // a mailbox is a transport too: an instance may have mail and no bot at all
+  const mailCfg = loadMailConfig(root);
+  if (keys.length === 0 && mailCfg === null) {
+    throw new ExpectedError(
+      `没有 bot 也没有信箱：先写 ${botsFile} 或 ${join(root, "secrets", "mail.json")}`,
+    );
   }
 
   const { ops } = ensureGatewayDirs(root);
@@ -438,6 +443,20 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
   };
 
+  if (mailCfg !== null) {
+    const mailEnv = readMailEnv(root);
+    if (mailEnv === null) {
+      throw new ExpectedError(`有 ${join(root, "secrets", "mail.json")} 但没有 token：写 secrets/mail.env 的 GENG_MAIL_TOKEN`);
+    }
+    await startMailServer({ root, cfg: mailCfg, env: mailEnv, log });
+    for (const line of describeConfig(mailCfg)) log(`mail 上线：${line}`);
+  }
+
   void sweep();
-  await Promise.all(keys.map((key) => poll(key)));
+  const loops = keys.map((key) => poll(key));
+  if (loops.length === 0) {
+    // only a mailbox: the listener is the whole job, so this process must outlive main()
+    await new Promise<void>(() => {});
+  }
+  await Promise.all(loops);
 }
