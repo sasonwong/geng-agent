@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import type { CutRecord } from "./meta.ts";
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
 import { excerpt, readJson, readText } from "./state.ts";
@@ -32,7 +33,10 @@ export interface PacketInput {
   /** Mutes that are still in force, shown as state — they do not change delivery. */
   mutes: Record<string, { until?: string | null }>;
   /** The previous waking died mid-flight. */
-  crashed: boolean;
+  /** How the round before this one ended, when it did not end on its own. */
+  cut: CutRecord | null;
+  /** The wall a round runs into, in minutes: stated once and quoted when a round hits it. */
+  capMinutes: number;
   /** A [观察] block explaining how the last waking ended, if it did not end well. */
   hint: string | null;
   /** Wakings in the last 24 hours, including this one. */
@@ -83,7 +87,7 @@ export interface PacketInput {
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
   /** The last round was cut short by a restart, not by a crash: same fact, calmer cause. */
-  interrupted: boolean;
+
 }
 
 /**
@@ -194,6 +198,30 @@ export function systemFacts(
   return out.join("\n");
 }
 
+/** Which waking it was, and what woke it, in the words the awake line already uses. */
+const WAKE_WORD: Record<string, string> = {
+  timer: "被自己的闹钟叫醒",
+  knock: "被消息叫醒",
+  nudge: "没人叫它，按默认间隔醒的",
+};
+
+/**
+ * How the round before this one ended. Three facts, no advice: what killed it, which
+ * waking it was, and — when the daemon outlived it — what it was doing at the moment.
+ */
+function cutLine(cut: CutRecord, capMinutes: number): string {
+  const which = cut.waking > 0 ? `（第 ${cut.waking} 次醒来，${WAKE_WORD[cut.reason] ?? cut.reason}）` : "";
+  if (cut.kind === "interrupted") return `上一轮是被重启打断的，不是出错${which}。`;
+  if (cut.kind === "crashed") return `上一轮没过完就断了${which}。不知道它停在哪。`;
+  const acts = (cut.tools ?? []).join("、");
+  const open =
+    cut.openMs !== undefined && cut.openMs >= 60_000
+      ? `，最后一个已经跑了 ${formatDuration(cut.openMs)}`
+      : "";
+  const head = `上一轮跑到 ${capMinutes} 分钟的上限被杀了${which}。`;
+  return acts === "" ? head : `${head}最后的动作：${acts}${open}。`;
+}
+
 /** One line, so a multi-paragraph sign-off does not take over the page. */
 function flatten(text: string): string {
   return text.replace(/\s+/g, " ").trim();
@@ -201,7 +229,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, attention, interrupted, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
+  const { inbox, mutes, cut, capMinutes, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
 
   const out: string[] = [];
 
@@ -322,11 +350,7 @@ export function buildPacket(input: PacketInput): string {
     out.push("", "[观察]", hint);
   }
 
-  if (crashed) {
-    out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");
-  } else if (interrupted) {
-    out.push("", "上一轮是被重启打断的。没出错，可能停在一半。");
-  }
+  if (cut) out.push("", cutLine(cut, capMinutes));
 
   // Its own words, verbatim, right before the reason it is awake: the last two things it
   // reads are who it decided it is and what it is supposed to be doing right now.

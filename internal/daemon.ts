@@ -15,7 +15,17 @@ import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
-import { DAY_MS, readMeta, recordWake, writeMeta, type Meta } from "./meta.ts";
+import {
+  clearCut,
+  DAY_MS,
+  readCut,
+  readMeta,
+  recordWake,
+  writeCut,
+  writeMeta,
+  type CutRecord,
+  type Meta,
+} from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { activeSince, lastSaidIn, readSaid, waitingOn } from "./people.ts";
@@ -77,28 +87,62 @@ async function sleepUntil(dueAtMs: number, knock: () => boolean, parked: boolean
   return "time";
 }
 
-/** True once, if the last round was cut by a restart rather than by a crash. */
-function takeInterrupted(paths: Paths): boolean {
-  let files: string[];
+/**
+ * The round before this daemon start, if it never finished.
+ *
+ * A leftover intent.json means the daemon itself was killed mid-round, so nothing about
+ * the round's actions survived with it. Older daemons renamed that file aside instead of
+ * reading it, so those leftovers mean the same thing and are cleared here too.
+ */
+function takeCrashed(paths: Paths): CutRecord | null {
+  const left = readJson<{ waking?: number; reason?: string } | null>(paths.intent, null);
+  let legacy: string[] = [];
+  try {
+    legacy = readdirSync(paths.meta).filter((f) => f.startsWith("intent.aborted.") && f.endsWith(".json"));
+  } catch {
+    legacy = [];
+  }
+  for (const f of legacy) rmSync(join(paths.meta, f), { force: true });
+  if (left === null) return null;
+  rmSync(paths.intent, { force: true });
+  return { ...cutOf("crashed"), waking: numOr(left.waking, 0), reason: strOr(left.reason, "timer") };
+}
+
+/** A restart is not a crash: the round was cut on purpose, so no ops line is written. */
+function takeInterrupted(paths: Paths): CutRecord | null {
+  let files: string[] = [];
   try {
     files = readdirSync(paths.meta).filter((f) => f.startsWith("interrupted-") && f.endsWith(".json"));
   } catch {
-    return false;
+    return null;
   }
-  if (files.length === 0) return false;
+  if (files.length === 0) return null;
+  const last = readJson<{ waking?: number; reason?: string } | null>(
+    join(paths.meta, files[files.length - 1] as string),
+    null,
+  );
   for (const f of files) rmSync(join(paths.meta, f), { force: true });
-  return true;
+  return { ...cutOf("interrupted"), waking: numOr(last?.waking, 0), reason: strOr(last?.reason, "timer") };
 }
 
-function recoverIntent(paths: Paths): boolean {
-  if (!existsSync(paths.intent)) return false;
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  try {
-    renameSync(paths.intent, join(paths.meta, `intent.aborted.${stamp}.json`));
-  } catch {
-    rmSync(paths.intent, { force: true });
-  }
-  return true;
+function cutOf(kind: CutRecord["kind"]): CutRecord {
+  return { kind, at: new Date().toISOString(), waking: 0, reason: "timer" };
+}
+
+const numOr = (v: unknown, fallback: number): number => (typeof v === "number" ? v : fallback);
+const strOr = (v: unknown, fallback: string): string => (typeof v === "string" ? v : fallback);
+
+/** What a round killed at the wall left behind: where it was, and what it was doing. */
+function cutOfTimeout(r: RpcResult, waking: number, reason: WakeReason): CutRecord {
+  const recent = r.toolCalls.slice(-3).map((c) => `${c.name} ${c.preview}`.trim().slice(0, 80));
+  const openMs = r.openCall ? Date.now() - r.openCall.atMs : undefined;
+  return {
+    ...cutOf("timeout"),
+    waking,
+    reason,
+    ...(recent.length > 0 ? { tools: recent } : {}),
+    ...(openMs === undefined ? {} : { openMs }),
+  };
 }
 
 function logLine(
@@ -216,9 +260,14 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     policy.runner === "docker" ? inContainer : host;
   const statePath = at("/state", paths.palimpsest);
   const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
-  let crashed = o.dry ? existsSync(paths.intent) : recoverIntent(paths);
-  const interrupted = o.dry ? false : takeInterrupted(paths);
-  if (crashed) writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
+  // A preview reads and clears nothing: --dry must not eat the note it is showing.
+  if (!o.dry) {
+    const crashed = takeCrashed(paths);
+    const interrupted = takeInterrupted(paths); // always cleared, even when a crash wins
+    const cut = crashed ?? interrupted;
+    if (cut) writeCut(paths, cut);
+    if (crashed) writeOps(ops, `daemon@${paths.instance}`, "上一轮没过完就断了，已经记下，下一张纸会告诉它。");
+  }
   let escalation: Escalation = loadEscalation(paths);
 
   for (;;) {
@@ -345,8 +394,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
           lines: t.tail,
         };
       })(),
-      crashed,
-      interrupted,
+      cut: readCut(paths),
+      capMinutes,
       longGap,
       hint: plan.hint,
       lowPending: pendingLow(paths),
@@ -408,7 +457,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     });
 
     rmSync(paths.intent, { force: true });
-    crashed = false;
 
     // Every waking is its own session, so the session total *is* this cycle's cost.
     // (It was a difference while one session spanned many wakings.)
@@ -426,6 +474,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
 
     const symptom = classify(result);
+    // The page just built already said how the last round ended, and this note is about
+    // one round: clear it, then replace it only if this round was itself cut at the wall.
+    clearCut(paths);
+    if (symptom === "timeout") writeCut(paths, cutOfTimeout(result, waking, reason));
     // Only a wake that ran to the end has read them. Anything else leaves the messages
     // in place so the next wake hands them over again rather than losing them.
     // An injection that no turn followed never reached the model: leaving it unseen

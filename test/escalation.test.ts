@@ -15,6 +15,7 @@ function rpc(over: Partial<RpcResult>): RpcResult {
     code: 0,
     signal: null,
     toolCalls: [],
+    openCall: null,
     repeat: null,
     finalText: "好",
     stats: null,

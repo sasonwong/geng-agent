@@ -31,7 +31,8 @@ function fixture(): {
     timezone: "Asia/Shanghai",
     places: [{ id: -1001234567890, label: "群「测试」", home: false }],
     attention: null,
-    interrupted: false,
+    cut: null,
+    capMinutes: 20,
     filesPath: "/files",
     filesForgotten: 0,
     filesPruned: 0,
@@ -40,7 +41,6 @@ function fixture(): {
     filesCapMb: 500,
     inbox: [],
     mutes: {},
-    crashed: false,
     longGap: false,
     hint: null,
     wakes24h: 1,
@@ -335,14 +335,38 @@ test("a line that answers another one says so, without a lookup", () => {
   assert.match(text, /你：原文在这\n/);
 });
 
-test("a restart is told apart from a crash", () => {
+test("a round that died says which of the three ways, and what it was doing", () => {
   const f = fixture();
-  const restarted = buildPacket(f.input({ interrupted: true }));
-  assert.match(restarted, /上一轮是被重启打断的。没出错，可能停在一半。/);
-  assert.doesNotMatch(restarted, /进程被杀或宿主机重启/);
-  const crashed = buildPacket(f.input({ interrupted: false, crashed: true }));
-  assert.match(crashed, /上一轮没过完就断了/);
-  assert.doesNotMatch(crashed, /被重启打断/);
+  const base = { at: "2026-03-02T08:30:00Z", waking: 7, reason: "knock" };
+
+  const killed = buildPacket(
+    f.input({
+      cut: { ...base, kind: "timeout", tools: ["bash md5sum v8.md", "say"], openMs: 12 * 60_000 },
+    }),
+  );
+  assert.match(killed, /上一轮跑到 20 分钟的上限被杀了（第 7 次醒来，被消息叫醒）。/);
+  assert.match(killed, /最后的动作：bash md5sum v8\.md、say，最后一个已经跑了 12m。/);
+
+  const crashed = buildPacket(f.input({ cut: { ...base, kind: "crashed" } }));
+  assert.match(crashed, /上一轮没过完就断了（第 7 次醒来，被消息叫醒）。/);
+  assert.doesNotMatch(crashed, /上限|被重启打断/);
+
+  const restarted = buildPacket(f.input({ cut: { ...base, kind: "interrupted" } }));
+  assert.match(restarted, /上一轮是被重启打断的，不是出错（第 7 次醒来，被消息叫醒）。/);
+  assert.doesNotMatch(restarted, /上限|没过完/);
+
+  // no advice rides along: the page states, it does not tell it what to do
+  for (const page of [killed, crashed, restarted]) {
+    assert.doesNotMatch(page, /看一眼|停在哪\/|别忘了|注意|建议/);
+  }
+  // the unknown case must not invent facts
+  const bare = buildPacket(f.input({ cut: { ...base, kind: "timeout", waking: 0, reason: "timer" } }));
+  assert.match(bare, /^上一轮跑到 20 分钟的上限被杀了。$/m);
+});
+
+test("nothing is said when the last round ended on its own", () => {
+  const page = buildPacket(fixture().input({ cut: null }));
+  assert.doesNotMatch(page, /上一轮跑到|上一轮没过完|被重启打断/);
 });
 
 test("mail is counted with its senders, and never pretends to have woken it", () => {
