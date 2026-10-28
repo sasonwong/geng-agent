@@ -9,7 +9,7 @@ import { loadPolicy, type Policy } from "./policy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
-import { formatDuration, knockable, readWaiting, type KnockHold, type WaitSpec } from "./schedule.ts";
+import { alarmSpent, formatDuration, knockable, readWaiting, type KnockHold, type WaitSpec } from "./schedule.ts";
 import { repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./state.ts";
 import { acquirePidLock } from "./guard.ts";
@@ -269,7 +269,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       reason = outcome === "knock" ? "knock" : pendingWait ? "timer" : "nudge";
     }
 
-    if (existsSync(paths.waiting) && !o.dry) {
+    // Only an alarm whose moment has arrived is spent here. A knock that came first does
+    // not cancel it: if this waking dies before writing a new one, the alarm is still the
+    // last thing it said about when to come back. (See alarmSpent.)
+    if (alarmSpent(pendingWait, Date.now()) && existsSync(paths.waiting) && !o.dry) {
       try {
         renameSync(paths.waiting, paths.waitingConsumed);
       } catch {
