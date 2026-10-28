@@ -1,0 +1,17 @@
+# Cloudflare tunnel for the mail endpoint.
+#
+# The endpoint listens on 127.0.0.1 only: the container must never be able to reach the
+# door Cloudflare uses, and the public internet must never be able to reach the mailbox
+# directly. Everything that arrives through here still has to carry the token.
+#
+#   cloudflared tunnel create geng-mail
+#   cloudflared tunnel route dns geng-mail mail.example.com
+#
+# Replace mail.example.com with the hostname whose A/AAAA record the tunnel owns.
+tunnel: geng-mail
+credentials-file: /etc/cloudflared/geng-mail.json
+
+ingress:
+  - hostname: mail.example.com
+    service: http://127.0.0.1:8788
+  - service: http_status:404

@@ -12,6 +12,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit",
+    "gate": "node tools/gate/scan.mjs",
     "test": "node --test",
     "dev": "node cmd/geng-dev/index.ts"
   },

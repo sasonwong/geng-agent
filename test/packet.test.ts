@@ -31,7 +31,7 @@ function fixture(): {
     timezone: "Asia/Shanghai",
     places: [{ id: -1001234567890, label: "群「测试」", home: false }],
     attention: null,
-    interrupted: false,
+    cut: null,
     filesPath: "/files",
     filesForgotten: 0,
     filesPruned: 0,
@@ -40,12 +40,13 @@ function fixture(): {
     filesCapMb: 500,
     inbox: [],
     mutes: {},
-    crashed: false,
     longGap: false,
     hint: null,
     wakes24h: 1,
     parked: false,
     lowPending: 0,
+    mailPending: { count: 0, senders: [], oldestMs: null },
+    mailPath: "/mail",
     searchLeft: 12,
     envChanged: null,
     lastSaid: null,
@@ -87,7 +88,10 @@ test("its own words are pasted verbatim, labelled, just before the reason it is 
 test("one sentence says why it is awake and whether anyone is there", () => {
   const { input } = fixture();
   const knocked = buildPacket(
-    input({ reason: "knock", inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you" }] }),
+    input({
+      reason: "knock",
+      inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you", chat: 111 }],
+    }),
   );
   assert.match(knocked, /有人敲门，所以你现在醒了，现在有人在跟你说话。/);
   // the permission is always true, so it stands alone and never varies with the reason
@@ -96,6 +100,26 @@ test("one sentence says why it is awake and whether anyone is there", () => {
 
   const timed = buildPacket(input({ reason: "timer" }));
   assert.match(timed, /你是被自己定的闹钟叫醒的，现在没人在跟你说话。/);
+});
+
+test("an event in the inbox is counted as an event, not as somebody talking", () => {
+  const { input } = fixture();
+  const event = { id: "github-7-ci-red", file: "github-7-ci-red.json", text: "PR #7 ci 红了", from: "github" };
+  const text = buildPacket(input({ reason: "knock", inbox: [event] }));
+  // a red build is not a person: saying so would make it answer into an empty room
+  assert.match(text, /1 件不是对话（feed 写的），也在 \/inbox\/。/);
+  assert.match(text, /收件箱里进了事件（不是对话），所以你现在醒了。/);
+  assert.doesNotMatch(text, /有人在跟你说话/);
+
+  const both = buildPacket(
+    input({
+      reason: "knock",
+      inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you", chat: 111 }, event],
+    }),
+  );
+  // counted separately, or the page credits the machine's news to the person
+  assert.match(both, /有人在跟你说话：1 条，在 \/inbox\/。/);
+  assert.match(both, /1 件不是对话（feed 写的）/);
 });
 
 test("nudge admits it was woken by default rather than by an alarm", () => {
@@ -310,12 +334,56 @@ test("a line that answers another one says so, without a lookup", () => {
   assert.match(text, /你：原文在这\n/);
 });
 
-test("a restart is told apart from a crash", () => {
+test("a round that died says which of the three ways, and what it was doing", () => {
   const f = fixture();
-  const restarted = buildPacket(f.input({ interrupted: true }));
-  assert.match(restarted, /上一轮是被重启打断的。没出错，可能停在一半。/);
-  assert.doesNotMatch(restarted, /进程被杀或宿主机重启/);
-  const crashed = buildPacket(f.input({ interrupted: false, crashed: true }));
-  assert.match(crashed, /上一轮没过完就断了/);
-  assert.doesNotMatch(crashed, /被重启打断/);
+  const base = { at: "2026-03-02T08:30:00Z", waking: 7, reason: "knock" };
+
+  const killed = buildPacket(
+    f.input({
+      cut: { ...base, kind: "timeout", capMinutes: 20, tools: ["bash md5sum v8.md", "say"], openMs: 12 * 60_000 },
+    }),
+  );
+  assert.match(killed, /上一轮跑到 20 分钟的上限被杀了（第 7 次醒来，被消息叫醒）。/);
+  assert.match(killed, /最后的动作：bash md5sum v8\.md、say，最后一个已经跑了 12m。/);
+
+  const crashed = buildPacket(f.input({ cut: { ...base, kind: "crashed" } }));
+  assert.match(crashed, /上一轮没过完就断了（第 7 次醒来，被消息叫醒）。/);
+  assert.doesNotMatch(crashed, /上限|被重启打断/);
+
+  const restarted = buildPacket(f.input({ cut: { ...base, kind: "interrupted" } }));
+  assert.match(restarted, /上一轮是被重启打断的，不是出错（第 7 次醒来，被消息叫醒）。/);
+  assert.doesNotMatch(restarted, /上限|没过完/);
+
+  // no advice rides along: the page states, it does not tell it what to do
+  for (const page of [killed, crashed, restarted]) {
+    assert.doesNotMatch(page, /看一眼|停在哪\/|别忘了|注意|建议/);
+  }
+  // the unknown case must not invent facts
+  const bare = buildPacket(f.input({ cut: { ...base, kind: "timeout", waking: 0, reason: "timer" } }));
+  assert.match(bare, /^上一轮跑到时间上限被杀了。$/m);
+});
+
+test("nothing is said when the last round ended on its own", () => {
+  const page = buildPacket(fixture().input({ cut: null }));
+  assert.doesNotMatch(page, /上一轮跑到|上一轮没过完|被重启打断/);
+});
+
+test("mail is counted with its senders, and never pretends to have woken it", () => {
+  const f = fixture();
+  const text = buildPacket(
+    f.input({
+      mailPending: {
+        count: 2,
+        senders: ["someone@example.org", "other@example.net"],
+        oldestMs: Date.parse("2026-02-27T09:00:00Z"),
+      },
+    }),
+  );
+  // 3 days before the page's clock, and both senders named once
+  assert.match(text, /邮件：2 封没处理，最早一封 3 天前，来自 someone@example\.org、other@example\.net，在 \/mail\/。/);
+  // mail is pull: it must not be dressed up as a conversation or as somebody waiting
+  assert.doesNotMatch(text, /有人在跟你说话/);
+  assert.doesNotMatch(text, /还没回的/);
+  assert.doesNotMatch(text, /群里的/);
+  assert.equal(buildPacket(f.input({})).includes("邮件"), false, "没有邮件时一个字都不提");
 });

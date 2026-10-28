@@ -14,11 +14,19 @@ export interface Paths {
   inbox: string;
   inboxSeen: string;
   inboxLow: string;
+  /** Every mail it ever received, one file each. Mounted read-only and never moved:
+   * "read" is a list in its own book, not a place files are put. */
+  mail: string;
+  /** The mail ids it has declared read, written only by the `mail` tool. */
+  mailRead: string;
   outbox: string;
   /** Files people sent it. Read-only inside the container, never its business to write. */
   filesDir: string;
   /** What it asked to have forgotten; the daemon applies this before the next waking. */
   filesForget: string;
+  /** The feeder's own book, in nobody else's. A file here is not one it wrote, and
+   * removing one must not look the same as the world standing still. */
+  feedDir: string;
   daemonLog: string;
   /** Outside the book on purpose: the rules it lives under are not something it reads
    * or writes. The negotiable values reach it through the wake page instead. */
@@ -50,9 +58,11 @@ export function makePaths(root: string, instance: string): Paths {
   const data = join(r, "data", instance);
   const palimpsest = join(data, "palimpsest");
   const inbox = join(data, "inbox");
+  const mail = join(data, "mail");
   const outbox = join(data, "outbox");
   const filesDir = join(data, "files");
   const filesForget = join(palimpsest, "files.forget.json");
+  const feedDir = join(data, "feed");
   const journal = join(palimpsest, "journal");
   return {
     root: r,
@@ -66,9 +76,12 @@ export function makePaths(root: string, instance: string): Paths {
     inbox,
     inboxSeen: join(inbox, "seen"),
     inboxLow: join(inbox, "low"),
+    mail,
+    mailRead: join(palimpsest, "mail.read.json"),
     outbox,
     filesDir,
     filesForget,
+    feedDir,
     daemonLog: join(data, "daemon.log"),
     policy: join(data, "policy.json"),
     identity: join(palimpsest, "identity.md"),
@@ -85,11 +98,6 @@ export function makePaths(root: string, instance: string): Paths {
     piDir: join(data, "pi"),
   };
 }
-
-/** The agent sees this directory as /state; the daemon sees the same files. */
-export const STATE_MOUNT = "/state";
-export const WORK_MOUNT = "/work";
-export const HOME_MOUNT = "/home/agent";
 
 /**
  * One list, because two lists drift exactly when you are debugging: init and the daemon
@@ -108,10 +116,12 @@ export function requiredDirs(p: Paths): string[] {
     p.inbox,
     p.inboxSeen,
     p.inboxLow,
+    p.mail,
     p.outbox,
     p.piDir,
     p.openLoops,
     p.people,
     p.filesDir,
+    p.feedDir,
   ];
 }

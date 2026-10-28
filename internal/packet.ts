@@ -1,4 +1,5 @@
 import { readdirSync } from "node:fs";
+import type { CutRecord } from "./meta.ts";
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
 import { excerpt, readJson, readText } from "./state.ts";
@@ -14,13 +15,17 @@ export interface PacketInput {
   paths: Paths;
   nowMs: number;
   reason: WakeReason;
-  /** What it said it was waiting for, carried over from the consumed waiting.json. */
+  /** What it said it was waiting for, from the waiting.json still on disk (a knock does not consume it). */
   waitWhy: string | null;
   lastWakeMs: number | null;
   /** 1-based: how many times this instance has woken. */
   waking: number;
   /** Where the agent sees the palimpsest: /state in docker, an absolute path for the local runner. */
   statePath: string;
+  /** What arrived by mail and was never marked read. Mail never knocks: it waits. */
+  mailPending: { count: number; senders: string[]; oldestMs: number | null };
+  /** Where the mailbox appears inside the container. */
+  mailPath: string;
   /** Where the read-only auxiliary mounts appear inside the container. */
   inboxPath: string;
   peoplePath: string;
@@ -28,7 +33,8 @@ export interface PacketInput {
   /** Mutes that are still in force, shown as state — they do not change delivery. */
   mutes: Record<string, { until?: string | null }>;
   /** The previous waking died mid-flight. */
-  crashed: boolean;
+  /** How the round before this one ended, when it did not end on its own. */
+  cut: CutRecord | null;
   /** A [观察] block explaining how the last waking ended, if it did not end well. */
   hint: string | null;
   /** Wakings in the last 24 hours, including this one. */
@@ -78,8 +84,6 @@ export interface PacketInput {
   identity: string | null;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
-  /** The last round was cut short by a restart, not by a crash: same fact, calmer cause. */
-  interrupted: boolean;
 }
 
 /**
@@ -152,15 +156,24 @@ const REASON_LINE: Record<WakeReason, string> = {
   nudge: "你上次没有留下下次什么时候醒，所以被按默认间隔叫醒了",
 };
 
-/** Whether anyone is on the other end — the same fact from the other side. */
-function whoLine(inboxCount: number): string {
-  return inboxCount > 0 ? "，现在有人在跟你说话。" : "，现在没人在跟你说话。";
+/**
+ * Whether anyone is on the other end — the same fact from the other side. A file in the
+ * inbox is not necessarily a person: a feeder writes events there too, and a page that
+ * called a red build "somebody talking to you" would be lying about the one thing it is
+ * supposed to get right.
+ */
+function whoLine(inbox: InboxMsg[]): string {
+  if (inbox.length === 0) return "，现在没人在跟你说话。";
+  // an inbox that only holds events says nothing about whether anyone is there — but
+  // the sentence still ends, and the full stop is this function's to add, not the line's.
+  return inbox.some((m) => typeof m.chat === "number") ? "，现在有人在跟你说话。" : "。";
 }
 
 /** The rare-changing half of the picture: where it may speak, and its own knobs. */
 export function systemFacts(
   places: { id: number; label: string; home: boolean }[],
   policyLine: string,
+  capMinutes: number,
 ): string {
   const out: string[] = [];
   if (places.length === 1) {
@@ -175,7 +188,38 @@ export function systemFacts(
     );
   }
   out.push(`可以调的运行参数：${policyLine}。`);
+  // The wall, not a knob: it is the operator's frame, so it is stated as a fact. A model
+  // cannot see a clock any more than it can see its own token count.
+  out.push(`每一轮最多 ${capMinutes} 分钟，到点会被杀掉。`);
   return out.join("\n");
+}
+
+/** Which waking it was, and what woke it, in the words the awake line already uses. */
+const WAKE_WORD: Record<string, string> = {
+  timer: "被自己的闹钟叫醒",
+  knock: "被消息叫醒",
+  nudge: "没人叫它，按默认间隔醒的",
+};
+
+/**
+ * How the round before this one ended. Three facts, no advice: what killed it, which
+ * waking it was, and — when the daemon outlived it — what it was doing at the moment.
+ */
+function cutLine(cut: CutRecord): string {
+  const which = cut.waking > 0 ? `（第 ${cut.waking} 次醒来，${WAKE_WORD[cut.reason] ?? cut.reason}）` : "";
+  if (cut.kind === "interrupted") return `上一轮是被重启打断的，不是出错${which}。`;
+  if (cut.kind === "crashed") return `上一轮没过完就断了${which}。不知道它停在哪。`;
+  const acts = (cut.tools ?? []).join("、");
+  const open =
+    cut.openMs !== undefined && cut.openMs >= 60_000
+      ? `，最后一个已经跑了 ${formatDuration(cut.openMs)}`
+      : "";
+  // the cap that was in force when it was killed, not the one in force now
+  const head =
+    cut.capMinutes === undefined
+      ? `上一轮跑到时间上限被杀了${which}。`
+      : `上一轮跑到 ${cut.capMinutes} 分钟的上限被杀了${which}。`;
+  return acts === "" ? head : `${head}最后的动作：${acts}${open}。`;
 }
 
 /** One line, so a multi-paragraph sign-off does not take over the page. */
@@ -185,7 +229,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, crashed, longGap, hint, wakes24h, parked, lowPending, timezone, attention, interrupted, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity } = input;
+  const { inbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
 
   const out: string[] = [];
 
@@ -248,7 +292,11 @@ export function buildPacket(input: PacketInput): string {
     // waiting, or the page quietly privileges whoever spoke last
     const people = new Set(inbox.map((m) => m.chat).filter((c) => typeof c === "number"));
     const who = people.size > 1 ? `（${people.size} 个人）` : "";
-    out.push("", `有人在跟你说话：${inbox.length} 条${who}，在 ${inboxPath}/。`);
+    const fromPeople = inbox.filter((m) => typeof m.chat === "number").length;
+    const events = inbox.length - fromPeople;
+    if (fromPeople > 0) out.push("", `有人在跟你说话：${fromPeople} 条${who}，在 ${inboxPath}/。`);
+    // counted, never described: which event it is, it reads in the file
+    if (events > 0) out.push("", `${events} 件不是对话（feed 写的），也在 ${inboxPath}/。`);
   }
   // Files are counted, never described: what is in them is the agent's business to look at.
   const kinds = new Map<string, number>();
@@ -279,7 +327,19 @@ export function buildPacket(input: PacketInput): string {
   }
 
   if (lowPending > 0) {
-    out.push(`还有 ${lowPending} 条群里的消息在 ${inboxPath}/low/，它们没有叫醒你。`);
+    out.push(`还有 ${lowPending} 条不叫醒你的在 ${inboxPath}/low/（群里的闲话、feed 记下的动静）。`);
+  }
+  if (mailPending.count > 0) {
+    // counted, never summarised: the senders and how long the oldest has waited are the
+    // only two things it needs to decide whether to open any of them
+    const waited = mailPending.oldestMs === null ? null : nowMs - mailPending.oldestMs;
+    const first =
+      waited === null
+        ? ""
+        : `，最早一封 ${waited >= DAY_MS ? `${Math.round(waited / DAY_MS)} 天` : formatDuration(waited)}前`;
+    const who =
+      mailPending.senders.length === 0 ? "" : `，来自 ${mailPending.senders.join("、")}`;
+    out.push(`邮件：${mailPending.count} 封没处理${first}${who}，在 ${mailPath}/。`);
   }
   const muteLine = renderMutes(mutes);
   const attentionLine = renderAttention(attention, places, timezone, nowMs);
@@ -290,11 +350,7 @@ export function buildPacket(input: PacketInput): string {
     out.push("", "[观察]", hint);
   }
 
-  if (crashed) {
-    out.push("", "上一轮没过完就断了（进程被杀或宿主机重启）。你自己看一眼 /work 停在哪。");
-  } else if (interrupted) {
-    out.push("", "上一轮是被重启打断的。没出错，可能停在一半。");
-  }
+  if (cut) out.push("", cutLine(cut));
 
   // Its own words, verbatim, right before the reason it is awake: the last two things it
   // reads are who it decided it is and what it is supposed to be doing right now.
@@ -305,7 +361,10 @@ export function buildPacket(input: PacketInput): string {
 
   // one sentence: why it is awake, and whether anyone is on the other end. Then the
   // standing permission, alone, because it is the only line that is always true.
-  out.push("", `${waking <= 1 ? "这是你第一次醒来" : REASON_LINE[reason]}${whoLine(inbox.length)}`);
+  const knockedByEvent =
+    reason === "knock" && !inbox.some((m) => typeof m.chat === "number");
+  const why = knockedByEvent ? "收件箱里进了事件（不是对话），所以你现在醒了" : REASON_LINE[reason];
+  out.push("", `${waking <= 1 ? "这是你第一次醒来" : why}${whoLine(inbox)}`);
   out.push("你可以什么都不做，那不算失败。");
 
   if (searchLeft !== null) {

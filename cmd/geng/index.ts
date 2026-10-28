@@ -10,8 +10,10 @@ import { runGateway } from "../../internal/gateway.ts";
 import { getMe } from "../../internal/telegram.ts";
 import { readJson } from "../../internal/state.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
+import { describeConfig, loadMailConfig, readMailEnv } from "../../internal/mail.ts";
 import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
 import { loadPolicy } from "../../internal/policy.ts";
+import { readFeedEnv, runGithubFeed } from "../../internal/feed.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
@@ -27,6 +29,8 @@ const USAGE = `geng <command> [options]
   restore <instance> [<id>] --yes    恢复到 backup/<instance>.restore-<时间>/（默认最近一张；
                                      没有 --yes 不动手；不直接覆盖 data/，自己拷回去）
   gateway [--check]                  跑消息搬运（需要 secrets/bots.json）；--check 只验 token
+  feed github --instance <instance>  跑一趟：自己的 PR 有什么变了，写进收件箱（需要
+                                     secrets/feed.env 里的 GENG_GITHUB_REPO）；给定时器用
   search                             跑搜索端点（需要 secrets/search.env）
 
 通用选项：
@@ -234,11 +238,26 @@ async function main(): Promise<number> {
           {},
         );
         const names = Object.keys(bots);
-        if (names.length === 0) {
-          console.error(`没有 bot：先写 ${join(args.root, "secrets", "bots.json")}`);
+        const mailCfg = loadMailConfig(args.root);
+        const mailEnv = readMailEnv(args.root);
+        if (names.length === 0 && mailCfg === null) {
+          console.error(
+            `没有 bot 也没有信箱：先写 ${join(args.root, "secrets", "bots.json")} 或 secrets/mail.json`,
+          );
           return 2;
         }
         let bad = 0;
+        if (mailCfg !== null) {
+          // a mailbox with no token accepts nothing, and it fails silently from outside
+          if (mailEnv === null) {
+            console.error("FAIL mail: 没有 token（secrets/mail.env 的 GENG_MAIL_TOKEN）");
+            bad++;
+          } else {
+            for (const line of describeConfig(mailCfg)) {
+              console.log(`ok   mail       ${line}  bind=${mailEnv.bind.host}:${mailEnv.bind.port}`);
+            }
+          }
+        }
         for (const name of names) {
           const token = bots[name]?.token ?? "";
           if (token === "") {
@@ -258,6 +277,36 @@ async function main(): Promise<number> {
         return bad === 0 ? 0 : 1;
       }
       await runGateway({ root: args.root });
+      return 0;
+    }
+
+    case "feed": {
+      const source = args.rest[1] ?? "github";
+      if (source !== "github") {
+        console.error(`没有这个来源：${source}（现在只有 github）`);
+        return 2;
+      }
+      if (!args.instance) {
+        console.error("用法：geng feed github --instance <instance>");
+        return 2;
+      }
+      const env = readFeedEnv();
+      if (!env) {
+        console.error(
+          "没有仓库：写 secrets/feed.env（GENG_GITHUB_REPO=owner/name，可选 GH_TOKEN；" +
+            "不写 token 就用 gh 自己的凭据，GH_CONFIG_DIR 指过去）",
+        );
+        return 2;
+      }
+      const p = makePaths(args.root, args.instance);
+      try {
+        const events = await runGithubFeed({ paths: p, ...env, log: console.log });
+        if (events.length === 0) console.log(`${env.repo}：没有新动静`);
+        else console.log(`${env.repo}：写了 ${events.length} 条，${events.filter((e) => e.knock).length} 条会叫醒它`);
+      } catch (err) {
+        console.error((err as Error).message);
+        return 1;
+      }
       return 0;
     }
 

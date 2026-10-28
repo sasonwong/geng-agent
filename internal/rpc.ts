@@ -32,6 +32,8 @@ export interface RpcResult {
   code: number | null;
   signal: NodeJS.Signals | null;
   toolCalls: ToolCall[];
+  /** The action that had started and not finished when the round was killed. */
+  openCall: { name: string; preview: string; atMs: number } | null;
   repeat: Repeat | null;
   finalText: string;
   stats: SessionStats | null;
@@ -127,6 +129,9 @@ export function abortActive(): void {
 export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   const started = Date.now();
   const toolCalls: ToolCall[] = [];
+  // Set when an action starts, cleared when it finishes: it stays set only if the round
+  // was killed with that action still running, which is exactly the thing worth naming.
+  let openCall: { name: string; preview: string; atMs: number } | null = null;
   const watcher = new RepeatWatcher(o.repeatThreshold);
   const interventions: string[] = [];
   let stderrTail = "";
@@ -184,6 +189,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
       const args = rec.args;
       const call: ToolCall = { name, key: callKey(name, args), preview: callPreview(args) };
       toolCalls.push(call);
+      openCall = { name, preview: call.preview, atMs: Date.now() };
       const repeat = watcher.observe(call);
       if (repeat && !steered) {
         steered = true;
@@ -199,6 +205,11 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
         fire({ type: "compact" });
         interventions.push(`compact: ${repeat.name} x${repeat.count}`);
       }
+      return;
+    }
+
+    if (type === "tool_execution_end") {
+      openCall = null;
       return;
     }
 
@@ -335,6 +346,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     code: child.exitCode,
     signal: child.signalCode,
     toolCalls,
+    openCall,
     repeat: watcher.repeat,
     finalText,
     stats,

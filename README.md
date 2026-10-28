@@ -136,6 +136,34 @@ unit 里已经带 `NODE_USE_ENV_PROXY=1`：node 的 `fetch` 默认不认 `HTTP(S
 - bot 之间默认互相看不见消息；两个实例要互相说话，得在 BotFather 里给**两边**都打开
   bot-to-bot communication。开了之后每往下一步仍然要显式 @，否则对面只当环境消息收着
 
+### 它自己的 PR
+
+有人在说话这条线之外还有一类变化没人出声：它的 PR 被批了、checks 红了、被合了或关掉了。
+补这一半的是 **feeder**：一个 oneshot 定时器，每趟只发一条 `gh pr list --author @me`，
+把状态转移写进收件箱——有人等它动手的（APPROVED / CHANGES_REQUESTED / ci 红）敲门，
+其余的（合并、关闭、转绿）进 `inbox/low`，等它下次自己看。
+
+```bash
+cat > secrets/feed.env <<'EOF'
+GENG_GITHUB_REPO=owner/name
+GH_TOKEN=...            # 或者 GH_CONFIG_DIR=/这里/gh 的配置目录
+EOF
+
+node cmd/geng/index.ts feed github --instance alice    # 手动跑一趟
+
+sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
+  deploy/geng-feed@.service > ~/.config/systemd/user/geng-feed@alice.service
+sed -e "s|@ROOT@|$PWD|g" deploy/geng-feed@.timer > ~/.config/systemd/user/geng-feed@alice.timer
+systemctl --user daemon-reload
+systemctl --user enable --now geng-feed@alice.timer
+```
+
+两件事是刻意的：**它不是 daemon 的一部分**（daemon 仍然不碰网络，网断了不会留下一个坏掉的
+闹钟），**第一次见到的 PR 是基线而不是新闻**（新装一个 feeder 不会把历史倒一地）。
+一个 PR 一种状态只会说一次，去重靠 `data/<instance>/feed/github.seen.json` 的差分：
+那是 feeder 自己的一本账，跟它的书分开写（`/state` 是它可写的，它的书每个文件只有一个作者）。
+这本账只增不删——掉出 `--limit` 窗口的 PR 回来时还得跟旧状态比，不然那次转移就没人说。
+
 ### 文件和图片
 
 别人发的图片、文档、音频、视频会下载到 `data/<inst>/files/`，容器里只读挂 `/files`，
@@ -203,22 +231,56 @@ docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
 限额写在宿主这边，容器改不了；用完时工具会说"今天的搜索用完了"，唤醒纸上也会写着
 今天还剩几次。
 
+### 邮件
+
+给它一个真地址：Cloudflare Email Routing 收信 → 一个 Email Worker 解 MIME → POST 回宿主。
+**收信是 pull**：邮件只进 `data/<inst>/mail/`，不叫醒它，唤醒纸上报「邮件：2 封没处理」。
+
+三份配置：
+
+```bash
+# secrets/mail.json     地址 → 实例。allow 留空 = 谁都进不来（和 telegram 的白名单不同，
+#                       这里默认是关的：一个没配好的信箱不该是开放的信箱）
+{ "geng-alice-bot@example.com": { "instance": "alice", "allow": ["you@example.org"] } }
+
+# secrets/mail.env
+GENG_MAIL_TOKEN=$(openssl rand -hex 16)     # Worker 和宿主共用的那一串
+GENG_MAIL_BIND=127.0.0.1:8788               # 只听 loopback，前面是 tunnel
+```
+
+然后是 Cloudflare 那边（一次）：`deploy/mail-worker/README.md` 里四步——`wrangler deploy`、
+两个 secret、`cloudflared tunnel route dns`、Email Routing 里加一条「Send to a Worker」的规则。
+
+通道说清楚了，剩下的是行为：
+
+- 白名单外的发件人**在落盘之前**被丢掉，日志一行 `mail ← guest someone@example.org（没送）`，
+  那个地址就是该粘进 `allow` 的。**这是减噪，不是身份**：信封发件人一样没验过，谁都能写
+- `From` 可伪造（Cloudflare 不给 Worker 任何可信的 SPF/DKIM 结论），所以邮件**不叫醒它**，
+  也没有「@ 它」这种东西
+- 已读是它自己的声明：`/mail` 只读，邮件永不移动，`/state/mail.read.json` 是它自己的名单
+- **只收不回**：现在没有回信通道，`say` 只说到会话
+
 ## 目录
 
 ```
 data/<instance>/
   palimpsest/   它的书：identity.md  open-loops/  waiting.json  journal/  mute.json
-                挂成容器里的 /state（可写）
+                mail.read.json（它标过已读的邮件 id）· 挂成容器里的 /state（可写）
   policy.json   它活在什么规矩下——**在书外面**，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）
   files/        别人发来的图片和文件，挂成 /files（只读）
+  feed/         feeder 自己的账（github.seen.json）：不算它写的文件，也不归它读
   inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
+  mail/         收到的邮件，一封一个文件，挂成 /mail（只读）；已读是书里的一张名单
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
   session/      pi 的会话文件，一轮一个
   usage/ meta/ daemon.log
 secrets/<instance>.env   模型凭据、搜索地址；--env-file 注入，永不挂载
-deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  egress.sh
+secrets/mail.json        信箱的地址和发件人白名单（容器看不见）
+secrets/mail.env         收信端点的 token 和监听地址
+deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-mail-tunnel.service
+           cloudflared.yml  egress.sh  mail-worker/
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore。

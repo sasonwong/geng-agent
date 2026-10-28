@@ -1,7 +1,7 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { knownPlaces } from "./gateway.ts";
-import { listSessionFiles } from "./runner.ts";
+import { listSessionFiles } from "./command.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy } from "./policy.ts";
 import { formatDuration, readWaiting } from "./schedule.ts";
@@ -114,8 +114,4 @@ export function listInstances(root: string): string[] {
   } catch {
     return [];
   }
-}
-
-export function hasWaiting(root: string, instance: string): boolean {
-  return existsSync(makePaths(root, instance).waiting);
 }

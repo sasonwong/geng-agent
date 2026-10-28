@@ -1,0 +1,20 @@
+[Unit]
+Description=geng github feeder (%i)
+# One shot, started by geng-feed@%i.timer. It is not a daemon: the agent's own daemon
+# must never touch the network, and a feeder that dies with a hung request is better
+# than a long-lived process holding the inbox.
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@ROOT@
+# GENG_GITHUB_REPO=owner/name, and either GH_TOKEN=... or GH_CONFIG_DIR=...
+# Nothing here is read from the repository: credentials live in secrets/ only.
+EnvironmentFile=-@ROOT@/secrets/feed.env
+ExecStart=@NODE@ @ROOT@/cmd/geng/index.ts feed github --instance %i --root @ROOT@
+# The only unit that puts a credential in a process environment: keep that process
+# from gaining anything else, and from seeing the world through /tmp.
+NoNewPrivileges=yes
+PrivateTmp=yes
+# A stuck `gh` is killed by the code at 30s; this is the second fence, not the first.
+TimeoutStartSec=90

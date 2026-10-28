@@ -7,4 +7,7 @@
 
 `/files` 满了会先删最老的。
 
+收到的邮件在 `/mail`（只读），不会叫醒你。用 `mail` 看，`mail mark` 标已读——不标就一直算没处理。
+邮件只收不回，没有回信的通道；要答一个人就换你找得到他的地方。
+
 `/state/policy.proposal.json`：`{"cycle":{"defaultWakeMinutes":30}}` 这样的东西，下次醒来前生效，只认时机和阈值。
