@@ -17,8 +17,15 @@ const git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 6
 /**
  * `~`-prefixed home paths are generic; an absolute one names a machine. The documented
  * examples use a placeholder account, so those are the only ones allowed through.
+ *
+ * Three shapes, because the leak comes from whichever machine the contributor was on:
+ * `/home/<account>/` on Linux, `/Users/<account>/` on macOS, `C:\Users\<account>\` on
+ * Windows. Backslashes may be written doubled (a JSON string), hence `\\+`.
  */
-const HOME_ABS = /\/home\/([A-Za-z0-9._-]+)\//g;
+const HOME_ABS = [
+  /\/(?:home|Users)\/([A-Za-z0-9._-]+)\//g,
+  /[A-Za-z]:\\+Users\\+([A-Za-z0-9._-]+)/g,
+];
 const GENERIC_ACCOUNTS = new Set(["agent", "you", "user", "someone"]);
 
 const problems = [];
@@ -39,10 +46,12 @@ for (const f of files) {
   } catch {
     continue; // binary or gone
   }
-  for (const m of text.matchAll(HOME_ABS)) {
-    if (GENERIC_ACCOUNTS.has(m[1])) continue;
-    const line = text.slice(0, m.index).split("\n").length;
-    problems.push(`主机路径: ${f}:${line}`);
+  for (const re of HOME_ABS) {
+    for (const m of text.matchAll(re)) {
+      if (GENERIC_ACCOUNTS.has(m[1])) continue;
+      const line = text.slice(0, m.index).split("\n").length;
+      problems.push(`主机路径: ${f}:${line}`);
+    }
   }
 }
 
