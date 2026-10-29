@@ -20,14 +20,24 @@ const ATTENTION_MAX_MS = 4 * 3_600_000;
 // Where this instance may speak, as chat ids. A count was not enough: a waking that
 // wanted to quote a message had no number to put in `replyTo`, invented one, and the
 // gateway dropped the message while this tool still reported "说了 N 句".
-// An instance with no places passes the empty string, and Number("") is 0 — a chat id
-// nobody could ever send from — so empty pieces go before parsing.
-const PLACES = (process.env.GENG_PLACES ?? "")
+//
+// The count is still sent and still read, because the image and the daemon are upgraded
+// separately: a daemon older than this file sends only the count (no list, so nothing to
+// check against), and an extension older than this daemon reads only the count and keeps
+// working. Reading the ids alone would make the first case refuse every chat with
+// "能发的是 1" — a speaking channel that goes quiet while the tool says it refused.
+// shortcut: no id check while only the count arrives; drop GENG_PLACES once the image and
+// the daemon are known to ship together.
+const PLACE_IDS = (process.env.GENG_PLACE_IDS ?? "")
   .split(",")
   .map((s) => s.trim())
-  .filter((s) => s !== "")
-  .map(Number)
+  .filter((s) => s !== "") // an instance with no places sends the empty string, and
+  .map(Number) // Number("") is 0 — a chat id nobody could ever send from
   .filter((n) => Number.isFinite(n));
+/** null: a daemon that only knows how many there are, so there is no list to check. */
+const PLACES: number[] | null = PLACE_IDS.length > 0 ? PLACE_IDS : null;
+const COUNT = Number(process.env.GENG_PLACES ?? "0");
+const placeCount = PLACES?.length ?? (Number.isFinite(COUNT) ? COUNT : 0);
 const FORGET = join(STATE, "files.forget.json");
 
 function writeAtomic(file: string, text: string): void {
@@ -92,14 +102,14 @@ const sayTool = defineTool({
     }
     // quoting one message already says which conversation it belongs to
     const target = params.to !== undefined ? Number(params.to) : (quote?.chat ?? undefined);
-    if (target === undefined && PLACES.length >= 2) {
+    if (target === undefined && placeCount >= 2) {
       throw new Error("有两处以上能说话，to 必填：提示词「能说话的地方」里有各个 chat 的 id。");
     }
     const chat = target;
     if (params.to !== undefined && !Number.isFinite(chat)) {
       return { content: [{ type: "text", text: `to 要写 chat 的 id：${params.to} 不是。` }], details: undefined };
     }
-    if (PLACES.length === 0) {
+    if (placeCount === 0) {
       return {
         content: [
           { type: "text", text: "现在没有能说话的地方：还没有人跟你的 bot 说过话，发出去也没人收到。" },
@@ -109,7 +119,7 @@ const sayTool = defineTool({
     }
     // A chat that is not on the list is a message nobody will ever read: the gateway drops
     // it and acks it, so "说了 N 句" here would be this tool lying to the one asking.
-    if (chat !== undefined && !PLACES.includes(chat)) {
+    if (chat !== undefined && PLACES !== null && !PLACES.includes(chat)) {
       return {
         content: [
           {
@@ -177,15 +187,16 @@ const listenTool = defineTool({
       };
     }
     // a window on a chat that never sends is a window that silently never opens
-    const unknown = chats.filter((c) => c !== "*" && !PLACES.includes(c));
-    if (unknown.length > 0) {
-      const known = PLACES.length > 0 ? `${PLACES.join("、")} 或 *` : "*";
-      return {
-        content: [
-          { type: "text", text: `这些 chat 不在你能说话的地方里：${unknown.join("、")}。能听的是 ${known}。` },
-        ],
-        details: undefined,
-      };
+    if (PLACES !== null) {
+      const unknown = chats.filter((c) => c !== "*" && !PLACES.includes(c));
+      if (unknown.length > 0) {
+        return {
+          content: [
+            { type: "text", text: `这些 chat 不在你能说话的地方里：${unknown.join("、")}。能听的是 ${PLACES.join("、")} 或 *。` },
+          ],
+          details: undefined,
+        };
+      }
     }
     const now = Date.now();
     const wanted = params.until ? Date.parse(params.until) : NaN;

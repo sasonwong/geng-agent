@@ -60,11 +60,15 @@ test("every -e value is really passed to docker as an env var", () => {
 test("the container is told where it may speak, by id", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const p = { ...defaultPolicy(), runner: "docker" as const };
-  // ids, not a count: `say` refuses a chat that is not one of them, and at two places it
-  // must be told which one. Neither is possible from a number.
+  // ids, because `say` refuses a chat that is not one of them, and at two places it must
+  // be told which one. The count stays next to them: an extension older than this daemon
+  // reads it and nothing else, and must keep working.
   const places = [{ id: 111 }, { id: -1001234567890 }];
   const args = buildCommand(makePaths(root, "alice"), p, "geng-x-0001", "P", places).args;
-  const i = args.indexOf("GENG_PLACES=111,-1001234567890");
-  assert.ok(i > 0, "没传 GENG_PLACES");
-  assert.equal(args[i - 1], "-e");
+  const ids = args.indexOf("GENG_PLACE_IDS=111,-1001234567890");
+  assert.ok(ids > 0, "没传 GENG_PLACE_IDS");
+  assert.equal(args[ids - 1], "-e");
+  const count = args.indexOf("GENG_PLACES=2");
+  assert.ok(count > 0, "没传 GENG_PLACES：比 daemon 旧的扩展读不到能说话的地方");
+  assert.equal(args[count - 1], "-e");
 });

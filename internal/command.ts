@@ -31,7 +31,8 @@ export function buildCommand(
   /** The constant half of waking up, with the identity it wrote appended. */
   systemPrompt: string,
   /** Where it may speak, as chat ids: `say` refuses a chat that is not one of them, and
-   *  with two or more it must be told which one. */
+   *  with two or more it must be told which one. The count goes out next to them, for an
+   *  extension older than this daemon — it reads the count and nothing else. */
   places: { id: number }[],
   /** Replace the in-container command; used by the doctor probe. */
   tail?: string[],
@@ -63,7 +64,9 @@ export function buildCommand(
       "-e",
       `TZ=${policy.timezone}`,
       "-e",
-      `GENG_PLACES=${places.map((p) => p.id).join(",")}`,
+      `GENG_PLACES=${places.length}`,
+      "-e",
+      `GENG_PLACE_IDS=${places.map((p) => p.id).join(",")}`,
       "-v",
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
@@ -130,7 +133,11 @@ export function buildCommand(
       "--system-prompt",
       systemPrompt,
     ],
-    env: { ...localEnv(), GENG_PLACES: places.map((p) => p.id).join(",") },
+    env: {
+      ...localEnv(),
+      GENG_PLACES: String(places.length),
+      GENG_PLACE_IDS: places.map((p) => p.id).join(","),
+    },
     cwd: paths.workspace,
   };
 }
