@@ -30,8 +30,9 @@ export function buildCommand(
   sessionId: string,
   /** The constant half of waking up, with the identity it wrote appended. */
   systemPrompt: string,
-  /** How many places it may speak into: with more than one, `say` must name one. */
-  places: number,
+  /** Where it may speak, as chat ids: `say` refuses a chat that is not one of them, and
+   *  with two or more it must be told which one. */
+  places: { id: number }[],
   /** Replace the in-container command; used by the doctor probe. */
   tail?: string[],
 ): Command {
@@ -62,7 +63,7 @@ export function buildCommand(
       "-e",
       `TZ=${policy.timezone}`,
       "-e",
-      `GENG_PLACES=${places}`,
+      `GENG_PLACES=${places.map((p) => p.id).join(",")}`,
       "-v",
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
@@ -129,7 +130,7 @@ export function buildCommand(
       "--system-prompt",
       systemPrompt,
     ],
-    env: { ...localEnv(), GENG_PLACES: String(places) },
+    env: { ...localEnv(), GENG_PLACES: places.map((p) => p.id).join(",") },
     cwd: paths.workspace,
   };
 }

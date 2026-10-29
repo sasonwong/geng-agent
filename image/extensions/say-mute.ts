@@ -17,9 +17,17 @@ const MUTE = join(STATE, "mute.json");
 const ATTENTION = join(STATE, "attention.json");
 // four hours is the most it may ask for: longer than that is not attention, it is a rule
 const ATTENTION_MAX_MS = 4 * 3_600_000;
-// How many places this instance may speak into, counted by the daemon. Guessing the
-// target is what put a group reply into a private chat, so at two or more it is refused.
-const PLACES = Number(process.env.GENG_PLACES ?? "0");
+// Where this instance may speak, as chat ids. A count was not enough: a waking that
+// wanted to quote a message had no number to put in `replyTo`, invented one, and the
+// gateway dropped the message while this tool still reported "说了 N 句".
+// An instance with no places passes the empty string, and Number("") is 0 — a chat id
+// nobody could ever send from — so empty pieces go before parsing.
+const PLACES = (process.env.GENG_PLACES ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter((s) => s !== "")
+  .map(Number)
+  .filter((n) => Number.isFinite(n));
 const FORGET = join(STATE, "files.forget.json");
 
 function writeAtomic(file: string, text: string): void {
@@ -37,7 +45,7 @@ const sayTool = defineTool({
   name: "say",
   label: "Say",
   description:
-    "说话。一次调用里的几句会一起送到；分几次调用就是隔一阵说一句。没人问你的时候也可以说。",
+    "对一个人说话。一次调用里的几句一起送到；分几次调用就是隔一阵说一句。没人问你的时候也可以说。只有一个地方能说话时不用写 to，两处以上必须写。replyTo 写「chat id-消息 id」，形如 -1001234567890-151（id 在 /inbox 的文件名里，也在 /people/<chat>.jsonl 每行的 id 里）。",
   parameters: Type.Object({
     messages: Type.Array(Type.String(), {
       minItems: 1,
@@ -46,7 +54,7 @@ const sayTool = defineTool({
     }),
     to: Type.Optional(
       Type.String({
-        description: "发给哪个 chat 的 id（见提示词里的「能说话的地方」）。",
+        description: "发到哪个 chat：「能说话的地方」里那些数字 id（不是 @handle）。",
       }),
     ),
     files: Type.Optional(
@@ -58,7 +66,7 @@ const sayTool = defineTool({
     replyTo: Type.Optional(
       Type.String({
         description:
-          "引用的那条消息的 id（收件箱文件里的 id，或 /people 里那些行，形如 -1001234567890-151）。写了它就发到那条消息所在的会话，to 可以省。",
+          "引用哪一条：chat id-消息 id，形如 -1001234567890-151。写了它就发到那条消息所在的会话，to 可以省。",
       }),
     ),
   }),
@@ -84,12 +92,33 @@ const sayTool = defineTool({
     }
     // quoting one message already says which conversation it belongs to
     const target = params.to !== undefined ? Number(params.to) : (quote?.chat ?? undefined);
-    if (target === undefined && PLACES >= 2) {
+    if (target === undefined && PLACES.length >= 2) {
       throw new Error("有两处以上能说话，to 必填：提示词「能说话的地方」里有各个 chat 的 id。");
     }
     const chat = target;
     if (params.to !== undefined && !Number.isFinite(chat)) {
       return { content: [{ type: "text", text: `to 要写 chat 的 id：${params.to} 不是。` }], details: undefined };
+    }
+    if (PLACES.length === 0) {
+      return {
+        content: [
+          { type: "text", text: "现在没有能说话的地方：还没有人跟你的 bot 说过话，发出去也没人收到。" },
+        ],
+        details: undefined,
+      };
+    }
+    // A chat that is not on the list is a message nobody will ever read: the gateway drops
+    // it and acks it, so "说了 N 句" here would be this tool lying to the one asking.
+    if (chat !== undefined && !PLACES.includes(chat)) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `这个 chat 不在你能说话的地方里：${chat} 不是。能发的是 ${PLACES.join("、")}。`,
+          },
+        ],
+        details: undefined,
+      };
     }
     const files = (params.files ?? []).filter((f) => f.trim() !== "");
     const id = nextId();
@@ -119,12 +148,13 @@ const listenTool = defineTool({
   name: "listen",
   label: "Listen",
   description:
-    "在一个会话里，平时的消息不会叫醒你——只在你下一轮醒来时摆在那儿。用这个说\"接下来这段时间，那儿的消息直接叫我\"。到点自动失效。",
+    "让某个会话的消息直接叫醒你：平时那些消息只在你下一轮醒来时摆在那儿。到点自动失效，最长四小时。",
   parameters: Type.Object({
     chats: Type.Array(Type.String(), {
       minItems: 1,
       maxItems: 10,
-      description: "要听哪些会话的 chat id（见提示词「能说话的地方」）。写 * 是所有会话。空数组表示不再听了。",
+      description:
+        "要听哪些会话的 chat id（纯数字，不是 @handle，也不是 telegram:xxx）。写 * 是所有会话。空数组表示不再听了。",
     }),
     until: Type.Optional(
       Type.String({
@@ -143,6 +173,17 @@ const listenTool = defineTool({
     if (chats.some((c) => c !== "*" && !Number.isFinite(c))) {
       return {
         content: [{ type: "text", text: `要写 chat 的 id 或 *：${raw.join("、")} 里有的不是。` }],
+        details: undefined,
+      };
+    }
+    // a window on a chat that never sends is a window that silently never opens
+    const unknown = chats.filter((c) => c !== "*" && !PLACES.includes(c));
+    if (unknown.length > 0) {
+      const known = PLACES.length > 0 ? `${PLACES.join("、")} 或 *` : "*";
+      return {
+        content: [
+          { type: "text", text: `这些 chat 不在你能说话的地方里：${unknown.join("、")}。能听的是 ${known}。` },
+        ],
         details: undefined,
       };
     }
@@ -207,7 +248,8 @@ const muteTool = defineTool({
     "安静一段时间：把某个来源从「会叫醒你」降成「等你下次醒来再看」。消息一条都不会丢。直接对你说话的人（@你、回复你、私聊你）不受影响。",
   parameters: Type.Object({
     target: Type.String({
-      description: '要安静的来源："*"（全部环境噪音）、"dm"（私聊）、或 "chat:<id>"。',
+      description:
+        '要安静的来源："*"（全部环境噪音）、"dm"（私聊）、或 "chat:<id>"——id 就是「能说话的地方」里那些数字。',
     }),
     minutes: Type.Integer({ minimum: 1, maximum: 10080, description: "安静多少分钟。" }),
     why: Type.String({ description: "为什么。会写进你下次醒来的纸上。" }),
