@@ -52,16 +52,26 @@ const RULES = [
     sev: "critical",
     src: String.raw`https://(?:discord(?:app)?\.com/api/webhooks|hooks\.slack\.com/services)/[A-Za-z0-9/_\-]{10,}`,
   },
+  // 赋值类的两条各有两种拼法：带引号的（JSON/TS）和不带引号的（`.env`、YAML）。
+  // 后者是 2026-10-29 补的：#28 只认带引号的值，而这个仓库存凭据的形状恰好是无引号的
+  // `NAME=value`，真提交进来时最像凭据的几行是静默的。
+  //
+  // 不带引号的那种只收「看起来是字面量」的值：不以反引号、引号或 `${` 开头，长度 ≥12，
+  // 后面不紧跟 `.` / `(` / `$`——那三种是表达式（`spec.token`、`newToken()`、`${VAR}` 是
+  // 引用不是值），不是谁忘了引号。这条尾巴是量出来的：把门槛放宽到「任意 8 个字符」，
+  // 这棵树的 106 个文件里有 8 处命中，全是 `process.env.X` / `readPassword(path)` 这类表达式，没有一处真值。
+  // 名字那一侧要另写一条 `[A-Z][A-Z0-9_]*` 的形状，因为 `GENG_SEARCH_TOKEN` 里的
+  // `token` 前面是 `_`，没有 `\b`。
   {
     name: "密钥赋值",
     sev: "critical",
-    src: String.raw`\b(?:access_?key_?id|secret_?access_?key|secret_?key|app_?secret|client_?secret|private_?token|api_?hash)\b['"]?\s*[:=]\s*['"][A-Za-z0-9/+=_\-]{12,}`,
+    src: String.raw`(?:\b(?:access_?key_?id|secret_?access_?key|secret_?key|app_?secret|client_?secret|private_?token|api_?hash)\b|[A-Z][A-Z0-9_]*(?:KEY|SECRET|TOKEN))['"]?\s*[:=]\s*(?:['"][A-Za-z0-9/+=_\-]{12,}|(?![\x60'"$])[A-Za-z0-9/+=_\-]{12,}(?![.($]))`,
     flags: "i",
   },
   {
     name: "口令赋值",
     sev: "high",
-    src: String.raw`\b(?:password|passwd|pwd|api_?key|apikey|auth_?token|bot_?token|token)\b['"]?\s*[:=]\s*['"][^'"\s]{8,}['"]`,
+    src: String.raw`(?:\b(?:password|passwd|pwd|api_?key|apikey|auth_?token|bot_?token|token)\b|[A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|PWD|TOKEN|KEY))['"]?\s*[:=]\s*(?:['"][^'"\s]{8,}['"]|(?![\x60'"$])[A-Za-z0-9/+=_\-]{12,}(?![.($]))`,
     flags: "i",
   },
   { name: "npm 令牌", sev: "critical", src: String.raw`_authToken\s*=\s*\S{10,}`, flags: "i" },

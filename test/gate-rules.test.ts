@@ -115,3 +115,28 @@ test("a row of identical digits is a placeholder, not an id", () => {
   commit(dir, { "doc.md": `示例里 id 就写成 ${id}\n` });
   assert.equal(scan(dir).code, 0);
 });
+
+test("an unquoted NAME=value is a credential too", () => {
+  // `.env` 和 YAML 里最常见的形状。带引号的那两条抓不到它——真把 secrets/*.env
+  // 提交进来的时候，最像凭据的几行是静默的（#28 的评论里记的实测）。
+  const dir = repo();
+  const secret = ["Zm9vYmFy", "YmF6cXV4MTIzNDU2Nzg5MA"].join("");
+  commit(dir, { "secrets.env": `GENG_SEARCH_TOKEN=${secret}\n` });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /口令赋值: secrets\.env:1/);
+  assert.equal(r.out.includes(secret), false);
+});
+
+test("a value that is an expression is not an unquoted credential", () => {
+  // 无引号那一侧的门槛收在「看起来是字面量」：`spec.token`、`newToken()`、
+  // `${VAR}` 都是表达式或引用。放宽到「任意 8 个字符」时，这棵树 106 个文件里有
+  // 8 处命中，全是这一类，一处真值没有。
+  const dir = repo();
+  commit(dir, {
+    "a.ts": "const token = newToken();\nconst b = spec.token.value;\n",
+    "b.env": "DB_PASSWORD=${DB_PASSWORD}\n",
+    "README.md": "password: hunter2\n",
+  });
+  assert.equal(scan(dir).code, 0);
+});
