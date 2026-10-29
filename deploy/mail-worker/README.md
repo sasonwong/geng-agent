@@ -19,6 +19,34 @@ npx wrangler secret put GENG_MAIL_TOKEN
 npx wrangler secret put GENG_MAIL_URL   # https://mail.example.com
 ```
 
+## 公网入口（tunnel）
+
+收信端点只听 `127.0.0.1:8788`，外面进不来，所以公网 hostname 要由 Cloudflare tunnel 接到它上面。
+**机器上已经有 tunnel 的话不要新建**——面板 → Zero Trust → Networks → Tunnels → 选那条正在跑的 →
+**Public Hostname**：
+
+- Subdomain `geng-mail`、Domain `your-domain`
+- Service `http://localhost:8788`
+
+面板会顺手建好 DNS 记录，hostname 就是 `GENG_MAIL_URL`。
+
+机器上还没有 tunnel 才需要新建，一次三行：
+
+```
+cloudflared tunnel create geng-mail
+cloudflared tunnel route dns geng-mail geng-mail.your-domain
+# 再把它跑成常驻服务（包自带的 unit 或自己写一个），ingress 就是上面那一条 hostname → 8788
+```
+
+两处顺序不能颠倒：token 要在 Worker 部署**之前**存在（否则 Worker 拿到 401，Cloudflare 把信退回去），
+tunnel 要在填 `GENG_MAIL_URL` 之前通（否则它指向一个 502）。验证：
+
+```
+curl -s -o /dev/null -w '%{http_code}\n' -X POST https://geng-mail.your-domain/
+```
+
+`401` 是对的（没有 token）。`502` 说明隧道或端点没起来。
+
 然后在 Cloudflare 面板：**Email Routing → Routes → 新规则**，
 
 - 地址：`geng-alice-bot@your-domain`（想给它哪个地址就写哪个）
