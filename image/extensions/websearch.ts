@@ -32,7 +32,7 @@ const searchTool = defineTool({
   name: "web_search",
   label: "Web Search",
   description:
-    "搜网。返回标题、链接、摘要。今天用完了就直说，别换个说法再问一遍。",
+    "搜网。返回标题、链接、摘要（count 最多 20）。need_content 连正文一起取回来，会大很多。今天用完了就直说，别换个说法再问一遍。",
   parameters: Type.Object({
     query: Type.String({ description: "查询，1-128 字符。" }),
     count: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
@@ -49,7 +49,7 @@ const searchTool = defineTool({
 const fetchTool = defineTool({
   name: "web_fetch",
   label: "Web Fetch",
-  description: "取一个网页的正文。",
+  description: "取一个网页的正文。取不到会直说（被挡、超时、不是网页）。",
   parameters: Type.Object({
     url: Type.String({ description: "http(s) URL。" }),
   }),
