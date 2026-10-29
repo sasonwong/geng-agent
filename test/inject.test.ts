@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText } from "../internal/inject.ts";
+import { clockArmed, clockNotice, freshForSteer, handedOver, INJECT_CAP, injectionText } from "../internal/inject.ts";
 import { peekInbox } from "../internal/inbox.ts";
 import { writeJson } from "../internal/state.ts";
 
@@ -30,9 +30,9 @@ test("an injected line says who and what, with no advice attached", () => {
 
 test("an injection no turn followed is not counted as delivered", () => {
   const injected = [{ file: "a.json" }, { file: "b.json" }];
-  assert.deepEqual(deliveredFiles(injected, [{ read: true }, { read: false }]), ["a.json"]);
-  assert.deepEqual(deliveredFiles(injected, []), []);
-  assert.deepEqual(deliveredFiles([], [{ read: true }]), []);
+  assert.deepEqual(handedOver(injected, [{ read: true }, { read: false }]).files, ["a.json"]);
+  assert.deepEqual(handedOver(injected, []).files, []);
+  assert.deepEqual(handedOver([], [{ read: true }]).files, []);
 });
 
 test("a message that is only a file still says something", () => {
@@ -67,4 +67,29 @@ test("a voice note says it cannot be listened to, because it never lands in /fil
   // looking for a file that does not exist
   const said = injectionText({ id: "9", file: "9.json", text: "", from: "telegram:@x", attachments: [{ kind: "voice", note: "没有转写" }] });
   assert.equal(said, "[刚收到] telegram:@x：没写字，只带了 1条语音（没有转写）。");
+});
+
+test("the clock is said once, in the last five minutes, and not before", () => {
+  const said = new Set<number>();
+  assert.deepEqual(clockNotice(6 * 60_000, "example", said), []);
+  assert.deepEqual(clockNotice(5 * 60_000, "example", said), ["[daemon@example] 本轮还剩约 5 分钟"]);
+  assert.deepEqual(clockNotice(5 * 60_000, "example", said), []);
+  // a late drain says it late rather than skipping it
+  assert.deepEqual(clockNotice(30_000, "example", new Set<number>()), ["[daemon@example] 本轮还剩约 5 分钟"]);
+});
+
+test("a round too short for the warning gets none", () => {
+  assert.equal(clockArmed(5 * 60_000), false);
+  assert.equal(clockArmed(6 * 60_000), true);
+  assert.equal(clockArmed(30 * 60_000), true);
+});
+
+test("a clock notice is neither a delivered message nor an undelivered one", () => {
+  const injected = [{ file: "" }, { file: "a.json" }, { file: "b.json" }];
+  assert.deepEqual(handedOver(injected, [{ read: true }, { read: true }, { read: false }]), {
+    files: ["a.json"],
+    total: 2,
+    unread: 1,
+    clock: 1,
+  });
 });
