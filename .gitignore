@@ -9,4 +9,7 @@
 # no trailing slash: a symlink is a file, and `/node_modules/` let one through
 node_modules
 /deploy/mail-worker/node_modules/
+# wrangler's own scratch: never part of what Cloudflare runs
+/deploy/mail-worker/.wrangler/
+/deploy/mail-worker/.dev.vars
 *.log
