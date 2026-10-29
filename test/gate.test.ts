@@ -1,7 +1,7 @@
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,8 +18,16 @@ const ACCOUNT = ["hostname", "alice"].join("-");
 const HOST_HOME = ["", "home", ACCOUNT, "proj", "geng"].join("/");
 const SCAN = fileURLToPath(new URL("../tools/gate/scan.mjs", import.meta.url));
 
+// Every fixture is a real repository on disk, so it has to be swept up: six of them
+// per run is small, but a few hundred runs of the suite is a hundred megabytes of dust.
+const made: string[] = [];
+after(() => {
+  for (const dir of made) rmSync(dir, { recursive: true, force: true });
+});
+
 function repo(): string {
   const dir = mkdtempSync(join(tmpdir(), "geng-gate-"));
+  made.push(dir);
   const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
   git("init", "-q");
   git("config", "user.email", "dev@example.invalid");
