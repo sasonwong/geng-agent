@@ -71,6 +71,55 @@ test("the placeholder accounts stay legal — that is what the docs are written 
   assert.equal(scan(dir).code, 0);
 });
 
+// 下面四条钉的是同一件事的另一半：门「没看见」不等于「没有」。
+//
+// 一个路径如果正好是行尾（符号链接的 target、笔记里的最后一个词就是这样），旧正则
+// 要求尾随斜杠，于是整条漏掉；`~<account>/` 这种短写法根本没被找过。这两种「看不见」
+// 和「干净」在输出上长得一模一样，所以只能靠测试区分。
+
+test("a home path that ends the line is still a host path", () => {
+  const dir = repo();
+  commit(dir, { "notes.md": `家目录是 ${["", "home", ACCOUNT].join("/")}\n` });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /主机路径: notes\.md:1/);
+  assert.equal(r.out.includes(ACCOUNT), false);
+});
+
+test("the short spelling of a home path is the same fact", () => {
+  const dir = repo();
+  commit(dir, { "notes.md": `别名指向 ~${ACCOUNT}/geng\n` });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /主机路径: notes\.md:1/);
+  assert.equal(r.out.includes(ACCOUNT), false);
+});
+
+test("a bare tilde plus an account ends the line the same way", () => {
+  const dir = repo();
+  commit(dir, { "notes.md": `链接指向 ~${ACCOUNT}\n` });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /主机路径: notes\.md:1/);
+  assert.equal(r.out.includes(ACCOUNT), false);
+});
+
+test("a tilde with no account is not a host — it is how the docs say it", () => {
+  const dir = repo();
+  commit(dir, { "doc.md": "配置在 ~/.pi，备份到 ~/backup，另见 ~/geng-agent，版本 ~1.2.3，删除线 ~~旧写法~~ 也不是路径\n" });
+  assert.equal(scan(dir).code, 0);
+});
+
+test("a repository with no commits is not a clean repository", () => {
+  // 空的 `git init` 是最容易误读成绿灯的形状：文件 0 个、身份 0 个，两条检查都
+  // 「通过」，而实际上什么都没检查。`git log` 在这里还会非零退出。
+  const dir = repo();
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /提交身份: 0 个/);
+  assert.match(r.out, /空树: 0 个文件/);
+});
+
 test("an absolute path in a file the tree does not track is none of the gate's business", () => {
   const dir = repo();
   commit(dir, { "README.md": "ok\n" });
