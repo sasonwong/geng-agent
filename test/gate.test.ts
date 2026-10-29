@@ -1,13 +1,13 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
+import { symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { CLEAN_GIT, cleanupRepos, cleanGitEnv, commit, gitIn, repo, scan } from "../tools/gate/fixture.ts";
 
 // 门是脚本，不是函数：它读的是「当前目录里的 git」，所以这里造真的 git 仓库，用真的
-// node 去跑它。测的是门看见什么，不是门里面的实现。
+// node 去跑它。测的是门看见什么，不是门里面的实现。夹具本身（以及它为什么必须不继承
+// 这台机器的 git 配置）在 tools/gate/fixture.ts。
 //
 // 只测这台机器和 GitHub runner 上真会发生的形状（Linux）。mac / Windows 的主机路径
 // 不在这个仓库的历史里，也就不在这里。
@@ -16,36 +16,8 @@ import { fileURLToPath } from "node:url";
 // /home/<谁>/ 会被门抓住——那说明门在工作，但也说明测试素材得运行时造。
 const ACCOUNT = ["hostname", "alice"].join("-");
 const HOST_HOME = ["", "home", ACCOUNT, "proj", "geng"].join("/");
-const SCAN = fileURLToPath(new URL("../tools/gate/scan.mjs", import.meta.url));
 
-// Every fixture is a real repository on disk, so it has to be swept up: six of them
-// per run is small, but a few hundred runs of the suite is a hundred megabytes of dust.
-const made: string[] = [];
-after(() => {
-  for (const dir of made) rmSync(dir, { recursive: true, force: true });
-});
-
-function repo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "geng-gate-"));
-  made.push(dir);
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
-  git("init", "-q");
-  git("config", "user.email", "dev@example.invalid");
-  git("config", "user.name", "dev");
-  return dir;
-}
-
-function commit(dir: string, files: Record<string, string>): void {
-  for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body);
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
-  git("add", "-A");
-  git("commit", "-q", "-m", "fixture");
-}
-
-function scan(dir: string): { code: number; out: string } {
-  const r = spawnSync(process.execPath, [SCAN], { cwd: dir, encoding: "utf8" });
-  return { code: r.status ?? -1, out: `${r.stdout}${r.stderr}` };
-}
+after(cleanupRepos);
 
 test("a clean tree passes, and the gate says what it counted", () => {
   const dir = repo();
@@ -131,9 +103,8 @@ test("a symlink is caught even though .gitignore matches directories, not links"
   const dir = repo();
   commit(dir, { "README.md": "ok\n" });
   symlinkSync("/tmp/somewhere", join(dir, "node_modules"));
-  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" });
-  git("add", "-A");
-  git("commit", "-q", "-m", "link");
+  gitIn(dir, "add", "-A");
+  gitIn(dir, "commit", "-q", "-m", "link");
   const r = scan(dir);
   assert.equal(r.code, 1);
   assert.match(r.out, /符号链接: node_modules/);
@@ -145,7 +116,7 @@ test("a commit identity that is not a noreply address is caught", () => {
   execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "x"], {
     cwd: dir,
     encoding: "utf8",
-    env: { ...process.env, GIT_AUTHOR_EMAIL: "dev@corp.example", GIT_COMMITTER_EMAIL: "dev@corp.example" },
+    env: { ...CLEAN_GIT, GIT_AUTHOR_EMAIL: "dev@corp.example", GIT_COMMITTER_EMAIL: "dev@corp.example" },
   });
   const r = scan(dir);
   assert.equal(r.code, 1);
@@ -153,4 +124,44 @@ test("a commit identity that is not a noreply address is caught", () => {
   // 打进公开日志，是门的事，不该被一条测试钉死。
   assert.match(r.out, /提交身份: /);
   assert.match(r.out, /gate: 1 处/);
+});
+
+test("the fixture does not inherit the machine's git config", () => {
+  // `%G?` 是「这个提交有没有签名」：`N` = 没有。签名是环境的事，不是夹具的事；一条
+  // 全局的 gpgsign 不该决定门能不能被测。反过来说，这条测试在没配签名的机器上
+  // 永远绿——它只在配置了签名的机器上才有区分力，而那正是它会坏的地方。
+  const dir = repo();
+  commit(dir, { "README.md": "ok\n" });
+  assert.equal(gitIn(dir, "log", "-1", "--format=%G?").trim(), "N");
+});
+
+test("every channel git reads configuration from is closed", () => {
+  // 这不是测 git，是测上面那个函数有没有把四类通道全关掉。敌意配置从三个方向来：
+  // 两个文件、`GIT_CONFIG` 指的文件、以及 `-c` 等价的那组变量。少关一类，夹具的
+  // 形状就又会由谁来跑决定。`GIT_DIR` 和 `GIT_AUTHOR_*` 不是配置，但同属「这台机器
+  // 的状态」：一个指仓库、一个指人，夹具两样都不该继承。
+  const env = cleanGitEnv({
+    PATH: "/usr/bin",
+    GIT_CONFIG: "/tmp/hostile.gitconfig",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "commit.gpgsign",
+    GIT_CONFIG_VALUE_0: "true",
+    GIT_CONFIG_PARAMETERS: "'commit.gpgsign'='true'",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_CONFIG_GLOBAL: "/tmp/hostile.gitconfig",
+    GIT_CONFIG_SYSTEM: "/tmp/hostile.gitconfig",
+    GIT_DIR: "/tmp/hostile.git",
+    GIT_AUTHOR_EMAIL: "dev@corp.example",
+  });
+  assert.equal(env.GIT_CONFIG_COUNT, undefined);
+  assert.equal(env.GIT_CONFIG_KEY_0, undefined);
+  assert.equal(env.GIT_CONFIG_VALUE_0, undefined);
+  assert.equal(env.GIT_CONFIG_PARAMETERS, undefined);
+  assert.equal(env.GIT_CONFIG_NOSYSTEM, undefined);
+  assert.equal(env.GIT_CONFIG, undefined);
+  assert.equal(env.GIT_DIR, undefined);
+  assert.equal(env.GIT_AUTHOR_EMAIL, undefined);
+  assert.equal(env.GIT_CONFIG_GLOBAL, "/dev/null");
+  assert.equal(env.GIT_CONFIG_SYSTEM, "/dev/null");
+  assert.equal(env.PATH, "/usr/bin", "其他环境变量原样保留");
 });
