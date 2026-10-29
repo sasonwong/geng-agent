@@ -260,7 +260,7 @@ const muteTool = defineTool({
   parameters: Type.Object({
     target: Type.String({
       description:
-        '要安静的来源："*"（全部环境噪音）、"dm"（私聊）、或 "chat:<id>"——id 就是「能说话的地方」里那些数字。',
+        '要安静的来源："*"（全部环境噪音）、"dm"（私聊）、或 "chat:<id>"——id 就是「能说话的地方」里那些数字，写错等于没静音。',
     }),
     minutes: Type.Integer({ minimum: 1, maximum: 10080, description: "安静多少分钟。" }),
     why: Type.String({ description: "为什么。会写进你下次醒来的纸上。" }),

@@ -2,7 +2,7 @@
 
 /state 里这三样只有你写：
   identity.md   你写下的自己。
-  journal/      日记，一件一个文件，格式你定。我们不读，也不数。
+  journal/      日记。格式你定，我们不读。
   open-loops/   没闭合的事，一件一个文件。
 
 下一轮什么时候醒，写在 `/state/waiting.json`：
