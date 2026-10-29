@@ -12,6 +12,7 @@ import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
 import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./mail.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
+import { readBots } from "./bots.ts";
 import { readJson, writeJson } from "./state.ts";
 import {
   getMe,
@@ -142,7 +143,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const root = o.root;
   const botsFile = join(root, "secrets", "bots.json");
-  const bots = readJson<Record<string, BotConfig>>(botsFile, {});
+  const bots = readBots(root);
   const keys = Object.keys(bots);
   // a mailbox is a transport too: an instance may have mail and no bot at all
   const mailCfg = loadMailConfig(root);

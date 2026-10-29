@@ -3,7 +3,7 @@ import { readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { makePaths, type Paths } from "./paths.ts";
-import { parseEnvFile } from "./search.ts";
+import { readEnvFile } from "./secret.ts";
 import { mtimeMs, readJson, writeJson } from "./state.ts";
 
 /**
@@ -50,7 +50,7 @@ export function loadMailConfig(root: string): MailConfig | null {
 }
 
 export function readMailEnv(root: string): MailEnv | null {
-  const file = parseEnvFile(join(root, "secrets", "mail.env"));
+  const file = readEnvFile(join(root, "secrets", "mail.env"));
   const token = process.env.GENG_MAIL_TOKEN ?? file.GENG_MAIL_TOKEN ?? "";
   if (token === "") return null;
   // loopback by default: the tunnel is the only thing that should reach it

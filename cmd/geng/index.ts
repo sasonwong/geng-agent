@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runDaemon } from "../../internal/daemon.ts";
 import { ExpectedError } from "../../internal/errors.ts";
@@ -11,6 +12,8 @@ import { getMe } from "../../internal/telegram.ts";
 import { readJson } from "../../internal/state.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 import { describeConfig, loadMailConfig, readMailEnv } from "../../internal/mail.ts";
+import { addBot, describeBot, editAllow, readBots } from "../../internal/bots.ts";
+import { newToken, readEnvFile, secretFiles, writeEnvValue } from "../../internal/secret.ts";
 import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
 import { loadPolicy } from "../../internal/policy.ts";
 
@@ -28,6 +31,11 @@ const USAGE = `geng <command> [options]
   restore <instance> [<id>] --yes    恢复到 backup/<instance>.restore-<时间>/（默认最近一张；
                                      没有 --yes 不动手；不直接覆盖 data/，自己拷回去）
   gateway [--check]                  跑消息搬运（需要 secrets/bots.json）；--check 只验 token
+  bots add <inst> [--token-stdin] [--listen all|mentions] [--allow 1,2] [--chat N]
+                                     往 secrets/bots.json 里加一个 bot（token 从 stdin 读）
+  bots allow <inst> add|rm <ids>     改白名单（逗号分隔）；只有 add 过的人才叫得醒它
+  secrets init <inst> [--rotate]     生成成对的 search / mail token，两处一起写
+  secrets set <inst> <NAME>          从 stdin 读一个值写进 secrets/<inst>.env（600）
   search                             跑搜索端点（需要 secrets/search.env）
 
 通用选项：
@@ -47,6 +55,13 @@ interface Args {
   check: boolean;
   rest: string[];
 }
+
+/**
+ * 子命令自己的选项。放在这里而不是全局 Args 上：它们对一个子命令有意义，对其余的没有，
+ * 而全局开关每加一个，就多一个"不知道属于谁"的状态。
+ */
+const SUB_FLAG_VALUED = new Set(["--listen", "--allow", "--chat"]);
+const SUB_FLAG_BOOL = new Set(["--token-stdin", "--rotate"]);
 
 function parse(argv: string[]): Args {
   const args: Args = {
@@ -91,6 +106,14 @@ function parse(argv: string[]): Args {
       args.all = true;
     } else if (a === "-h" || a === "--help") {
       args.cmd = "help";
+    } else if (SUB_FLAG_VALUED.has(a)) {
+      // 只有某个子命令认识的选项：原样留着，由它自己解释（未知的仍然报错）
+      positional.push(a);
+      const v = rest[++i];
+      if (v === undefined) throw new Error(`${a} 需要一个值`);
+      positional.push(v);
+    } else if (SUB_FLAG_BOOL.has(a)) {
+      positional.push(a);
     } else if (a.startsWith("-")) {
       throw new Error(`未知选项 ${a}`);
     } else {
@@ -228,12 +251,140 @@ async function main(): Promise<number> {
       return whole.ok ? 0 : 1;
     }
 
+    case "bots": {
+      // rest 里是去掉命令名之后的参数：["add", "<instance>", ...]
+      const sub = args.rest[0] ?? "";
+      const key = args.rest[1] ?? args.instance ?? "";
+      const flag = (name: string): string | null => {
+        const at = args.rest.indexOf(`--${name}`);
+        return at === -1 ? null : (args.rest[at + 1] ?? null);
+      };
+      if (sub === "add") {
+        if (key === "") {
+          console.error("用法：geng bots add <instance> [--token-stdin] [--listen all|mentions] [--allow 1,2] [--chat N]");
+          return 2;
+        }
+        // 从 stdin 读，不走 argv：argv 在 ps 里是公开的。
+        const token = (args.rest.includes("--token-stdin") ? readFileSync(0, "utf8") : "").trim();
+        if (token === "") {
+          console.error(
+            "没有 token：把 BotFather 给的那串用管道送进来——\n" +
+              `  echo '<token>' | geng bots add ${key} --token-stdin --allow <你的 id>`,
+          );
+          return 2;
+        }
+        const ids = flag("allow");
+        const chat = flag("chat");
+        const listen = flag("listen");
+        if (listen !== null && listen !== "all" && listen !== "mentions") {
+          console.error("--listen 只能是 all 或 mentions");
+          return 2;
+        }
+        addBot(args.root, key, {
+          token,
+          ...(listen === null ? {} : { listen: listen as "all" | "mentions" }),
+          ...(ids === null
+            ? {}
+            : {
+                allow: ids
+                  .split(",")
+                  .map((x) => Number(x.trim()))
+                  .filter((n) => Number.isFinite(n)),
+              }),
+          ...(chat === null ? {} : { chat: Number(chat) }),
+        });
+        console.log(`写好 secrets/bots.json 里的 ${key}：${describeBot(readBots(args.root)[key])}`);
+        console.log("接着跑 `geng gateway --check`：它会对每个 token 调一次 getMe，只有那一步能证明 token 是对的。");
+        return 0;
+      }
+      if (sub === "allow") {
+        const op = args.rest[2] ?? "";
+        const ids = (args.rest[3] ?? "")
+          .split(",")
+          .map((x) => Number(x.trim()))
+          .filter((n) => Number.isFinite(n));
+        if (key === "" || (op !== "add" && op !== "rm") || ids.length === 0) {
+          console.error("用法：geng bots allow <instance> add|rm <id,id>");
+          return 2;
+        }
+        try {
+          editAllow(args.root, key, op === "add" ? ids : [], op === "rm" ? ids : []);
+        } catch (err) {
+          console.error((err as Error).message);
+          return 2;
+        }
+        console.log(`${key}：${describeBot(readBots(args.root)[key])}`);
+        return 0;
+      }
+      console.error("用法：geng bots add <instance> … | geng bots allow <instance> add|rm <ids>");
+      return 2;
+    }
+
+    case "secrets": {
+      const sub = args.rest[0] ?? "";
+      const instance = args.rest[1] ?? args.instance ?? "";
+      if (sub === "init") {
+        if (instance === "") {
+          console.error("用法：geng secrets init <instance> [--rotate]");
+          return 2;
+        }
+        const rotate = args.rest.includes("--rotate");
+        const files = secretFiles(args.root, instance);
+        const written: string[] = [];
+        // 同一个值要出现在两处时，只生成一次、写两处，永不手抄。
+        if (rotate || (readEnvFile(files.search).GENG_SEARCH_TOKEN ?? "") === "") {
+          const token = newToken();
+          writeEnvValue(files.search, "GENG_SEARCH_TOKEN", token);
+          writeEnvValue(files.inst, "GENG_SEARCH_TOKEN", token);
+          written.push(`search token（secrets/search.env 与 secrets/${instance}.env 两处一致）`);
+        }
+        if (rotate || (readEnvFile(files.mail).GENG_MAIL_TOKEN ?? "") === "") {
+          writeEnvValue(files.mail, "GENG_MAIL_TOKEN", newToken());
+          written.push("mail token（secrets/mail.env）");
+        }
+        if (written.length === 0) {
+          console.log("两对 token 都已经有了，没有动（要换加 --rotate）。");
+        } else {
+          for (const w of written) console.log(`写了 ${w}`);
+        }
+        if ((readEnvFile(files.search).DEEPSEEK_API_KEY ?? "") === "") {
+          console.log("还差 secrets/search.env 里的 DEEPSEEK_API_KEY——这个生成不出来，得去控制台拿。");
+        }
+        if (written.some((w) => w.startsWith("mail"))) {
+          console.log(
+            "Cloudflare Worker 那边要同一个值，别抄，直接管道：\n" +
+              "  wrangler secret put GENG_MAIL_TOKEN < <(sed -n 's/^GENG_MAIL_TOKEN=//p' secrets/mail.env)",
+          );
+        }
+        if ((readEnvFile(files.inst).GENG_SEARCH_URL ?? "") === "") {
+          console.log(`还差 secrets/${instance}.env 里的 GENG_SEARCH_URL（搜索端点地址，见 docs/install.md）。`);
+        }
+        return 0;
+      }
+      if (sub === "set") {
+        const name = args.rest[2] ?? "";
+        if (instance === "" || !/^[A-Z][A-Z0-9_]*$/.test(name)) {
+          console.error("用法：echo '<值>' | geng secrets set <instance> <NAME>   （NAME 形如 OPENCODE_API_KEY）");
+          return 2;
+        }
+        const value = readFileSync(0, "utf8").trim();
+        if (value === "") {
+          console.error("没有值：从 stdin 读——echo '<值>' | geng secrets set <instance> <NAME>");
+          return 2;
+        }
+        const file = secretFiles(args.root, instance).inst;
+        writeEnvValue(file, name, value);
+        // 只报长度，不回显：这条输出会留在 shell 历史里。
+        console.log(`写进 ${file}：${name}（${value.length} 字符，600）。`);
+        return 0;
+      }
+      console.error("用法：geng secrets init <instance> [--rotate] | geng secrets set <instance> <NAME>");
+      return 2;
+    }
+
     case "gateway": {
       if (args.check) {
-        const bots = readJson<Record<string, { token?: string; chat?: number }>>(
-          join(args.root, "secrets", "bots.json"),
-          {},
-        );
+        const bots = readBots(args.root);
         const names = Object.keys(bots);
         const mailCfg = loadMailConfig(args.root);
         const mailEnv = readMailEnv(args.root);
