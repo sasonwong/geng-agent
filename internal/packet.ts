@@ -157,16 +157,10 @@ const REASON_LINE: Record<WakeReason, string> = {
 };
 
 /**
- * Whether anyone is on the other end — the same fact from the other side. A file in the
- * inbox is not necessarily a person: a feeder writes events there too, and a page that
- * called a red build "somebody talking to you" would be lying about the one thing it is
- * supposed to get right.
+ * Whether anyone is on the other end — the same fact from the other side.
  */
 function whoLine(inbox: InboxMsg[]): string {
-  if (inbox.length === 0) return "，现在没人在跟你说话。";
-  // an inbox that only holds events says nothing about whether anyone is there — but
-  // the sentence still ends, and the full stop is this function's to add, not the line's.
-  return inbox.some((m) => typeof m.chat === "number") ? "，现在有人在跟你说话。" : "。";
+  return inbox.length === 0 ? "，现在没人在跟你说话。" : "，现在有人在跟你说话。";
 }
 
 /** The rare-changing half of the picture: where it may speak, and its own knobs. */
@@ -176,16 +170,15 @@ export function systemFacts(
   capMinutes: number,
 ): string {
   const out: string[] = [];
-  if (places.length === 1) {
-    out.push(`能说话的地方：${places[0]?.label ?? "?"}。`);
-  }
-  if (places.length > 1) {
+  if (places.length > 0) {
+    // The id is printed even when there is only one place: `say` writes a quote as
+    // "<chat id>-<message id>", and a page that names the person but not the number left
+    // a waking inventing one — the gateway dropped the message and the tool still said
+    // "说了 N 句". One place needs no `to`, so that sentence stays for two and up.
     const list = places
       .map((p) => `${p.label}（${p.id}${p.home ? "，默认" : ""}）`)
       .join("、");
-    out.push(
-      `能说话的地方：${list}。say 要指明 to。`,
-    );
+    out.push(`能说话的地方：${list}。${places.length > 1 ? "say 要指明 to。" : ""}`);
   }
   out.push(`可以调的运行参数：${policyLine}。`);
   // The wall, not a knob: it is the operator's frame, so it is stated as a fact. A model
@@ -292,11 +285,7 @@ export function buildPacket(input: PacketInput): string {
     // waiting, or the page quietly privileges whoever spoke last
     const people = new Set(inbox.map((m) => m.chat).filter((c) => typeof c === "number"));
     const who = people.size > 1 ? `（${people.size} 个人）` : "";
-    const fromPeople = inbox.filter((m) => typeof m.chat === "number").length;
-    const events = inbox.length - fromPeople;
-    if (fromPeople > 0) out.push("", `有人在跟你说话：${fromPeople} 条${who}，在 ${inboxPath}/。`);
-    // counted, never described: which event it is, it reads in the file
-    if (events > 0) out.push("", `${events} 件不是对话（feed 写的），也在 ${inboxPath}/。`);
+    out.push("", `有人在跟你说话：${inbox.length} 条${who}，在 ${inboxPath}/。`);
   }
   // Files are counted, never described: what is in them is the agent's business to look at.
   const kinds = new Map<string, number>();
@@ -327,7 +316,7 @@ export function buildPacket(input: PacketInput): string {
   }
 
   if (lowPending > 0) {
-    out.push(`还有 ${lowPending} 条不叫醒你的在 ${inboxPath}/low/（群里的闲话、feed 记下的动静）。`);
+    out.push(`还有 ${lowPending} 条不叫醒你的在 ${inboxPath}/low/（群里的闲话）。`);
   }
   if (mailPending.count > 0) {
     // counted, never summarised: the senders and how long the oldest has waited are the
@@ -357,14 +346,17 @@ export function buildPacket(input: PacketInput): string {
   if (identity !== null && identity.trim() !== "") {
     out.push("", `你写下的自己（${statePath}/identity.md）：`);
     out.push("", identity.trim());
+  } else {
+    // A fact, not an instruction, and not the same line as the map in SYSTEM.md: the map
+    // says what the file is for, this says it is still missing. Without it a new instance
+    // never learns the file exists — `ls /state` shows two empty directories, because the
+    // only way identity.md comes to exist is that it writes one.
+    out.push("", `你还没写下过自己：${statePath}/identity.md 不存在。`);
   }
 
   // one sentence: why it is awake, and whether anyone is on the other end. Then the
   // standing permission, alone, because it is the only line that is always true.
-  const knockedByEvent =
-    reason === "knock" && !inbox.some((m) => typeof m.chat === "number");
-  const why = knockedByEvent ? "收件箱里进了事件（不是对话），所以你现在醒了" : REASON_LINE[reason];
-  out.push("", `${waking <= 1 ? "这是你第一次醒来" : why}${whoLine(inbox)}`);
+  out.push("", `${waking <= 1 ? "这是你第一次醒来" : REASON_LINE[reason]}${whoLine(inbox)}`);
   out.push("你可以什么都不做，那不算失败。");
 
   if (searchLeft !== null) {

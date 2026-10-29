@@ -11,17 +11,38 @@
  * public CI log, and a log that repeats a leaked value is another copy of it.
  */
 import { execFileSync } from "node:child_process";
+import { scanLine, splitLines } from "./patterns.mjs";
 
 const git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 << 20 });
 
 /**
- * `~`-prefixed home paths are generic; an absolute one names a machine. The documented
+ * `~`-prefixed home paths are generic; one that names an account is not. The documented
  * examples use a placeholder account, so those are the only ones allowed through.
+ *
+ * Both shapes below used to be missed: `HOME_ABS` required a trailing slash, so a path
+ * that ends the line (`…/home/<account>`, which is how a symlink target or the last word
+ * of a note looks) went unseen, and the `~<account>/` form was not looked for at all.
+ * This gate covers the machines this project runs on — Linux — and a `~<account>/` path
+ * is the same fact in a shorter spelling. Other platforms' home directories are out of
+ * scope on purpose: nothing here runs there, so there is no machine to name.
+ *
+ * Neither shape needs anything after it: `~<account>` alone is still a home directory. What
+ * keeps `~1.2.3` out is the account having to start with a letter, not the slash — npm's
+ * range syntax is the only tilde this repository writes on purpose.
+ *
+ * A second tilde is never a home directory: markdown writes `~~struck~~`, and matching the
+ * second one would report `主机路径` for a line that names nothing but a deleted sentence.
  */
-const HOME_ABS = /\/home\/([A-Za-z0-9._-]+)\//g;
-const GENERIC_ACCOUNTS = new Set(["agent", "you", "user", "someone"]);
+const HOME_ABS = /\/home\/([A-Za-z0-9._-]+)(?![A-Za-z0-9._-])/g;
+const HOME_TILDE = /(?<![A-Za-z0-9._-~])~([A-Za-z][A-Za-z0-9._-]*)(?![A-Za-z0-9._-])/g;
+const GENERIC_ACCOUNTS = new Set([
+  "agent", "node", "runner", "app", "you", "user", "me", "someone", "example",
+]);
+
+const lineOf = (text, index) => text.slice(0, index).split("\n").length;
 
 const problems = [];
+const warnings = [];
 
 // 1. A symlink in the tree can point anywhere, including off the machine.
 for (const line of git(["ls-files", "-s"]).split("\n").filter(Boolean)) {
@@ -41,13 +62,50 @@ for (const f of files) {
   }
   for (const m of text.matchAll(HOME_ABS)) {
     if (GENERIC_ACCOUNTS.has(m[1])) continue;
-    const line = text.slice(0, m.index).split("\n").length;
-    problems.push(`主机路径: ${f}:${line}`);
+    problems.push(`主机路径: ${f}:${lineOf(text, m.index)}`);
+  }
+  for (const m of text.matchAll(HOME_TILDE)) {
+    if (GENERIC_ACCOUNTS.has(m[1])) continue;
+    problems.push(`主机路径: ${f}:${lineOf(text, m.index)}`);
+  }
+}
+
+// 2b. 凭据与机器指纹。表在 patterns.mjs，这里只负责读、判、只印位置。
+//
+// 分级沿用表里的 severity：只有 low 不拦（唯一一条 low 是「9-11 位数字，可能是 IM
+// 用户 id」——文档里出现一个数字不该挡住合并）；其余一律拦。打印出来的一律是
+// `规则: 文件:行`，没有值。
+for (const f of files) {
+  let text;
+  try {
+    text = git(["show", `:${f}`]);
+  } catch {
+    continue; // binary or gone
+  }
+  const lines = splitLines(text);
+  for (let i = 0; i < lines.length; i++) {
+    for (const hit of scanLine(f, lines[i])) {
+      const where = `${hit.name}: ${f}:${i + 1}`;
+      if (hit.sev === "low") warnings.push(where);
+      else problems.push(where);
+    }
   }
 }
 
 // 3. Commit identity appears in no diff, so no content scan can see it.
-const emails = new Set(git(["log", "--all", "--format=%ae%n%ce"]).split("\n").filter(Boolean));
+//
+// A repository with nothing in it is not a clean repository: this gate's whole value is
+// that a green line means "these checks ran and found nothing", and zero files or zero
+// commits makes the same green line mean "there was nothing to check". `git log` exits
+// non-zero when there is no commit yet, so that case is caught rather than thrown.
+let emails = new Set();
+try {
+  emails = new Set(git(["log", "--all", "--format=%ae%n%ce"]).split("\n").filter(Boolean));
+} catch {
+  emails = new Set();
+}
+if (files.length === 0) problems.push("空树: 0 个文件");
+if (emails.size === 0) problems.push("提交身份: 0 个（读不到任何提交）");
 for (const e of emails) {
   if (e.endsWith("@users.noreply.github.com") || e === "noreply@github.com") continue;
   if (e.endsWith(".invalid")) continue;
@@ -55,9 +113,12 @@ for (const e of emails) {
 }
 
 if (problems.length === 0) {
-  console.log(`gate: ok（${files.length} 个文件，${emails.size} 个提交身份）`);
+  const tail = warnings.length === 0 ? "" : `，${warnings.length} 条低级别警告`;
+  console.log(`gate: ok（${files.length} 个文件，${emails.size} 个提交身份${tail}）`);
+  for (const w of warnings) console.error(`  警告 ${w}`);
   process.exit(0);
 }
 console.error(`gate: ${problems.length} 处`);
+for (const w of warnings) console.error(`  警告 ${w}`);
 for (const p of problems) console.error(`  ${p}`);
 process.exit(1);

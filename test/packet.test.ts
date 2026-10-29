@@ -67,6 +67,9 @@ test("birth packet says only what is new, and nothing about who it is", () => {
   assert.doesNotMatch(text, /被自己定的闹钟叫醒|最近 24 小时醒了/);
   assert.match(text, /你可以什么都不做，那不算失败/);
   assert.match(text, /没人在跟你说话/);
+  // the one thing it cannot see by looking: `ls /state` on a new instance shows two empty
+  // directories and no identity.md, because the only way that file comes to exist is it
+  assert.match(text, /你还没写下过自己：\/state\/identity\.md 不存在。/);
   // the constants (paths, waiting.json instructions) are the system prompt's job now
   assert.doesNotMatch(text, /waiting\.json/);
 });
@@ -83,6 +86,8 @@ test("its own words are pasted verbatim, labelled, just before the reason it is 
   const at = text.indexOf("我是 alice。");
   assert.ok(at > text.indexOf("未闭合的事"), "identity 应该排在事实之后");
   assert.ok(at < text.indexOf("你可以什么都不做"));
+  // the missing-file line is replaced, not repeated next to it
+  assert.doesNotMatch(text, /你还没写下过自己/);
 });
 
 test("one sentence says why it is awake and whether anyone is there", () => {
@@ -100,26 +105,6 @@ test("one sentence says why it is awake and whether anyone is there", () => {
 
   const timed = buildPacket(input({ reason: "timer" }));
   assert.match(timed, /你是被自己定的闹钟叫醒的，现在没人在跟你说话。/);
-});
-
-test("an event in the inbox is counted as an event, not as somebody talking", () => {
-  const { input } = fixture();
-  const event = { id: "github-7-ci-red", file: "github-7-ci-red.json", text: "PR #7 ci 红了", from: "github" };
-  const text = buildPacket(input({ reason: "knock", inbox: [event] }));
-  // a red build is not a person: saying so would make it answer into an empty room
-  assert.match(text, /1 件不是对话（feed 写的），也在 \/inbox\/。/);
-  assert.match(text, /收件箱里进了事件（不是对话），所以你现在醒了。/);
-  assert.doesNotMatch(text, /有人在跟你说话/);
-
-  const both = buildPacket(
-    input({
-      reason: "knock",
-      inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you", chat: 111 }, event],
-    }),
-  );
-  // counted separately, or the page credits the machine's news to the person
-  assert.match(both, /有人在跟你说话：1 条，在 \/inbox\/。/);
-  assert.match(both, /1 件不是对话（feed 写的）/);
 });
 
 test("nudge admits it was woken by default rather than by an alarm", () => {

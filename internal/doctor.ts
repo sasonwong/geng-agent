@@ -5,6 +5,10 @@ import { execFileSync, spawn } from "node:child_process";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
 import { readJson } from "./state.ts";
+import { readBots, botProblems } from "./bots.ts";
+import { loadMailConfig, readMailEnv } from "./mail.ts";
+import { envProblem, mailWiringProblem, searchPairProblem, readEnvFile } from "./secret.ts";
+import { searchConfigured, searchQuota } from "./search.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -100,13 +104,71 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     }
   })();
   checks.push({
-    name: "secrets",
+    name: "secrets 权限",
     ok: secretsMode !== null && (secretsMode & 0o077) === 0,
     detail:
       secretsMode === null
         ? `缺少 ${p.secrets}`
         : `权限 ${secretsMode.toString(8)}（应为 600）`,
   });
+
+  // 一个填错或漏填的值不会报错，只会让某件事安静地不发生。这几条是它唯一的出口。
+  const instEnv = readEnvFile(p.secrets);
+  const missingKey = envProblem(instEnv);
+  checks.push({
+    name: "模型凭据",
+    ok: missingKey === null,
+    detail: missingKey ?? "有 *_API_KEY",
+  });
+
+  // 可选能力的三态：配好且对 = ok，配了但不对 = FAIL，没配 = warn。
+  // 只有区分这三态，"漏配"才看得见——否则"没配"和"配好且安静"长得一样。
+  const optional = (
+    name: string,
+    configured: boolean,
+    problem: string | null,
+    unset: string,
+    fine: string,
+  ): Check =>
+    configured
+      ? { name, ok: problem === null, detail: problem ?? fine }
+      : { name, ok: false, warnOnly: true, detail: unset };
+
+  const searchOn = searchConfigured(p.secrets);
+  const pair = searchPairProblem(instEnv, readEnvFile(join(root, "secrets", "search.env")));
+  checks.push(
+    optional(
+      "搜索接线",
+      searchOn,
+      pair,
+      "没配：容器里没有 web_search",
+      `两处 token 一致，今天还剩 ${searchQuota(root, p.secrets)?.left ?? "?"} 次`,
+    ),
+  );
+
+  const mailCfg = loadMailConfig(root);
+  const mailEnv = readMailEnv(root);
+  checks.push(
+    optional(
+      "邮件接线",
+      mailCfg !== null || mailEnv !== null,
+      mailWiringProblem(instance, mailCfg, mailEnv),
+      "没配：信收不进来",
+      "地址与 token 都在",
+    ),
+  );
+
+  const bots = readBots(root);
+  const issues = botProblems(bots, (key) => existsSync(join(root, "data", key)));
+  checks.push(
+    optional(
+      "bot 接线",
+      bots[instance] !== undefined,
+      issues.length === 0 ? null : issues.slice(0, 3).join("；"),
+      `没配：只有它自己的闹钟能叫醒它${issues.length > 0 ? `（bots.json 另有 ${issues.length} 处问题）` : ""}`,
+      "bots.json 的每一项都能解析",
+    ),
+  );
 
   const sessions = listSessionFiles(p.sessionDir);
   const bad = sessions
@@ -264,7 +326,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     return checks;
   }
 
-  const command = buildCommand(o, policy, "geng-doctor-probe", "probe", 0, PROBE);
+  const command = buildCommand(o, policy, "geng-doctor-probe", "probe", [], PROBE);
   const out = await new Promise<string>((resolve) => {
     const p = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "pipe"] });
     let text = "";

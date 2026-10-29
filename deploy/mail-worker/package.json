@@ -3,7 +3,13 @@
   "private": true,
   "type": "module",
   "description": "Cloudflare Email Worker: parses MIME and hands each mail to the host endpoint.",
+  "scripts": {
+    "deploy": "./deploy.sh"
+  },
   "dependencies": {
     "postal-mime": "^4.1.4"
+  },
+  "devDependencies": {
+    "wrangler": "^4.155.0"
   }
 }

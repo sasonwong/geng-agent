@@ -2,7 +2,7 @@ import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { markSeen, peekInbox, quarantine } from "./inbox.ts";
-import { deliveredFiles, freshForSteer, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
+import { clockArmed, clockNotice, freshForSteer, handedOver, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { pendingMail } from "./mail.ts";
@@ -169,6 +169,9 @@ function logLine(
   symptom: string,
   level: number,
   inboxCount: number,
+  // messages only: a `[daemon@…]` notice has no file behind it, and saying it is not the
+  // same act as handing over something a person wrote
+  inj: { total: number; unread: number },
   interventions: string[],
   backup: BackupOutcome | null,
   spent: { tokens: number; cost: number } | null,
@@ -194,9 +197,8 @@ function logLine(
   }
   parts.push(`inbox=${inboxCount}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
-  if (r && r.injections.length > 0) {
-    const unread = r.injections.filter((i) => !i.read).length;
-    parts.push(unread > 0 ? `inj=${r.injections.length}(unread=${unread})` : `inj=${r.injections.length}`);
+  if (inj.total > 0) {
+    parts.push(inj.unread > 0 ? `inj=${inj.total}(unread=${inj.unread})` : `inj=${inj.total}`);
   }
   if (files.pruned > 0) parts.push(`pruned=${files.pruned}`);
   if (files.forgot > 0) parts.push(`forgot=${files.forgot}`);
@@ -456,16 +458,28 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // the whole message, not a copy of the field list: a builder here would silently
     // drop any field added later (attachments was the one that went missing)
     const injected: LiveMsg[] = [];
+    // rpc records one entry per line the drain hands over, and handedOver pairs the two
+    // lists by index; the clock notice has no file, so it goes in here as an empty-file
+    // placeholder or every message after it would be marked seen against the wrong name.
+    const saidMinutes = new Set<number>();
+    const budgetMs = policy.cycle.timeoutSec * 1000;
+    const deadlineMs = startedMs + budgetMs;
+    // a round too short for the warning to arrive while it is still running gets none
+    const armed = clockArmed(budgetMs);
+    let messages = 0;
     const result = await runWaking({
       drain: () => {
-        const fresh = freshForSteer(peekInbox(paths.inbox), shown, INJECT_CAP - injected.length);
+        const clock = armed ? clockNotice(deadlineMs - Date.now(), paths.instance, saidMinutes) : [];
+        for (const text of clock) injected.push({ id: "clock", file: "", text });
+        const fresh = freshForSteer(peekInbox(paths.inbox), shown, INJECT_CAP - messages);
         for (const m of fresh) {
           shown.add(m.id); // do not hand it the same words twice
           injected.push(m); // InboxMsg is a structural superset of LiveMsg
+          messages += 1;
         }
-        return fresh.map(injectionText);
+        return [...clock, ...fresh.map(injectionText)];
       },
-      command: buildCommand(paths, policy, sessionId, systemPrompt, places.length),
+      command: buildCommand(paths, policy, sessionId, systemPrompt, places),
       instance: paths.instance,
       isDocker: policy.runner === "docker",
       timeoutMs: policy.cycle.timeoutSec * 1000,
@@ -499,7 +513,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // in place so the next wake hands them over again rather than losing them.
     // An injection that no turn followed never reached the model: leaving it unseen
     // means the next page hands it over again, which is the cheap side of the trade.
-    const read = deliveredFiles(injected, result.injections);
+    const inj = handedOver(injected, result.injections);
+    const read = inj.files;
+    // The log is the only place that can answer "did the notice fire at all" afterwards;
+    // inj= counts messages, so without this the clock leaves no trace of having run.
+    const interventions = inj.clock > 0 ? [...result.interventions, "clock"] : result.interventions;
     if (symptom === "ok" && inbox.length + read.length > 0) {
       markSeen(
         [paths.inbox, paths.inboxLow],
@@ -549,7 +567,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       symptom,
       escalation.level,
       inbox.length,
-      result.interventions,
+      inj,
+      interventions,
       backup,
       spent,
       { pruned: pruned.removed, forgot },

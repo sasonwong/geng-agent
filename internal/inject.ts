@@ -37,12 +37,53 @@ export function injectionText(m: LiveMsg): string {
 }
 
 /**
- * Which injected messages were actually read. Same order on both sides: the drain hands
- * them over in order and rpc records them in order.
+ * Which injected messages were actually read, and how many were handed over at all. Same
+ * order on both sides: the drain hands them over in order and rpc records them in order.
+ * An empty file is a clock notice, not a message: it stands in the list only to keep the
+ * two sides paired by index, and there is nothing on disk to mark as seen.
  */
-export function deliveredFiles(
+export function handedOver(
   injected: { file: string }[],
   records: { read: boolean }[],
-): string[] {
-  return injected.filter((_, i) => records[i]?.read === true).map((m) => m.file);
+): { files: string[]; total: number; unread: number; clock: number } {
+  const files: string[] = [];
+  let total = 0;
+  let unread = 0;
+  let clock = 0;
+  injected.forEach((m, i) => {
+    if (m.file === "") {
+      clock += 1;
+      return;
+    }
+    total += 1;
+    if (records[i]?.read === true) files.push(m.file);
+    else unread += 1;
+  });
+  return { files, total, unread, clock };
+}
+
+/** How much of the round is left when the warning is due, in minutes. Not policy. */
+export const CLOCK_MINUTES = 5;
+
+/** A round with barely more than the warning in it gets no warning: it is already over. */
+const CLOCK_MARGIN_MS = 60_000;
+
+/**
+ * One line per waking, said the first time the drain runs inside the last five minutes.
+ * "约" rather than "还剩": the steer lands between two actions, so it can be a few seconds
+ * late, and a notice that claims a precision it does not have is worse than a rough one.
+ *
+ * A short round (a budget that does not outlast the margin) is skipped on purpose: with a
+ * three-minute budget the line would fire at the start, which is noise, not a warning.
+ */
+export function clockNotice(leftMs: number, instance: string, said: Set<number>): string[] {
+  const mark = CLOCK_MINUTES;
+  if (said.has(mark) || leftMs > mark * 60_000) return [];
+  said.add(mark);
+  return [`[daemon@${instance}] 本轮还剩约 ${mark} 分钟`];
+}
+
+/** Whether a budget is long enough for the warning to mean anything (see clockNotice). */
+export function clockArmed(budgetMs: number): boolean {
+  return budgetMs >= CLOCK_MINUTES * 60_000 + CLOCK_MARGIN_MS;
 }
