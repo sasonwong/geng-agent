@@ -479,7 +479,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         }
         return [...clock, ...fresh.map(injectionText)];
       },
-      command: buildCommand(paths, policy, sessionId, systemPrompt, places.length),
+      command: buildCommand(paths, policy, sessionId, systemPrompt, places),
       instance: paths.instance,
       isDocker: policy.runner === "docker",
       timeoutMs: policy.cycle.timeoutSec * 1000,
