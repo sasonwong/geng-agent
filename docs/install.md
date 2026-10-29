@@ -128,6 +128,28 @@ GENG_SEARCH_TOKEN=...
 
 `--env-file` 注入，**永不挂载**。容器里 `env` 就能读到它，所以它必须是最小权限、只对一个用途。
 
+### 全部凭据一览
+
+| 文件 | 谁写的 | 谁读它 | 缺了会怎样 |
+|---|---|---|---|
+| `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 第一轮就 `No API key found`；变量名写错也是这个症状 |
+| `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search` |
+| `<inst>.env` 的 `GENG_SEARCH_URL`/`_TOKEN` | 你 | 容器里的扩展 | 同上。纸上看不到「今天还能搜 N 次」就是它 |
+| `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
+| `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `/mail`；纸上那行也不会出现 |
+| `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
+| `data/<inst>/palimpsest/.gh/hosts.yml` | 它自己 | 容器里的 `gh` | 推不了代码 |
+
+三处是**同一个值要在两个地方逐字相同**，也是抄错率最高的三处：
+
+1. `search.env` 里的 `GENG_SEARCH_TOKEN` = `<inst>.env` 里的 `GENG_SEARCH_TOKEN`
+2. `mail.env` 里的 `GENG_MAIL_TOKEN` = Cloudflare Worker 里的同名 secret
+3. 每个 bot 的 token = `bots.json` 里那串（它只出现在一个地方，但错一个字符就是 401）
+
+抄错的后果都是**同一种**：那边看起来正常，这边安静地什么都不发生。所以拿不到可靠信号时，
+判据永远是**拿它去打一次真端点看状态码**（401 = 能连上但没认出来，200 = 对了），
+而不是打印它、数长度、看前缀。
+
 ### 3.3 pi 的配置（模型、思考档）
 
 `data/alice/pi/settings.json`，`init` 从 `deploy/settings.json` 拷来，每轮**只读**挂进容器：
