@@ -13,19 +13,21 @@ function root(instances: string[] = ["alice"]): string {
   return d;
 }
 
+// 值里带 "fake" 是给门看的：tools/gate/patterns.mjs 的 PLACEHOLDERS 让整行跳过，所以
+// 这些假 token 不必长得像真的。去掉这个词，门会在测这个测试之前先红。
 test("adding a bot keeps the other bots and every field it was not asked about", () => {
   const d = root();
-  writeBots(d, { ops: { token: "ops-token", chat: 111 }, alice: { token: "old", allow: [1] } });
+  writeBots(d, { ops: { token: "fake-ops", chat: 111 }, alice: { token: "old", allow: [1] } });
 
   addBot(d, "alice", { token: "new", listen: "mentions" });
 
   const bots = readBots(d);
-  assert.equal(bots.ops?.token, "ops-token", "unrelated bot untouched");
+  assert.equal(bots.ops?.token, "fake-ops", "unrelated bot untouched");
   assert.equal(bots.alice?.token, "new");
   assert.equal(bots.alice?.listen, "mentions");
   assert.deepEqual(bots.alice?.allow, [1], "a field it was not asked about survives");
 
-  addBot(d, "bob", { token: "bob-token", allow: [] });
+  addBot(d, "bob", { token: "fake-bob", allow: [] });
   assert.deepEqual(Object.keys(readBots(d)).sort(), ["alice", "bob", "ops"]);
 });
 

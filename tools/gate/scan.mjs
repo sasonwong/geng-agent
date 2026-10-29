@@ -11,6 +11,7 @@
  * public CI log, and a log that repeats a leaked value is another copy of it.
  */
 import { execFileSync } from "node:child_process";
+import { scanLine, splitLines } from "./patterns.mjs";
 
 const git = (args) => execFileSync("git", args, { encoding: "utf8", maxBuffer: 64 << 20 });
 
@@ -41,6 +42,7 @@ const GENERIC_ACCOUNTS = new Set([
 const lineOf = (text, index) => text.slice(0, index).split("\n").length;
 
 const problems = [];
+const warnings = [];
 
 // 1. A symlink in the tree can point anywhere, including off the machine.
 for (const line of git(["ls-files", "-s"]).split("\n").filter(Boolean)) {
@@ -68,6 +70,28 @@ for (const f of files) {
   }
 }
 
+// 2b. 凭据与机器指纹。表在 patterns.mjs，这里只负责读、判、只印位置。
+//
+// 分级沿用表里的 severity：只有 low 不拦（唯一一条 low 是「9-11 位数字，可能是 IM
+// 用户 id」——文档里出现一个数字不该挡住合并）；其余一律拦。打印出来的一律是
+// `规则: 文件:行`，没有值。
+for (const f of files) {
+  let text;
+  try {
+    text = git(["show", `:${f}`]);
+  } catch {
+    continue; // binary or gone
+  }
+  const lines = splitLines(text);
+  for (let i = 0; i < lines.length; i++) {
+    for (const hit of scanLine(f, lines[i])) {
+      const where = `${hit.name}: ${f}:${i + 1}`;
+      if (hit.sev === "low") warnings.push(where);
+      else problems.push(where);
+    }
+  }
+}
+
 // 3. Commit identity appears in no diff, so no content scan can see it.
 //
 // A repository with nothing in it is not a clean repository: this gate's whole value is
@@ -89,9 +113,12 @@ for (const e of emails) {
 }
 
 if (problems.length === 0) {
-  console.log(`gate: ok（${files.length} 个文件，${emails.size} 个提交身份）`);
+  const tail = warnings.length === 0 ? "" : `，${warnings.length} 条低级别警告`;
+  console.log(`gate: ok（${files.length} 个文件，${emails.size} 个提交身份${tail}）`);
+  for (const w of warnings) console.error(`  警告 ${w}`);
   process.exit(0);
 }
 console.error(`gate: ${problems.length} 处`);
+for (const w of warnings) console.error(`  警告 ${w}`);
 for (const p of problems) console.error(`  ${p}`);
 process.exit(1);
