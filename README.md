@@ -248,8 +248,9 @@ GENG_MAIL_TOKEN=$(openssl rand -hex 16)     # Worker 和宿主共用的那一串
 GENG_MAIL_BIND=127.0.0.1:8788               # 只听 loopback，前面是 tunnel
 ```
 
-然后是 Cloudflare 那边（一次）：`deploy/mail-worker/README.md` 里四步——`wrangler deploy`、
-两个 secret、`cloudflared tunnel route dns`、Email Routing 里加一条「Send to a Worker」的规则。
+然后是 Cloudflare 那边（一次）：`deploy/mail-worker/README.md` 里三步——`wrangler deploy` 加两个
+secret、在 tunnel 上加一个指向 `http://localhost:8788` 的 hostname、Email Routing 里加一条
+「Send to a Worker」的规则。机器上**已经有 tunnel 就不要新建**，加一个 Public Hostname 就够。
 
 通道说清楚了，剩下的是行为：
 
@@ -279,8 +280,7 @@ data/<instance>/
 secrets/<instance>.env   模型凭据、搜索地址；--env-file 注入，永不挂载
 secrets/mail.json        信箱的地址和发件人白名单（容器看不见）
 secrets/mail.env         收信端点的 token 和监听地址
-deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-mail-tunnel.service
-           cloudflared.yml  egress.sh  mail-worker/
+deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  egress.sh  mail-worker/
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore。
