@@ -23,3 +23,26 @@ test("the time budget is a fact of the frame, stated and not advised", () => {
   assert.doesNotMatch(facts, /能说话的地方/);
   assert.doesNotMatch(facts, /少做|注意|建议|尽量|别浪费/);
 });
+
+test("one place still carries its id, because a quote is written as a chat id and a message id", () => {
+  const facts = systemFacts(
+    [{ id: -1001234567890, label: "群「测试」", home: true }],
+    "defaultWakeMinutes=30",
+    30,
+  );
+  assert.match(facts, /能说话的地方：群「测试」（-1001234567890，默认）。/);
+  // one place needs no `to`; saying so would be an instruction, not a fact
+  assert.doesNotMatch(facts, /say 要指明 to/);
+});
+
+test("two places are listed with their ids, and it is told it must name one", () => {
+  const facts = systemFacts(
+    [
+      { id: 111, label: "私聊 telegram:@a", home: true },
+      { id: -1001234567890, label: "群「测试」", home: false },
+    ],
+    "defaultWakeMinutes=30",
+    30,
+  );
+  assert.match(facts, /私聊 telegram:@a（111，默认）、群「测试」（-1001234567890）。say 要指明 to。/);
+});

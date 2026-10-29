@@ -170,16 +170,15 @@ export function systemFacts(
   capMinutes: number,
 ): string {
   const out: string[] = [];
-  if (places.length === 1) {
-    out.push(`能说话的地方：${places[0]?.label ?? "?"}。`);
-  }
-  if (places.length > 1) {
+  if (places.length > 0) {
+    // The id is printed even when there is only one place: `say` writes a quote as
+    // "<chat id>-<message id>", and a page that names the person but not the number left
+    // a waking inventing one — the gateway dropped the message and the tool still said
+    // "说了 N 句". One place needs no `to`, so that sentence stays for two and up.
     const list = places
       .map((p) => `${p.label}（${p.id}${p.home ? "，默认" : ""}）`)
       .join("、");
-    out.push(
-      `能说话的地方：${list}。say 要指明 to。`,
-    );
+    out.push(`能说话的地方：${list}。${places.length > 1 ? "say 要指明 to。" : ""}`);
   }
   out.push(`可以调的运行参数：${policyLine}。`);
   // The wall, not a knob: it is the operator's frame, so it is stated as a fact. A model
@@ -347,6 +346,12 @@ export function buildPacket(input: PacketInput): string {
   if (identity !== null && identity.trim() !== "") {
     out.push("", `你写下的自己（${statePath}/identity.md）：`);
     out.push("", identity.trim());
+  } else {
+    // A fact, not an instruction, and not the same line as the map in SYSTEM.md: the map
+    // says what the file is for, this says it is still missing. Without it a new instance
+    // never learns the file exists — `ls /state` shows two empty directories, because the
+    // only way identity.md comes to exist is that it writes one.
+    out.push("", `你还没写下过自己：${statePath}/identity.md 不存在。`);
   }
 
   // one sentence: why it is awake, and whether anyone is on the other end. Then the

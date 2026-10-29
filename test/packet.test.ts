@@ -67,6 +67,9 @@ test("birth packet says only what is new, and nothing about who it is", () => {
   assert.doesNotMatch(text, /被自己定的闹钟叫醒|最近 24 小时醒了/);
   assert.match(text, /你可以什么都不做，那不算失败/);
   assert.match(text, /没人在跟你说话/);
+  // the one thing it cannot see by looking: `ls /state` on a new instance shows two empty
+  // directories and no identity.md, because the only way that file comes to exist is it
+  assert.match(text, /你还没写下过自己：\/state\/identity\.md 不存在。/);
   // the constants (paths, waiting.json instructions) are the system prompt's job now
   assert.doesNotMatch(text, /waiting\.json/);
 });
@@ -83,6 +86,8 @@ test("its own words are pasted verbatim, labelled, just before the reason it is 
   const at = text.indexOf("我是 alice。");
   assert.ok(at > text.indexOf("未闭合的事"), "identity 应该排在事实之后");
   assert.ok(at < text.indexOf("你可以什么都不做"));
+  // the missing-file line is replaced, not repeated next to it
+  assert.doesNotMatch(text, /你还没写下过自己/);
 });
 
 test("one sentence says why it is awake and whether anyone is there", () => {
