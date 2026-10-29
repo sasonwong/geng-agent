@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
 import { readJson, readText, writeJson } from "./state.ts";
 
@@ -15,22 +16,8 @@ export interface SearchEnv {
   dailyLimit: number;
 }
 
-export function parseEnvFile(path: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  const text = readText(path);
-  if (!text) return out;
-  for (const line of text.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "" || trimmed.startsWith("#")) continue;
-    const at = trimmed.indexOf("=");
-    if (at === -1) continue;
-    out[trimmed.slice(0, at).trim()] = trimmed.slice(at + 1).trim();
-  }
-  return out;
-}
-
 export function readSearchEnv(root: string): SearchEnv | null {
-  const file = parseEnvFile(join(root, "secrets", "search.env"));
+  const file = readEnvFile(join(root, "secrets", "search.env"));
   const token = process.env.GENG_SEARCH_TOKEN ?? file.GENG_SEARCH_TOKEN ?? "";
   const apiKey = process.env.DEEPSEEK_API_KEY ?? file.DEEPSEEK_API_KEY ?? "";
   if (token === "" || apiKey === "") return null;
@@ -62,13 +49,13 @@ const UPSTREAM = "https://api.deepseek.com/v1/tools";
  * instance env carries a URL. The host having a search.env means nothing to it.
  */
 export function searchConfigured(instanceEnvFile: string): boolean {
-  return (parseEnvFile(instanceEnvFile).GENG_SEARCH_URL ?? "") !== "";
+  return (readEnvFile(instanceEnvFile).GENG_SEARCH_URL ?? "") !== "";
 }
 
 /** How much searching is left today — the agent has to know to weigh it. */
 export function searchQuota(root: string, instanceEnvFile: string): { limit: number; left: number } | null {
   if (!searchConfigured(instanceEnvFile)) return null;
-  const file = parseEnvFile(join(root, "secrets", "search.env"));
+  const file = readEnvFile(join(root, "secrets", "search.env"));
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
   const limit = q.limit ?? Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200);
   const used = q.day === today() ? (q.count ?? 0) : 0;

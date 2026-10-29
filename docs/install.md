@@ -113,8 +113,11 @@ node cmd/geng/index.ts init alice
 ### 3.2 填凭据
 
 ```bash
-chmod 600 secrets/alice.env
+echo '<你的 key>' | node cmd/geng/index.ts secrets set alice OPENCODE_API_KEY
 ```
+
+值**从 stdin 读**（argv 会在 `ps` 里露出去），写进 `secrets/alice.env`（600），同名行原地替换、
+注释和别的行一个字不动。也可以照旧手写这个文件：
 
 ```
 OPENCODE_API_KEY=...          # 或者你用的 provider 对应的变量名
@@ -233,7 +236,14 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是�
    消息，只会收到 @ 和命令，而你会以为它坏了
 3. `ops` bot 只建一个：daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀
 
-`secrets/bots.json`：
+```bash
+echo '<BotFather 给的 token>' | node cmd/geng/index.ts bots add alice \
+  --token-stdin --listen all --allow 111111111,222222222
+node cmd/geng/index.ts bots allow alice add 333333333     # 之后加人
+node cmd/geng/index.ts bots allow alice rm 222222222
+```
+
+写出来的是 `secrets/bots.json`（600，原子替换），也可以照旧手写：
 
 ```json
 {
@@ -272,8 +282,17 @@ systemctl --user enable --now geng-gateway
 搜索的 key 不在容器里。宿主上跑一个只认搜索的端点：
 
 ```bash
+node cmd/geng/index.ts secrets init alice     # 生成 search / mail 两对 token，写进该写的每一处
+```
+
+它做的事就是**同一个值不让你抄两遍**：`GENG_SEARCH_TOKEN` 一次生成，同时写进
+`secrets/search.env`（端点那侧）和 `secrets/alice.env`（容器那侧）。已经有的不动，要换加
+`--rotate`。
+
+剩下两项它生成不出来，手写：
+
+```bash
 # secrets/search.env   chmod 600
-GENG_SEARCH_TOKEN=$(openssl rand -hex 16)    # 容器拿这串，也只能拿这串
 DEEPSEEK_API_KEY=sk-...                      # 搜索是单独计费的端点，chat 的 key 不一定能用
 GENG_SEARCH_BIND=0.0.0.0:8787                # 或直接绑 agent-net 的网关地址
 GENG_SEARCH_DAILY=200
@@ -310,8 +329,14 @@ docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
 { "geng-alice-bot@example.com": { "instance": "alice", "allow": ["you@example.org"] } }
 
 # secrets/mail.env
-GENG_MAIL_TOKEN=$(openssl rand -hex 16)      # Worker 和宿主共用
+GENG_MAIL_TOKEN=...                          # geng secrets init 生成的；Worker 和宿主共用
 GENG_MAIL_BIND=127.0.0.1:8788                # 只听 loopback，前面是 tunnel
+```
+
+Worker 那边要同一个值，**不要手抄**：
+
+```bash
+wrangler secret put GENG_MAIL_TOKEN < <(sed -n 's/^GENG_MAIL_TOKEN=//p' secrets/mail.env)
 ```
 
 Cloudflare 那边三步在 `deploy/mail-worker/README.md`：`wrangler deploy` + 两个 secret、
@@ -462,6 +487,8 @@ command -v node && node --version          # ≥ 22.18
 docker ps                                  # 不需要 sudo
 docker run --rm geng-agent:latest sh -lc 'curl -sS -m 5 -o /dev/null -w "%{http_code}\n" https://api.github.com'
 node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
+# 其中四条是"漏配"的唯一出口：模型凭据 / 搜索接线 / 邮件接线 / bot 接线
+#   配好且对 = ok，配了但不对 = FAIL，没配 = warn
 node cmd/geng/index.ts doctor alice --probe   # 容器能上网、私网不通、policy 写不进去
 node cmd/geng/index.ts status --all        # runner=docker，下次=…
 tail -3 data/alice/daemon.log              # 有行就是跑过
