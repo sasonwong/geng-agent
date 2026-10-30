@@ -220,6 +220,32 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是�
 > 第一次醒来之前 `daemon.log` 是空的、`status` 说"从未"、`palimpsest/` 里只有 `journal/`：
 > 那是刚出生，不是坏了。它自己设的第一个闹钟到点才醒。
 
+### 改配置不用重启
+
+四份配置，各有各的读法；`restart` 只在换代码、换 `.env` 时才是必须的：
+
+| 文件 | 谁读 | 什么时候重读 |
+|---|---|---|
+| `secrets/bots.json` | gateway | `systemctl --user reload geng-gateway` |
+| `secrets/mail.json` | gateway | 同上 |
+| `data/<inst>/policy.json` | daemon | **每一轮开头**，什么也不用做 |
+| `secrets/search.env` | search | **每一次请求**，什么也不用做；`bind` 除外，它只在 listen 时读 |
+
+`reload` 不是重启：长轮询不断，只有 **token 变了的 bot** 才会重新登录（一个 token 只许一个
+消费者，旧的不先停新的会被 409）；新加的 bot 起、删掉的停，只改 `allow` 的话一个 poller 都不动。
+`bots.json` / `mail.json` 变空或读不出来都当成手滑，继续用旧的，日志里写一行。启动时没有信箱、
+后来才写一个 `mail.json`，那要重启——监听器不是每轮都能起。
+
+验证：`node cmd/geng/index.ts bots allow alice rm <某个 id>` 之后
+
+```bash
+systemctl --user reload geng-gateway
+journalctl --user -u geng-gateway -n 5    # 应有「重载 alice：… allow=4 人」
+```
+
+出现 `Stopping`/`Started` 这一对就说明 HUP 变成了重启（handler 没装上）——只有「重载」行才是真
+的没重启。再把 id 加回去 reload 一次，数字应该回到原样。
+
 ---
 
 ## 5. 可选能力
@@ -295,7 +321,7 @@ node cmd/geng/index.ts secrets init alice     # 生成 search / mail 两对 toke
 # secrets/search.env   chmod 600
 DEEPSEEK_API_KEY=sk-...                      # 搜索是单独计费的端点，chat 的 key 不一定能用
 GENG_SEARCH_BIND=0.0.0.0:8787                # 或直接绑 agent-net 的网关地址
-GENG_SEARCH_DAILY=200
+GENG_SEARCH_DAILY=200                        # 改了不用重启，下一次请求就是新额度
 
 node cmd/geng/index.ts search                # 前台；常驻用 deploy/geng-search.service
 ```
@@ -346,6 +372,8 @@ tunnel 上加一个指向 `http://localhost:8788` 的 hostname、Email Routing �
 行为上要知道的三件事：**只收不回**（`say` 只说到会话）；**收信是 pull**——邮件只进
 `data/<inst>/mail/`，纸上报「邮件：2 封没处理」，不叫醒它；`From` 可伪造，所以邮件不叫醒它。
 
+改白名单不用重启：`mail.json` 跟着 gateway 的 `reload` 一起换（见 §4）。
+
 验证：给那个地址发一封，`ls data/alice/mail/` 多一个文件，下一张纸上出现那一行。
 白名单外的人**在落盘之前**就被丢掉，日志一行 `mail ← guest …（没送）`。
 
@@ -388,7 +416,7 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 ## 7. 它的运行参数
 
 `data/<inst>/policy.json` 是**你**的（它在书外面，容器里看不见也写不着）。它自己只能通过
-`palimpsest/policy.proposal.json` 提请求，下次启动时被检查：
+`palimpsest/policy.proposal.json` 提请求，每一轮开头被检查：
 
 | 它能改 | 范围 |
 |---|---|

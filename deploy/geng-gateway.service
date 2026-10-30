@@ -12,6 +12,10 @@ WorkingDirectory=@ROOT@
 Environment=NODE_USE_ENV_PROXY=1
 EnvironmentFile=-@ROOT@/secrets/gateway.env
 ExecStart=@NODE@ @ROOT@/cmd/geng/index.ts gateway
+# SIGHUP re-reads secrets/bots.json and secrets/mail.json in place: the long polls stay
+# up and only a bot whose token changed is logged in again. The daemon and the search
+# endpoint need no reload target — they read their files per cycle and per request.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=10
 TimeoutStopSec=20
