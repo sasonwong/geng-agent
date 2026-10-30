@@ -267,16 +267,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     // a quote only means something inside the chat it came from; a mismatched one is
     // dropped rather than sent into the wrong conversation
     const reply = quoteFor(chat, replyTo);
+    const ids: (number | undefined)[] = [];
     for (const text of texts) {
       if (reply === undefined) {
-        await sendMessage(cfg.token, chat, text);
+        ids.push((await sendMessage(cfg.token, chat, text))[0]);
         continue;
       }
       try {
-        await sendMessage(cfg.token, chat, text, undefined, reply);
+        ids.push((await sendMessage(cfg.token, chat, text, undefined, reply))[0]);
       } catch {
         // a deleted message must not take the words down with it
-        await sendMessage(cfg.token, chat, text);
+        ids.push((await sendMessage(cfg.token, chat, text))[0]);
       }
     }
     const p = instanceData(key);
@@ -291,8 +292,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       await sendFile(cfg.token, chat, host);
     }
     if (p) {
-      for (const text of texts) {
-        appendSaid(p.data, chat, { at: new Date().toISOString(), dir: "out", text });
+      for (const [i, text] of texts.entries()) {
+        // The id Telegram gave the first part of this text: `<chat>-<message_id>`, the
+        // same shape the inbox uses, so a line of its own can be pointed at later just
+        // like anyone else's. Absent only if the send answered without one.
+        const id = ids[i];
+        appendSaid(p.data, chat, {
+          at: new Date().toISOString(),
+          dir: "out",
+          text,
+          ...(id === undefined ? {} : { id: `${chat}-${id}` }),
+        });
       }
     }
     return true;

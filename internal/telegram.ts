@@ -136,21 +136,30 @@ export function splitMessage(text: string, limit = 4000): string[] {
   return parts;
 }
 
+/**
+ * Returns the message id of every part actually sent, in order — the transcript wants
+ * them so its own lines can be pointed at the same way someone else's can. A text split
+ * into several Telegram messages yields several ids; the first is the anchor for the
+ * whole text.
+ */
 export async function sendMessage(
   token: string,
   chat: number,
   text: string,
   threadId?: number,
   replyTo?: number,
-): Promise<void> {
+): Promise<number[]> {
+  const sent: number[] = [];
   for (const part of splitMessage(text)) {
-    await call(token, "sendMessage", {
+    const message = await call<{ message_id: number }>(token, "sendMessage", {
       chat_id: chat,
       text: part,
       ...(threadId ? { message_thread_id: threadId } : {}),
       ...(replyTo ? { reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } } : {}),
     });
+    sent.push(message.message_id);
   }
+  return sent;
 }
 
 /**
