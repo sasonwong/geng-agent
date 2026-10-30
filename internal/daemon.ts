@@ -216,18 +216,21 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // it is mounted read-only into the container, and docker materialises a missing
   // host path as a directory — after which appending a line is EISDIR forever
   if (!existsSync(paths.daemonLog)) writeText(paths.daemonLog, "");
-  if (!o.dry) {
+  // Spent at the top of every cycle, not only at startup: the page promises the agent
+  // "before the next waking", and reading it only at startup made that a promise for the
+  // next restart.
+  const applyProposalNow = (): void => {
+    if (o.dry) return;
     const proposal = applyProposal(paths);
-    if (proposal) {
-      const lines = [
-        ...proposal.applied.map((a) => `${a.key} ${String(a.from)} → ${a.to}`),
-        ...proposal.rejected.map((r) => `${r.key} 没采用（${r.reason}）`),
-      ];
-      if (lines.length > 0) {
-        writeOps(ensureGatewayDirs(paths.root).ops, `daemon@${paths.instance}`, `改了运行参数：${lines.join("；")}`);
-      }
+    if (!proposal) return;
+    const lines = [
+      ...proposal.applied.map((a) => `${a.key} ${String(a.from)} → ${a.to}`),
+      ...proposal.rejected.map((r) => `${r.key} 没采用（${r.reason}）`),
+    ];
+    if (lines.length > 0) {
+      writeOps(ensureGatewayDirs(paths.root).ops, `daemon@${paths.instance}`, `改了运行参数：${lines.join("；")}`);
     }
-  }
+  };
   let policy: Policy = loadPolicy(paths.policy);
 
   // Every waking starts a fresh container from the image tag, so a rebuilt image is
@@ -278,7 +281,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const at = (inContainer: string, host: string): string =>
     policy.runner === "docker" ? inContainer : host;
   const statePath = at("/state", paths.palimpsest);
-  const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
   // A preview computes the same note without touching the disk: --dry must not eat what
   // it is showing, but it must still say what a real start would say.
   const leftover = leftoverCut(paths, !o.dry);
@@ -291,6 +293,17 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   let escalation: Escalation = loadEscalation(paths);
 
   for (;;) {
+    // policy.json is read at the top of every cycle, and a proposal is spent there too:
+    // both are files, and applying them by restarting would abort a waking in flight —
+    // which is the whole cost a restart has. A cycle already running keeps its policy.
+    applyProposalNow();
+    const reloaded = loadPolicy(paths.policy);
+    if (JSON.stringify(reloaded) !== JSON.stringify(policy)) {
+      policy = reloaded;
+      log(`policy.json 变了：${policySummary(policy)}`);
+    }
+    // derived from the policy, so it is read after the reload above rather than once
+    const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
     // Only while it is not running: a file vanishing under a read is the failure this
     // must not have. Its own requests go first, then the cap.
     const forgot = forgetFiles(

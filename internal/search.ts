@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
@@ -16,18 +16,26 @@ export interface SearchEnv {
   dailyLimit: number;
 }
 
+/**
+ * The file first, the environment second.
+ *
+ * `geng-search.service` loads the same file with `EnvironmentFile=`, which freezes its
+ * contents at start: reading `process.env` first made a token rotation invisible (the old
+ * token stayed valid forever) and a quota edit a no-op. The environment is only the
+ * fallback for a value the file does not carry.
+ */
 export function readSearchEnv(root: string): SearchEnv | null {
   const file = readEnvFile(join(root, "secrets", "search.env"));
-  const token = process.env.GENG_SEARCH_TOKEN ?? file.GENG_SEARCH_TOKEN ?? "";
-  const apiKey = process.env.DEEPSEEK_API_KEY ?? file.DEEPSEEK_API_KEY ?? "";
+  const token = file.GENG_SEARCH_TOKEN ?? process.env.GENG_SEARCH_TOKEN ?? "";
+  const apiKey = file.DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? "";
   if (token === "" || apiKey === "") return null;
-  const bind = process.env.GENG_SEARCH_BIND ?? file.GENG_SEARCH_BIND ?? "0.0.0.0:8787";
+  const bind = file.GENG_SEARCH_BIND ?? process.env.GENG_SEARCH_BIND ?? "0.0.0.0:8787";
   const [host, port] = bind.split(":");
   return {
     token,
     apiKey,
     bind: { host: host || "0.0.0.0", port: Number(port ?? 8787) },
-    dailyLimit: Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200),
+    dailyLimit: Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200),
   };
 }
 
@@ -57,7 +65,7 @@ export function searchQuota(root: string, instanceEnvFile: string): { limit: num
   if (!searchConfigured(instanceEnvFile)) return null;
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
-  const limit = q.limit ?? Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200);
+  const limit = q.limit ?? Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200);
   const used = q.day === today() ? (q.count ?? 0) : 0;
   return { limit, left: Math.max(0, limit - used) };
 }
@@ -68,26 +76,52 @@ export interface SearchServerOptions {
   log?: (line: string) => void;
 }
 
-export function startSearchServer(o: SearchServerOptions): Promise<{ close: () => void }> {
+export function startSearchServer(o: SearchServerOptions): Promise<Server> {
   const { ops } = ensureGatewayDirs(o.root);
   const quotaFile = join(ops, "usage", "search.json");
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
 
   // The limit this process enforces, written down so the packet reports the same
-  // number the server actually applies — restarting is what makes a new limit real.
+  // number the server actually applies — restarting used to be what made a new limit
+  // real; now secrets/search.env is re-read per request (see refresh below).
   writeJson(quotaFile, { ...readJson<Quota>(quotaFile, {}), limit: o.env.dailyLimit });
+
+  // The env is the operator's knob and nothing here outlives a request, so it is re-read
+  // on every one: a quota or token change then needs no restart. Only bind is fixed, at
+  // listen time, and saying so is cheaper than pretending it reloaded.
+  let env = o.env;
+  let bindWarned = false;
+  const refresh = (): void => {
+    const next = readSearchEnv(o.root);
+    if (next === null) return; // half a config is a typo: keep serving with the old one
+    if (next.bind.host !== env.bind.host || next.bind.port !== env.bind.port) {
+      if (!bindWarned) {
+        log(`search.env 的 bind 变了，要重启才换；继续听 ${env.bind.host}:${env.bind.port}`);
+        bindWarned = true;
+      }
+    } else {
+      bindWarned = false;
+    }
+    const changed =
+      next.token !== env.token || next.apiKey !== env.apiKey || next.dailyLimit !== env.dailyLimit;
+    env = { ...next, bind: env.bind };
+    if (!changed) return;
+    const q = readJson<Quota>(quotaFile, {});
+    if (q.limit !== env.dailyLimit) writeJson(quotaFile, { ...q, limit: env.dailyLimit });
+    log(`search.env 重读了：每天 ${env.dailyLimit} 次`);
+  };
 
   const spend = (): { ok: boolean; remaining: number } => {
     const q = readJson<Quota>(quotaFile, {});
     const count = q.day === today() ? (q.count ?? 0) : 0;
-    if (count >= o.env.dailyLimit) return { ok: false, remaining: 0 };
-    writeJson(quotaFile, { day: today(), count: count + 1, limit: o.env.dailyLimit });
-    return { ok: true, remaining: o.env.dailyLimit - count - 1 };
+    if (count >= env.dailyLimit) return { ok: false, remaining: 0 };
+    writeJson(quotaFile, { day: today(), count: count + 1, limit: env.dailyLimit });
+    return { ok: true, remaining: env.dailyLimit - count - 1 };
   };
 
   const remaining = (): number => {
     const q = readJson<Quota>(quotaFile, {});
-    return Math.max(0, o.env.dailyLimit - (q.day === today() ? (q.count ?? 0) : 0));
+    return Math.max(0, env.dailyLimit - (q.day === today() ? (q.count ?? 0) : 0));
   };
 
   const server = createServer((req, res) => {
@@ -97,8 +131,9 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
       res.end(text);
     };
 
+    refresh();
     if (req.method !== "POST") return send(405, { error: "POST only" });
-    if (req.headers["x-geng-token"] !== o.env.token) return send(401, { error: "bad token" });
+    if (req.headers["x-geng-token"] !== env.token) return send(401, { error: "bad token" });
 
     const operation = req.url === "/fetch" ? "fetch" : req.url === "/search" ? "search" : null;
     if (operation === null) return send(404, { error: "unknown path" });
@@ -135,7 +170,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
           const response = await fetch(`${UPSTREAM}/${operation}`, {
             method: "POST",
             headers: {
-              authorization: `Bearer ${o.env.apiKey}`,
+              authorization: `Bearer ${env.apiKey}`,
               "content-type": "application/json",
             },
             body: JSON.stringify(forwarded),
@@ -159,8 +194,8 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
   return new Promise((resolve, reject) => {
     server.on("error", reject);
     server.listen(o.env.bind.port, o.env.bind.host, () => {
-      log(`search 端点 ${o.env.bind.host}:${o.env.bind.port}（每天 ${o.env.dailyLimit} 次）`);
-      resolve({ close: () => server.close() });
+      log(`search 端点 ${env.bind.host}:${env.bind.port}（每天 ${env.dailyLimit} 次）`);
+      resolve(server);
     });
   });
 }

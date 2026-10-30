@@ -222,7 +222,7 @@ test("the endpoint answers 401, 413 and accepts a wanted mail", async () => {
   const f = fixture();
   const cfg = loadMailConfig(f.root)!;
   const env = { token: "tok", bind: { host: "127.0.0.1", port: 0 } };
-  const server = await startMailServer({ root: f.root, cfg, env, log: () => {}, maxBytes: 4_000 });
+  const server = await startMailServer({ root: f.root, getCfg: () => cfg, env, log: () => {}, maxBytes: 4_000 });
   const port = (server.address() as { port: number }).port;
   const post = (body: string, token = "tok") =>
     fetch(`http://127.0.0.1:${port}/`, {

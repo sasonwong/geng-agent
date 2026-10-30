@@ -220,6 +220,32 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是�
 > 第一次醒来之前 `daemon.log` 是空的、`status` 说"从未"、`palimpsest/` 里只有 `journal/`：
 > 那是刚出生，不是坏了。它自己设的第一个闹钟到点才醒。
 
+### 改配置不用重启
+
+四份配置，各有各的读法；`restart` 只在换代码、换 `.env` 时才是必须的：
+
+| 文件 | 谁读 | 什么时候重读 |
+|---|---|---|
+| `secrets/bots.json` | gateway | `systemctl --user reload geng-gateway` |
+| `secrets/mail.json` | gateway | 同上 |
+| `data/<inst>/policy.json` | daemon | **每一轮开头**，什么也不用做 |
+| `secrets/search.env` | search | **每一次请求**，什么也不用做；`bind` 除外，它只在 listen 时读 |
+
+`reload` 不是重启：长轮询不断，只有 **token 变了的 bot** 才会重新登录（一个 token 只许一个
+消费者，旧的不先停新的会被 409）；新加的 bot 起、删掉的停，只改 `allow` 的话一个 poller 都不动。
+`bots.json` / `mail.json` 变空或读不出来都当成手滑，继续用旧的，日志里写一行。启动时没有信箱、
+后来才写一个 `mail.json`，那要重启——监听器不是每轮都能起。
+
+验证：`node cmd/geng/index.ts bots allow alice rm <某个 id>` 之后
+
+```bash
+systemctl --user reload geng-gateway
+journalctl --user -u geng-gateway -n 5    # 应有「重载 alice：… allow=4 人」
+```
+
+出现 `Stopping`/`Started` 这一对就说明 HUP 变成了重启（handler 没装上）——只有「重载」行才是真
+的没重启。再把 id 加回去 reload 一次，数字应该回到原样。
+
 ---
 
 ## 5. 可选能力
@@ -232,8 +258,16 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是�
 一个实例一个 bot：**token 就是路由键**，昵称和头像就是它在你手机里的身份。
 
 1. [@BotFather](https://t.me/BotFather) `/newbot`，名字和头像之后都能改
-2. **群聊必须关 privacy mode**：`/setprivacy` → 选 bot → `Disable`。不关的话它收不到群里的普通
-   消息，只会收到 @ 和命令，而你会以为它坏了
+2. **两个开关，缺一个它就是个哑的**，都在 BotFather 里：
+   - `/setprivacy` → 选 bot → `Disable`：不关就收不到群里的普通消息，只有 @ 和命令。**关完必须
+     把它踢出群再拉回来**——Telegram 只在入群那一刻记 privacy，之后改对已经加入的群不生效
+   - `/mybots` → 选 bot → `Bot Settings`（Mini App）→ `Mode Settings` → 打开
+     `Bot to Bot Communication Mode`：不开的话**别的 bot 说的话一条都收不到**。这是 Bot API 10.0
+     才有的开关，跟 privacy 是两件事，`getMe` 里也没有对应字段，只能在群里发一条验
+
+   两个都漏的时候症状很像：人说的话照收，所以你不会起疑。区别是 privacy 没关时别的 bot 只在
+   @ / 回复它的时候才到，bot-to-bot 没开时一条都不到。开了之后 Telegram 也不再替它拦 bot 之间的
+   循环，刹车只剩 gateway 自己的 tripwire（一分钟 30 条、同一句 10 次 → 停 10 分钟）。
 3. `ops` bot 只建一个：daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀
 
 ```bash
@@ -273,6 +307,18 @@ systemctl --user enable --now geng-gateway
 验证：`geng gateway --check` 每个 bot 打印 `ok @username`；启动行打印 `allow=N 人`（`0 人` 和
 `不限` 要能一眼看出来）；然后给 bot 发一句话，看 `data/alice/inbox/` 出现文件、`people/` 出现一行。
 
+最后一项只能拿**另一个 bot** 验：人说的话在 privacy 还生效时也会到，自己的账号测不出来。让群里
+另一个 bot 发一条不带 @ 的普通消息，看目标实例的 `inbox/low/` 有没有多出文件：
+
+```bash
+# 群 id 抄 data/_gateway/chats.json；token 从文件读，不上命令行
+node -e 'const b=require("./secrets/bots.json").alice;fetch("https://api.telegram.org/bot"+b.token+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:-1001234567890,text:"投递自检"})}).then(r=>r.json()).then(j=>console.log(j.ok))'
+ls data/<inst>/inbox/low/     # 空 = 第 2 步还有开关没开（privacy 或 bot-to-bot）；有文件 = 通了
+```
+
+对照两个实例的 `message_id` 没有意义：basic group 的编号是按收件人各编一套的，同一条消息在
+两个 bot 那儿是两个数。
+
 投递分两档，这条决定了它会不会被吵：**私聊 / @ / 回复 → 立刻叫醒它**；
 群里的闲话 → 只进 `inbox/low`，等它下次自己看。它可以用 `listen` 自己开四小时窗口，
 也可以 `mute` 某个来源（但**直接对它说话永远穿透静音**）。
@@ -295,7 +341,7 @@ node cmd/geng/index.ts secrets init alice     # 生成 search / mail 两对 toke
 # secrets/search.env   chmod 600
 DEEPSEEK_API_KEY=sk-...                      # 搜索是单独计费的端点，chat 的 key 不一定能用
 GENG_SEARCH_BIND=0.0.0.0:8787                # 或直接绑 agent-net 的网关地址
-GENG_SEARCH_DAILY=200
+GENG_SEARCH_DAILY=200                        # 改了不用重启，下一次请求就是新额度
 
 node cmd/geng/index.ts search                # 前台；常驻用 deploy/geng-search.service
 ```
@@ -346,6 +392,8 @@ tunnel 上加一个指向 `http://localhost:8788` 的 hostname、Email Routing �
 行为上要知道的三件事：**只收不回**（`say` 只说到会话）；**收信是 pull**——邮件只进
 `data/<inst>/mail/`，纸上报「邮件：2 封没处理」，不叫醒它；`From` 可伪造，所以邮件不叫醒它。
 
+改白名单不用重启：`mail.json` 跟着 gateway 的 `reload` 一起换（见 §4）。
+
 验证：给那个地址发一封，`ls data/alice/mail/` 多一个文件，下一张纸上出现那一行。
 白名单外的人**在落盘之前**就被丢掉，日志一行 `mail ← guest …（没送）`。
 
@@ -388,7 +436,7 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 ## 7. 它的运行参数
 
 `data/<inst>/policy.json` 是**你**的（它在书外面，容器里看不见也写不着）。它自己只能通过
-`palimpsest/policy.proposal.json` 提请求，下次启动时被检查：
+`palimpsest/policy.proposal.json` 提请求，每一轮开头被检查：
 
 | 它能改 | 范围 |
 |---|---|
