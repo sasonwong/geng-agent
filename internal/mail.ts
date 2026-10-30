@@ -301,7 +301,8 @@ export const INGEST_MAX_BYTES = 25 * 1024 * 1024;
 
 export interface MailServerOptions {
   root: string;
-  cfg: MailConfig;
+  /** Read per mail, so editing secrets/mail.json does not need a gateway restart. */
+  getCfg: () => MailConfig;
   env: MailEnv;
   log: (line: string) => void;
   /** Overridable so a test can prove the guard without sending 25 MB. */
@@ -347,7 +348,7 @@ export async function startMailServer(o: MailServerOptions): Promise<Server> {
         return;
       }
       try {
-        const result = accept(raw, o.cfg, o.root, o.log);
+        const result = accept(raw, o.getCfg(), o.root, o.log);
         if (!result.ok) {
           // accepted and dropped: bouncing would tell a stranger the address exists, and
           // the mail is not wanted either way

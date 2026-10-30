@@ -139,15 +139,34 @@ const RATE_LIMIT = 30;
 const REPEAT_LIMIT = 10;
 const PAUSE_MS = 10 * 60_000;
 
+/**
+ * Which pollers a reload has to move. A poller is a long poll holding a token, so only a
+ * token that changed (or a bot that came or went) needs a new one: allow, listen and chat
+ * are read per message from `bots`, which is swapped under it.
+ */
+export function reloadPlan(
+  running: Record<string, string>,
+  next: Record<string, string>,
+): { stop: string[]; start: string[] } {
+  return {
+    stop: Object.keys(running).filter((k) => running[k] !== next[k]).sort(),
+    start: Object.keys(next).filter((k) => next[k] !== running[k]).sort(),
+  };
+}
+
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const root = o.root;
   const botsFile = join(root, "secrets", "bots.json");
-  const bots = readBots(root);
-  const keys = Object.keys(bots);
+  // both are re-read on SIGHUP: editing either one is an operator action, and restarting
+  // the process for it would drop the long polls and re-login every bot
+  let bots = readBots(root);
   // a mailbox is a transport too: an instance may have mail and no bot at all
-  const mailCfg = loadMailConfig(root);
-  if (keys.length === 0 && mailCfg === null) {
+  const loadedMail = loadMailConfig(root);
+  // a box rather than a bare `let`: the getter handed to the mail server stays non-null
+  // for the life of the process, and only its contents are swapped by a reload
+  const mailbox = loadedMail === null ? null : { cfg: loadedMail };
+  if (Object.keys(bots).length === 0 && mailbox === null) {
     throw new ExpectedError(
       `没有 bot 也没有信箱：先写 ${botsFile} 或 ${join(root, "secrets", "mail.json")}`,
     );
@@ -357,7 +376,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     );
   };
 
-  const poll = async (key: string): Promise<void> => {
+  const poll = async (key: string, signal: AbortSignal): Promise<void> => {
     const cfg = bots[key];
     if (!cfg) return;
     const me = await getMe(cfg.token);
@@ -374,7 +393,8 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         ` home=${cfg.chat ?? chats[key]?.home ?? "未知"}`,
     );
     for (;;) {
-      const updates = await getUpdates(cfg.token, offsets[key] ?? 0);
+      const updates = await getUpdates(cfg.token, offsets[key] ?? 0, undefined, signal);
+      if (signal.aborted) return;
       for (const update of updates) {
         // Handle first, record the offset after: recording it first means a crash in
         // between loses the message for good, and Telegram will never hand it over again.
@@ -388,6 +408,103 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       }
     }
   };
+
+  // One long poll per bot, keyed so a reload can stop exactly the one it has to. Telegram
+  // allows one consumer per token: a changed token means the old poll must end before the
+  // new one starts, or both get 409 and the bot looks dead.
+  const pollers = new Map<string, { token: string; stop: () => Promise<void> }>();
+
+  const startPoller = (key: string): void => {
+    const cfg = bots[key];
+    if (!cfg || pollers.has(key)) return;
+    const ac = new AbortController();
+    const done = poll(key, ac.signal).catch((err: unknown) => {
+      if (!ac.signal.aborted) log(`${key} 的轮询断了：${(err as Error).message}`);
+    });
+    const entry = { token: cfg.token, stop: async () => {
+      ac.abort();
+      await done;
+    } };
+    pollers.set(key, entry);
+    // a poller that died on its own (a token that was wrong at startup) must be startable
+    // again by the next reload, so it leaves the map when its loop ends
+    void done.finally(() => {
+      if (pollers.get(key) === entry) pollers.delete(key);
+    });
+  };
+
+  const stopPoller = async (key: string): Promise<void> => {
+    const p = pollers.get(key);
+    if (!p) return;
+    await p.stop();
+    if (pollers.get(key) === p) pollers.delete(key);
+  };
+
+  const readMail = (): void => {
+    const next = loadMailConfig(root);
+    if (next === null) {
+      // empty or unreadable is a typo, not an instruction: a mailbox is not torn down by
+      // a half-written file, and stopping one is a restart
+      if (mailbox !== null) {
+        log(`重载：mail.json 是空的或读不出来，继续用旧的 ${Object.keys(mailbox.cfg).length} 个地址`);
+      }
+      return;
+    }
+    if (mailbox === null) {
+      log("重载：新出现了 mail.json，但信箱是启动时起的——重启才起得来");
+      return;
+    }
+    mailbox.cfg = next;
+    for (const line of describeConfig(mailbox.cfg)) log(`mail 重载：${line}`);
+  };
+
+  const doReload = async (): Promise<void> => {
+    const next = readBots(root);
+    if (Object.keys(next).length === 0) {
+      log("重载：bots.json 是空的或读不出来，一个 bot 都没动");
+    } else {
+      for (const [key, cfg] of Object.entries(next)) {
+        if (typeof cfg.token !== "string" || cfg.token.trim() === "") {
+          delete next[key];
+          log(`重载：${key} 没有 token，继续用旧的`);
+        }
+      }
+      const tokens = (b: typeof bots): Record<string, string> =>
+        Object.fromEntries(Object.entries(b).map(([k, c]) => [k, c.token]));
+      const plan = reloadPlan(tokens(bots), tokens(next));
+      // stop, swap, start: the new poller must read the new token, and the old one has to
+      // be gone before it starts polling or Telegram answers 409 to both
+      for (const key of plan.stop) await stopPoller(key);
+      bots = next;
+      for (const key of plan.start) startPoller(key);
+      log(`重载：bots ${Object.keys(next).length} 个（起 ${plan.start.length} 停 ${plan.stop.length}）`);
+      for (const [key, cfg] of Object.entries(next)) {
+        log(
+          `重载 ${key}：${cfg.listen ? `listen=${cfg.listen} ` : ""}` +
+            `allow=${cfg.allow === undefined ? "不限" : `${cfg.allow.length} 人`}` +
+            ` home=${cfg.chat ?? chats[key]?.home ?? "未知"}`,
+        );
+      }
+    }
+    readMail();
+  };
+
+  // one reload at a time: two SIGHUPs a second apart must not stop the same poller twice
+  let reloading: Promise<void> | null = null;
+  const reload = (): Promise<void> => {
+    reloading ??= doReload()
+      .catch((err: unknown) => log(`重载失败：${(err as Error).message}`))
+      .finally(() => {
+        reloading = null;
+      });
+    return reloading;
+  };
+  // before anything is awaited: SIGHUP's default action is to kill the process, and a
+  // reload arriving during startup would look exactly like a crash
+  process.on("SIGHUP", () => {
+    log("收到 SIGHUP：重读 bots.json 和 mail.json");
+    void reload();
+  });
 
   // "working on it" is worth 4 seconds of a person's patience at a time; the state is
   // deliberately in memory, because a gateway restart should just stop typing.
@@ -418,7 +535,8 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
   const sweep = async (): Promise<void> => {
     for (;;) {
-      for (const key of keys) {
+      // read per pass: a reload may have added or removed a bot since the last one
+      for (const key of Object.keys(bots)) {
         try {
           await showTyping(key);
         } catch {
@@ -444,7 +562,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
   };
 
-  if (mailCfg !== null) {
+  if (mailbox !== null) {
     const mailEnv = readMailEnv(root);
     // a mailbox is a second transport: a field missing here must not take Telegram down
     // with it, and it must not be quiet either — ops is the only place a person looks
@@ -457,8 +575,8 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       broken(`有 ${join("secrets", "mail.json")} 但没有 token（secrets/mail.env 的 GENG_MAIL_TOKEN）`);
     } else {
       try {
-        await startMailServer({ root, cfg: mailCfg, env: mailEnv, log });
-        for (const line of describeConfig(mailCfg)) log(`mail 上线：${line}`);
+        await startMailServer({ root, getCfg: () => mailbox.cfg, env: mailEnv, log });
+        for (const line of describeConfig(mailbox.cfg)) log(`mail 上线：${line}`);
       } catch (err) {
         broken((err as Error).message);
       }
@@ -466,10 +584,8 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   }
 
   void sweep();
-  const loops = keys.map((key) => poll(key));
-  if (loops.length === 0) {
-    // only a mailbox: the listener is the whole job, so this process must outlive main()
-    await new Promise<void>(() => {});
-  }
-  await Promise.all(loops);
+  for (const key of Object.keys(bots)) startPoller(key);
+  // the pollers come and go on reload, so what keeps this process alive is the promise
+  // that never settles — not a list of loops captured at startup
+  await new Promise<void>(() => {});
 }

@@ -101,16 +101,23 @@ export async function getUpdates(
   token: string,
   offset: number,
   timeoutSec = 50,
+  signal?: AbortSignal,
 ): Promise<TgUpdate[]> {
   try {
     return await call<TgUpdate[]>(
       token,
       "getUpdates",
       { offset, timeout: timeoutSec, allowed_updates: ["message"] },
-      AbortSignal.timeout((timeoutSec + 15) * 1000),
+      AbortSignal.any([
+        AbortSignal.timeout((timeoutSec + 15) * 1000),
+        ...(signal ? [signal] : []),
+      ]),
     );
-  } catch {
-    // long-poll timeouts and transient network errors are normal; retry next tick
+  } catch (err) {
+    // long-poll timeouts and transient network errors are normal; retry next tick.
+    // A deliberate abort is not: a reload is stopping this poller, and the loop above
+    // has to be allowed to end.
+    if (signal?.aborted) throw err;
     return [];
   }
 }

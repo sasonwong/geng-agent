@@ -74,20 +74,46 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
 
   // The limit this process enforces, written down so the packet reports the same
-  // number the server actually applies — restarting is what makes a new limit real.
+  // number the server actually applies — restarting used to be what made a new limit
+  // real; now secrets/search.env is re-read per request (see refresh below).
   writeJson(quotaFile, { ...readJson<Quota>(quotaFile, {}), limit: o.env.dailyLimit });
+
+  // The env is the operator's knob and nothing here outlives a request, so it is re-read
+  // on every one: a quota or token change then needs no restart. Only bind is fixed, at
+  // listen time, and saying so is cheaper than pretending it reloaded.
+  let env = o.env;
+  let bindWarned = false;
+  const refresh = (): void => {
+    const next = readSearchEnv(o.root);
+    if (next === null) return; // half a config is a typo: keep serving with the old one
+    if (next.bind.host !== env.bind.host || next.bind.port !== env.bind.port) {
+      if (!bindWarned) {
+        log(`search.env 的 bind 变了，要重启才换；继续听 ${env.bind.host}:${env.bind.port}`);
+        bindWarned = true;
+      }
+    } else {
+      bindWarned = false;
+    }
+    const changed =
+      next.token !== env.token || next.apiKey !== env.apiKey || next.dailyLimit !== env.dailyLimit;
+    env = { ...next, bind: env.bind };
+    if (!changed) return;
+    const q = readJson<Quota>(quotaFile, {});
+    if (q.limit !== env.dailyLimit) writeJson(quotaFile, { ...q, limit: env.dailyLimit });
+    log(`search.env 重读了：每天 ${env.dailyLimit} 次`);
+  };
 
   const spend = (): { ok: boolean; remaining: number } => {
     const q = readJson<Quota>(quotaFile, {});
     const count = q.day === today() ? (q.count ?? 0) : 0;
-    if (count >= o.env.dailyLimit) return { ok: false, remaining: 0 };
-    writeJson(quotaFile, { day: today(), count: count + 1, limit: o.env.dailyLimit });
-    return { ok: true, remaining: o.env.dailyLimit - count - 1 };
+    if (count >= env.dailyLimit) return { ok: false, remaining: 0 };
+    writeJson(quotaFile, { day: today(), count: count + 1, limit: env.dailyLimit });
+    return { ok: true, remaining: env.dailyLimit - count - 1 };
   };
 
   const remaining = (): number => {
     const q = readJson<Quota>(quotaFile, {});
-    return Math.max(0, o.env.dailyLimit - (q.day === today() ? (q.count ?? 0) : 0));
+    return Math.max(0, env.dailyLimit - (q.day === today() ? (q.count ?? 0) : 0));
   };
 
   const server = createServer((req, res) => {
@@ -97,8 +123,9 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
       res.end(text);
     };
 
+    refresh();
     if (req.method !== "POST") return send(405, { error: "POST only" });
-    if (req.headers["x-geng-token"] !== o.env.token) return send(401, { error: "bad token" });
+    if (req.headers["x-geng-token"] !== env.token) return send(401, { error: "bad token" });
 
     const operation = req.url === "/fetch" ? "fetch" : req.url === "/search" ? "search" : null;
     if (operation === null) return send(404, { error: "unknown path" });
@@ -135,7 +162,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
           const response = await fetch(`${UPSTREAM}/${operation}`, {
             method: "POST",
             headers: {
-              authorization: `Bearer ${o.env.apiKey}`,
+              authorization: `Bearer ${env.apiKey}`,
               "content-type": "application/json",
             },
             body: JSON.stringify(forwarded),
@@ -159,7 +186,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
   return new Promise((resolve, reject) => {
     server.on("error", reject);
     server.listen(o.env.bind.port, o.env.bind.host, () => {
-      log(`search 端点 ${o.env.bind.host}:${o.env.bind.port}（每天 ${o.env.dailyLimit} 次）`);
+      log(`search 端点 ${env.bind.host}:${env.bind.port}（每天 ${env.dailyLimit} 次）`);
       resolve({ close: () => server.close() });
     });
   });
