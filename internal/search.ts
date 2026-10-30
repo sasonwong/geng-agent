@@ -1,4 +1,4 @@
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
@@ -16,18 +16,26 @@ export interface SearchEnv {
   dailyLimit: number;
 }
 
+/**
+ * The file first, the environment second.
+ *
+ * `geng-search.service` loads the same file with `EnvironmentFile=`, which freezes its
+ * contents at start: reading `process.env` first made a token rotation invisible (the old
+ * token stayed valid forever) and a quota edit a no-op. The environment is only the
+ * fallback for a value the file does not carry.
+ */
 export function readSearchEnv(root: string): SearchEnv | null {
   const file = readEnvFile(join(root, "secrets", "search.env"));
-  const token = process.env.GENG_SEARCH_TOKEN ?? file.GENG_SEARCH_TOKEN ?? "";
-  const apiKey = process.env.DEEPSEEK_API_KEY ?? file.DEEPSEEK_API_KEY ?? "";
+  const token = file.GENG_SEARCH_TOKEN ?? process.env.GENG_SEARCH_TOKEN ?? "";
+  const apiKey = file.DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? "";
   if (token === "" || apiKey === "") return null;
-  const bind = process.env.GENG_SEARCH_BIND ?? file.GENG_SEARCH_BIND ?? "0.0.0.0:8787";
+  const bind = file.GENG_SEARCH_BIND ?? process.env.GENG_SEARCH_BIND ?? "0.0.0.0:8787";
   const [host, port] = bind.split(":");
   return {
     token,
     apiKey,
     bind: { host: host || "0.0.0.0", port: Number(port ?? 8787) },
-    dailyLimit: Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200),
+    dailyLimit: Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200),
   };
 }
 
@@ -57,7 +65,7 @@ export function searchQuota(root: string, instanceEnvFile: string): { limit: num
   if (!searchConfigured(instanceEnvFile)) return null;
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
-  const limit = q.limit ?? Number(process.env.GENG_SEARCH_DAILY ?? file.GENG_SEARCH_DAILY ?? 200);
+  const limit = q.limit ?? Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200);
   const used = q.day === today() ? (q.count ?? 0) : 0;
   return { limit, left: Math.max(0, limit - used) };
 }
@@ -68,7 +76,7 @@ export interface SearchServerOptions {
   log?: (line: string) => void;
 }
 
-export function startSearchServer(o: SearchServerOptions): Promise<{ close: () => void }> {
+export function startSearchServer(o: SearchServerOptions): Promise<Server> {
   const { ops } = ensureGatewayDirs(o.root);
   const quotaFile = join(ops, "usage", "search.json");
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
@@ -187,7 +195,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<{ close: () =
     server.on("error", reject);
     server.listen(o.env.bind.port, o.env.bind.host, () => {
       log(`search 端点 ${env.bind.host}:${env.bind.port}（每天 ${env.dailyLimit} 次）`);
-      resolve({ close: () => server.close() });
+      resolve(server);
     });
   });
 }
