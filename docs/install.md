@@ -258,10 +258,16 @@ journalctl --user -u geng-gateway -n 5    # 应有「重载 alice：… allow=4 
 一个实例一个 bot：**token 就是路由键**，昵称和头像就是它在你手机里的身份。
 
 1. [@BotFather](https://t.me/BotFather) `/newbot`，名字和头像之后都能改
-2. **群聊必须关 privacy mode**：`/setprivacy` → 选 bot → `Disable`。不关的话它收不到群里的普通
-   消息，只会收到 @ 和命令，而你会以为它坏了。**关完必须把它踢出群再拉回来**——Telegram 只在入群
-   那一刻记 privacy，之后改对已经加入的群不生效，症状和不关一模一样：人说的话照收（所以你不会
-   起疑），别的 bot 说的话只收到指向自己的那几条
+2. **两个开关，缺一个它就是个哑的**，都在 BotFather 里：
+   - `/setprivacy` → 选 bot → `Disable`：不关就收不到群里的普通消息，只有 @ 和命令。**关完必须
+     把它踢出群再拉回来**——Telegram 只在入群那一刻记 privacy，之后改对已经加入的群不生效
+   - `/mybots` → 选 bot → `Bot Settings`（Mini App）→ `Mode Settings` → 打开
+     `Bot to Bot Communication Mode`：不开的话**别的 bot 说的话一条都收不到**。这是 Bot API 10.0
+     才有的开关，跟 privacy 是两件事，`getMe` 里也没有对应字段，只能在群里发一条验
+
+   两个都漏的时候症状很像：人说的话照收，所以你不会起疑。区别是 privacy 没关时别的 bot 只在
+   @ / 回复它的时候才到，bot-to-bot 没开时一条都不到。开了之后 Telegram 也不再替它拦 bot 之间的
+   循环，刹车只剩 gateway 自己的 tripwire（一分钟 30 条、同一句 10 次 → 停 10 分钟）。
 3. `ops` bot 只建一个：daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀
 
 ```bash
@@ -307,7 +313,7 @@ systemctl --user enable --now geng-gateway
 ```bash
 # 群 id 抄 data/_gateway/chats.json；token 从文件读，不上命令行
 node -e 'const b=require("./secrets/bots.json").alice;fetch("https://api.telegram.org/bot"+b.token+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:-1001234567890,text:"投递自检"})}).then(r=>r.json()).then(j=>console.log(j.ok))'
-ls data/<inst>/inbox/low/     # 空 = privacy 还生效，回第 2 步踢出重拉；有文件 = 通了
+ls data/<inst>/inbox/low/     # 空 = 第 2 步还有开关没开（privacy 或 bot-to-bot）；有文件 = 通了
 ```
 
 对照两个实例的 `message_id` 没有意义：basic group 的编号是按收件人各编一套的，同一条消息在
