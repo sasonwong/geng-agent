@@ -161,7 +161,8 @@ const listenTool = defineTool({
     "让某个会话的消息直接叫醒你：平时那些消息只在你下一轮醒来时摆在那儿。到点自动失效，最长四小时。",
   parameters: Type.Object({
     chats: Type.Array(Type.String(), {
-      minItems: 1,
+      // the handler below already turns an empty list into "不听了" and clears
+      // attention.json; minItems: 1 was the only thing standing between the two.
       maxItems: 10,
       description:
         "要听哪些会话的 chat id（纯数字，不是 @handle，也不是 telegram:xxx）。写 * 是所有会话。空数组表示不再听了。",
