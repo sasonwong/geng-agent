@@ -450,12 +450,36 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   // new one starts, or both get 409 and the bot looks dead.
   const pollers = new Map<string, { token: string; stop: () => Promise<void> }>();
 
+  // one reload at a time: two SIGHUPs a second apart must not stop the same poller twice.
+  // A SIGHUP that arrives mid-reload leaves a mark and gets its own pass afterwards, so
+  // an edit made during a reload is read instead of being silently lost.
+  let reloading: Promise<void> | null = null;
+  let reloadAgain = false;
+
+  /**
+   * Nothing left to serve means exit, not "stay alive and look healthy". A bad token used
+   * to leave the process holding a promise that never settles: systemd said active and
+   * only journald knew. Exiting makes the unit retry, which is what a wrong token needs.
+   *
+   * A mailbox is still a job, and a reload is momentarily between stop and start — exiting
+   * there would turn one config edit into a restart loop.
+   */
+  const exitIfIdle = (): void => {
+    if (pollers.size > 0 || mailbox !== null || reloading !== null) return;
+    log("没有轮询也没有信箱：退出，unit 会重试");
+    process.exit(1);
+  };
+
   const startPoller = (key: string): void => {
     const cfg = bots[key];
     if (!cfg || pollers.has(key)) return;
     const ac = new AbortController();
     const done = poll(key, ac.signal).catch((err: unknown) => {
-      if (!ac.signal.aborted) log(`${key} 的轮询断了：${(err as Error).message}`);
+      if (ac.signal.aborted) return;
+      const line = `${key} 的轮询断了：${(err as Error).message}`;
+      log(line);
+      // the same fact in the only place a person looks: journald alone is not a signal
+      writeOps(ops, "gateway", line);
     });
     const entry = { token: cfg.token, stop: async () => {
       ac.abort();
@@ -466,6 +490,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     // again by the next reload, so it leaves the map when its loop ends
     void done.finally(() => {
       if (pollers.get(key) === entry) pollers.delete(key);
+      exitIfIdle();
     });
   };
 
@@ -522,11 +547,6 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     readMail();
   };
 
-  // one reload at a time: two SIGHUPs a second apart must not stop the same poller twice.
-  // A SIGHUP that arrives mid-reload leaves a mark and gets its own pass afterwards, so
-  // an edit made during a reload is read instead of being silently lost.
-  let reloading: Promise<void> | null = null;
-  let reloadAgain = false;
   const reload = (): Promise<void> => {
     if (reloading !== null) {
       reloadAgain = true;
@@ -541,7 +561,13 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     reloading = pass().finally(() => {
       reloading = null;
       // a SIGHUP that landed between the last loop check and here must not be swallowed
-      if (reloadAgain) void reload();
+      if (reloadAgain) {
+        void reload();
+        return;
+      }
+      // checked here and not inside doReload: there `reloading` is still set, so the guard
+      // that protects the stop/start window would swallow a reload that emptied the table
+      exitIfIdle();
     });
     return reloading;
   };
