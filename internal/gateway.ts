@@ -12,7 +12,7 @@ import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
 import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./mail.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
-import { readBots } from "./bots.ts";
+import { readBots, type Bots } from "./bots.ts";
 import { readJson, writeJson } from "./state.ts";
 import {
   getMe,
@@ -152,6 +152,42 @@ export function reloadPlan(
     stop: Object.keys(running).filter((k) => running[k] !== next[k]).sort(),
     start: Object.keys(next).filter((k) => next[k] !== running[k]).sort(),
   };
+}
+
+/**
+ * What a reload does with a bot whose token is missing or blank.
+ *
+ * A token is the one thing a reload cannot invent, so a missing one must mean "keep the
+ * token this poller already holds" — deleting the entry instead stops the poller and takes
+ * the bot down, which is the opposite of what the log line promises. A half-written
+ * `bots.json` is exactly the case a reload is supposed to survive.
+ *
+ * A bot that has no token and no old one is dropped: there is nothing to poll with.
+ *
+ * `next` is the JSON as it was read, so it is deliberately typed as partial: a file that is
+ * being written has holes, and the type says so rather than lying about it.
+ */
+export function mergeBots(
+  running: Bots,
+  next: Record<string, Partial<BotConfig>>,
+): { bots: Bots; notes: string[] } {
+  const bots: Bots = {};
+  const notes: string[] = [];
+  for (const [key, cfg] of Object.entries(next)) {
+    const token = cfg.token;
+    if (typeof token === "string" && token.trim() !== "") {
+      bots[key] = { ...cfg, token };
+      continue;
+    }
+    const old = running[key];
+    if (old) {
+      bots[key] = { ...cfg, token: old.token };
+      notes.push(`重载：${key} 没有 token，沿用旧的`);
+    } else {
+      notes.push(`重载：${key} 没有 token，也没有旧的可用，跳过`);
+    }
+  }
+  return { bots, notes };
 }
 
 export async function runGateway(o: GatewayOptions): Promise<void> {
@@ -463,22 +499,19 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     if (Object.keys(next).length === 0) {
       log("重载：bots.json 是空的或读不出来，一个 bot 都没动");
     } else {
-      for (const [key, cfg] of Object.entries(next)) {
-        if (typeof cfg.token !== "string" || cfg.token.trim() === "") {
-          delete next[key];
-          log(`重载：${key} 没有 token，继续用旧的`);
-        }
-      }
-      const tokens = (b: typeof bots): Record<string, string> =>
+      const merged = mergeBots(bots, next);
+      for (const line of merged.notes) log(line);
+      const kept = merged.bots;
+      const tokens = (b: Bots): Record<string, string> =>
         Object.fromEntries(Object.entries(b).map(([k, c]) => [k, c.token]));
-      const plan = reloadPlan(tokens(bots), tokens(next));
+      const plan = reloadPlan(tokens(bots), tokens(kept));
       // stop, swap, start: the new poller must read the new token, and the old one has to
       // be gone before it starts polling or Telegram answers 409 to both
       for (const key of plan.stop) await stopPoller(key);
-      bots = next;
+      bots = kept;
       for (const key of plan.start) startPoller(key);
-      log(`重载：bots ${Object.keys(next).length} 个（起 ${plan.start.length} 停 ${plan.stop.length}）`);
-      for (const [key, cfg] of Object.entries(next)) {
+      log(`重载：bots ${Object.keys(kept).length} 个（起 ${plan.start.length} 停 ${plan.stop.length}）`);
+      for (const [key, cfg] of Object.entries(kept)) {
         log(
           `重载 ${key}：${cfg.listen ? `listen=${cfg.listen} ` : ""}` +
             `allow=${cfg.allow === undefined ? "不限" : `${cfg.allow.length} 人`}` +
@@ -489,14 +522,27 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     readMail();
   };
 
-  // one reload at a time: two SIGHUPs a second apart must not stop the same poller twice
+  // one reload at a time: two SIGHUPs a second apart must not stop the same poller twice.
+  // A SIGHUP that arrives mid-reload leaves a mark and gets its own pass afterwards, so
+  // an edit made during a reload is read instead of being silently lost.
   let reloading: Promise<void> | null = null;
+  let reloadAgain = false;
   const reload = (): Promise<void> => {
-    reloading ??= doReload()
-      .catch((err: unknown) => log(`重载失败：${(err as Error).message}`))
-      .finally(() => {
-        reloading = null;
-      });
+    if (reloading !== null) {
+      reloadAgain = true;
+      return reloading;
+    }
+    const pass = async (): Promise<void> => {
+      do {
+        reloadAgain = false;
+        await doReload().catch((err: unknown) => log(`重载失败：${(err as Error).message}`));
+      } while (reloadAgain);
+    };
+    reloading = pass().finally(() => {
+      reloading = null;
+      // a SIGHUP that landed between the last loop check and here must not be swallowed
+      if (reloadAgain) void reload();
+    });
     return reloading;
   };
   // before anything is awaited: SIGHUP's default action is to kill the process, and a
