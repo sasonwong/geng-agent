@@ -14,6 +14,14 @@ function answer(body: unknown, status = 200): () => void {
   };
 }
 
+function raw(text: string, status = 200): () => void {
+  const real = globalThis.fetch;
+  globalThis.fetch = async () => new Response(text, { status });
+  return () => {
+    globalThis.fetch = real;
+  };
+}
+
 function drop(): () => void {
   const real = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -57,6 +65,32 @@ test("429 is retried, not fatal", async () => {
   const restore = answer(
     { ok: false, error_code: 429, description: "Too Many Requests: retry after 3" },
     429,
+  );
+  try {
+    assert.deepEqual(await getUpdates("1:fake-token", 0, 1), []);
+  } finally {
+    restore();
+  }
+});
+
+// A page that is not the Bot API is not a fact about this bot: a proxy, a captive portal
+// or a cut-short body answers 200 with something else, and that can pass next tick. It used
+// to throw TelegramError(200), which is not retryable, so the gateway would have exited on
+// a hijacked page — the restart loop this file's other half exists to prevent.
+test("a 200 that is not JSON is retried, not fatal", async () => {
+  const restore = raw("<html>502 Bad Gateway</html>");
+  try {
+    assert.deepEqual(await getUpdates("1:fake-token", 0, 1), []);
+  } finally {
+    restore();
+  }
+});
+
+// the same promise as 429, measured instead of trusted: 5xx passes on its own
+test("500 with ok:false is retried, not fatal", async () => {
+  const restore = answer(
+    { ok: false, error_code: 500, description: "Internal Server Error" },
+    500,
   );
   try {
     assert.deepEqual(await getUpdates("1:fake-token", 0, 1), []);

@@ -100,7 +100,10 @@ export async function call<T>(
   try {
     body = JSON.parse(text);
   } catch {
-    throw new TelegramError(`${method}: HTTP ${response.status} ${text.slice(0, 200)}`, response.status);
+    // Not a Bot API answer at all: a proxy, a captive portal, a body cut short. That is the
+    // kind of failure that can pass on its own, so it stays a plain Error and getUpdates
+    // returns an empty batch. Only a status Telegram itself typed can be permanent.
+    throw new Error(`${method}: HTTP ${response.status} ${text.slice(0, 200)}`);
   }
   if (!body.ok) {
     throw new TelegramError(`${method}: ${body.description ?? `HTTP ${response.status}`}`, response.status);
