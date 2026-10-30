@@ -23,6 +23,9 @@ export interface TgEntity {
   type: string;
   offset: number;
   length: number;
+  /** Only on `text_mention`: the user it points at has no username, so this is the only
+   *  way to tell who was meant. */
+  user?: { id: number };
 }
 
 export interface TgFileRef {
@@ -214,17 +217,33 @@ export async function sendTyping(token: string, chat: number): Promise<void> {
   await call(token, "sendChatAction", { chat_id: chat, action: "typing" });
 }
 
+/**
+ * Addressed to this bot, as far as the message's own entities can say.
+ *
+ * The entity is a claim about *a* mention, not about *this* bot: Telegram emits
+ * `bot_command` for any `/word` anywhere in the text (paths like `/work` included), and
+ * `text_mention` for any user picked from a member list. In a chat shared by several
+ * instances, treating either as “someone called me” turns ordinary talk into a knock for
+ * all of them, so each branch has to check whom the entity points at.
+ */
 export function isMentioned(m: TgMessage, me: BotIdentity): boolean {
   const text = m.text ?? m.caption ?? "";
+  const handle = `@${me.username.toLowerCase()}`;
   for (const e of m.entities ?? []) {
-    if (e.type === "mention" || e.type === "text_mention") {
-      const mentioned = text.slice(e.offset, e.offset + e.length);
-      if (mentioned.toLowerCase() === `@${me.username.toLowerCase()}`) return true;
-      if (e.type === "text_mention") return true;
+    const token = text.slice(e.offset, e.offset + e.length);
+    if (e.type === "mention") {
+      if (token.toLowerCase() === handle) return true;
     }
-    if (e.type === "bot_command") return true;
+    if (e.type === "text_mention") {
+      if (e.user?.id === me.id) return true;
+    }
+    // A bare `/command` in a shared chat answers to nobody in particular: there is no
+    // command handling here anyway, so only `@thisbot` in the token can mean us.
+    if (e.type === "bot_command") {
+      if (token.toLowerCase().includes(handle)) return true;
+    }
   }
-  return text.toLowerCase().includes(`@${me.username.toLowerCase()}`);
+  return text.toLowerCase().includes(handle);
 }
 
 export function isReplyToBot(m: TgMessage, me: BotIdentity): boolean {
