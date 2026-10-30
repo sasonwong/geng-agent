@@ -233,7 +233,9 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是�
 
 1. [@BotFather](https://t.me/BotFather) `/newbot`，名字和头像之后都能改
 2. **群聊必须关 privacy mode**：`/setprivacy` → 选 bot → `Disable`。不关的话它收不到群里的普通
-   消息，只会收到 @ 和命令，而你会以为它坏了
+   消息，只会收到 @ 和命令，而你会以为它坏了。**关完必须把它踢出群再拉回来**——Telegram 只在入群
+   那一刻记 privacy，之后改对已经加入的群不生效，症状和不关一模一样：人说的话照收（所以你不会
+   起疑），别的 bot 说的话只收到指向自己的那几条
 3. `ops` bot 只建一个：daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀
 
 ```bash
@@ -272,6 +274,18 @@ systemctl --user enable --now geng-gateway
 
 验证：`geng gateway --check` 每个 bot 打印 `ok @username`；启动行打印 `allow=N 人`（`0 人` 和
 `不限` 要能一眼看出来）；然后给 bot 发一句话，看 `data/alice/inbox/` 出现文件、`people/` 出现一行。
+
+最后一项只能拿**另一个 bot** 验：人说的话在 privacy 还生效时也会到，自己的账号测不出来。让群里
+另一个 bot 发一条不带 @ 的普通消息，看目标实例的 `inbox/low/` 有没有多出文件：
+
+```bash
+# 群 id 抄 data/_gateway/chats.json；token 从文件读，不上命令行
+node -e 'const b=require("./secrets/bots.json").alice;fetch("https://api.telegram.org/bot"+b.token+"/sendMessage",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({chat_id:-1001234567890,text:"投递自检"})}).then(r=>r.json()).then(j=>console.log(j.ok))'
+ls data/<inst>/inbox/low/     # 空 = privacy 还生效，回第 2 步踢出重拉；有文件 = 通了
+```
+
+对照两个实例的 `message_id` 没有意义：basic group 的编号是按收件人各编一套的，同一条消息在
+两个 bot 那儿是两个数。
 
 投递分两档，这条决定了它会不会被吵：**私聊 / @ / 回复 → 立刻叫醒它**；
 群里的闲话 → 只进 `inbox/low`，等它下次自己看。它可以用 `listen` 自己开四小时窗口，
