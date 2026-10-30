@@ -228,7 +228,8 @@ export async function sendTyping(token: string, chat: number): Promise<void> {
  */
 export function isMentioned(m: TgMessage, me: BotIdentity): boolean {
   const text = m.text ?? m.caption ?? "";
-  const handle = `@${me.username.toLowerCase()}`;
+  const username = me.username.toLowerCase();
+  const handle = `@${username}`;
   for (const e of m.entities ?? []) {
     const token = text.slice(e.offset, e.offset + e.length);
     if (e.type === "mention") {
@@ -238,12 +239,16 @@ export function isMentioned(m: TgMessage, me: BotIdentity): boolean {
       if (e.user?.id === me.id) return true;
     }
     // A bare `/command` in a shared chat answers to nobody in particular: there is no
-    // command handling here anyway, so only `@thisbot` in the token can mean us.
+    // command handling here anyway, so only `@thisbot` in the token can mean us — and
+    // the name has to be the whole name, not a prefix of a longer one.
     if (e.type === "bot_command") {
-      if (token.toLowerCase().includes(handle)) return true;
+      const at = token.indexOf("@");
+      if (at !== -1 && token.slice(at + 1).toLowerCase() === username) return true;
     }
   }
-  return text.toLowerCase().includes(handle);
+  // Telegram usernames are [A-Za-z0-9_], so a name ends where one of those stops:
+  // `@our_bot_2` is a different bot, not ours with a suffix.
+  return new RegExp(`(^|[^a-z0-9_])${handle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9_])`, "i").test(text);
 }
 
 export function isReplyToBot(m: TgMessage, me: BotIdentity): boolean {

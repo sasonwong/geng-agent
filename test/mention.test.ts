@@ -69,3 +69,17 @@ test("a caption is read the same way as a text", () => {
   };
   assert.equal(isMentioned(message, me), false);
 });
+
+test("a command for a longer name is a different bot", () => {
+  // `/cmd@our_bot_2` is not ours: matching a prefix would knock us for another bot's command
+  const text = "/probe@our_bot_2 跑一下";
+  assert.equal(isMentioned(msg(text, [entityOf(text, "/probe@our_bot_2", "bot_command")]), me), false);
+});
+
+test("a bare handle written inside a longer name is not us", () => {
+  assert.equal(isMentioned(msg("@our_bot_2 你在吗"), me), false);
+  assert.equal(isMentioned(msg("mail: alice@our_bot.example"), me), false);
+  // and the real one still counts, at the start, in the middle, with punctuation after
+  assert.equal(isMentioned(msg("@our_bot, 你在吗"), me), true);
+  assert.equal(isMentioned(msg("问一下 @our_bot 这条"), me), true);
+});
