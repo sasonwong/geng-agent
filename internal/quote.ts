@@ -34,7 +34,8 @@ export interface Quoted {
  * the person is answering.
  *
  * The text is kept, not just the id, because the quoted message may be one of its own —
- * outbound message ids are deliberately not stored, so an id alone could not be resolved.
+ * outbound ids are recorded from now on, but older lines were written without them, so an
+ * id alone may point at a line this file cannot name.
  */
 export function quotedOf(
   chatId: number,
