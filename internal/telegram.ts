@@ -79,7 +79,7 @@ export class TelegramError extends Error {
 }
 
 /** 429 and 5xx pass on their own; every other refusal is a fact that will not change. */
-export function retryable(status: number): boolean {
+function retryable(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
