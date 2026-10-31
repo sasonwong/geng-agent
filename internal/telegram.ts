@@ -52,6 +52,8 @@ export interface TgMessage {
   sticker?: TgFileRef;
   voice?: TgFileRef;
   entities?: TgEntity[];
+  /** A caption's entities live here, not in `entities`: Telegram splits the two by field. */
+  caption_entities?: TgEntity[];
   reply_to_message?: {
     message_id?: number;
     from?: { id: number; username?: string; first_name?: string };
@@ -230,7 +232,7 @@ export function isMentioned(m: TgMessage, me: BotIdentity): boolean {
   const text = m.text ?? m.caption ?? "";
   const username = me.username.toLowerCase();
   const handle = `@${username}`;
-  for (const e of m.entities ?? []) {
+  for (const e of [...(m.entities ?? []), ...(m.caption_entities ?? [])]) {
     const token = text.slice(e.offset, e.offset + e.length);
     if (e.type === "mention") {
       if (token.toLowerCase() === handle) return true;

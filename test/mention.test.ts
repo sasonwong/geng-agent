@@ -60,14 +60,26 @@ test("@handle still works, entity or not", () => {
 });
 
 test("a caption is read the same way as a text", () => {
+  // a caption's entities arrive in `caption_entities`, not `entities`: the first version
+  // of this test put them in `entities`, which is a shape Telegram never sends
   const caption = "图里是 /files 的文件";
   const message: TgMessage = {
     message_id: 2,
     chat: { id: -1, type: "group" },
     caption,
-    entities: [entityOf(caption, "/files", "bot_command")],
+    caption_entities: [entityOf(caption, "/files", "bot_command")],
   };
   assert.equal(isMentioned(message, me), false);
+
+  // and addressed the same way as a text, a caption does name us
+  const mine = "/probe@our_bot 图里这个";
+  assert.equal(
+    isMentioned(
+      { ...message, caption: mine, caption_entities: [entityOf(mine, "/probe@our_bot", "bot_command")] },
+      me,
+    ),
+    true,
+  );
 });
 
 test("a command for a longer name is a different bot", () => {
