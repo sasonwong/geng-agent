@@ -489,6 +489,7 @@ git fetch origin && git reset --hard origin/main
 | 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数，不叫醒 |
 | 搜不到东西 | 纸上有「今天还能搜 N 次」吗 | 没有那一行 = `GENG_SEARCH_URL` 没进容器 |
 | 备份说 ok 但 `--list` 是空的 | `geng backup <inst> --list` | rustic 版本不同，成功信息在 stderr、JSON 形状也不同。看落下来的快照，不看成功那行 |
+| 某个 bot 突然不回消息，unit 还 active | `journalctl --user -u geng-gateway`（找「轮询断了」）、`ls data/_ops/outbox` | 401（token 被吊销）/ 409（有 webhook，或同一个 token 有第二个消费者）不会自愈：gateway 杀掉那个 poller，没有别的 bot 就退出、十秒后重试，还有别的 bot 就**要 `reload` 一次才回来**。429 / 5xx / 断网会原地重试。409 先 `deleteWebhook` |
 
 深入一层的顺序固定：`geng doctor <inst>` → `journalctl --user -u geng@<inst>` →
 `data/<inst>/daemon.log` → `data/<inst>/usage/symptoms.log` → 最后才是 session JSONL
