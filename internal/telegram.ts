@@ -65,6 +65,24 @@ export interface TgUpdate {
 
 const API = "https://api.telegram.org";
 
+/**
+ * Telegram answered and refused: the status says whether trying again can ever help.
+ * A dropped connection or a timeout has no status at all, and is not this.
+ */
+export class TelegramError extends Error {
+  override name = "TelegramError";
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** 429 and 5xx pass on their own; every other refusal is a fact that will not change. */
+function retryable(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
 export async function call<T>(
   token: string,
   method: string,
@@ -82,9 +100,14 @@ export async function call<T>(
   try {
     body = JSON.parse(text);
   } catch {
+    // Not a Bot API answer at all: a proxy, a captive portal, a body cut short. That is the
+    // kind of failure that can pass on its own, so it stays a plain Error and getUpdates
+    // returns an empty batch. Only a status Telegram itself typed can be permanent.
     throw new Error(`${method}: HTTP ${response.status} ${text.slice(0, 200)}`);
   }
-  if (!body.ok) throw new Error(`${method}: ${body.description ?? `HTTP ${response.status}`}`);
+  if (!body.ok) {
+    throw new TelegramError(`${method}: ${body.description ?? `HTTP ${response.status}`}`, response.status);
+  }
   return body.result as T;
 }
 
@@ -118,6 +141,12 @@ export async function getUpdates(
     // A deliberate abort is not: a reload is stopping this poller, and the loop above
     // has to be allowed to end.
     if (signal?.aborted) throw err;
+    // Nor is a refusal that will be identical next tick: 401 (token revoked), 409 (a
+    // webhook is set, or another consumer holds the token), 400. Swallowing those is the
+    // runtime twin of the hole #36 closed at startup: the process stays up, the poller
+    // stays in the map, and the bot is mute with nothing in journald or ops. Rethrowing
+    // kills the poller, which logs it and exits, and the unit retries.
+    if (err instanceof TelegramError && !retryable(err.status)) throw err;
     return [];
   }
 }

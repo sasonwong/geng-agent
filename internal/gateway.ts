@@ -476,7 +476,11 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const ac = new AbortController();
     const done = poll(key, ac.signal).catch((err: unknown) => {
       if (ac.signal.aborted) return;
-      const line = `${key} 的轮询断了：${(err as Error).message}`;
+      // this entry is still in the map here, so more than one means another bot is alive;
+      // exitIfIdle will then not exit, and nothing else ever restarts this one
+      const line = `${key} 的轮询断了：${(err as Error).message}${
+        pollers.size > 1 ? "（别的 bot 还在跑，它要 reload 一次才回来）" : ""
+      }`;
       log(line);
       // the same fact in the only place a person looks: journald alone is not a signal
       writeOps(ops, "gateway", line);
