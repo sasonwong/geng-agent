@@ -39,6 +39,7 @@ function fixture(): {
     filesUsedBytes: 0,
     filesCapMb: 500,
     inbox: [],
+    lowInbox: [],
     mutes: {},
     longGap: false,
     hint: null,
@@ -371,4 +372,68 @@ test("mail is counted with its senders, and never pretends to have woken it", ()
   assert.doesNotMatch(text, /还没回的/);
   assert.doesNotMatch(text, /群里的/);
   assert.equal(buildPacket(f.input({})).includes("邮件"), false, "没有邮件时一个字都不提");
+});
+
+test("ambient chatter is counted once, and is not pointed at inbox/", () => {
+  const { input } = fixture();
+  // measured on a real waking: 1 message in inbox/, 27 in inbox/low/, and a page that
+  // said "有人在跟你说话：28 条，在 /inbox/" and then "还有 27 条不叫醒你的" — the same
+  // 27 added twice, under a path that holds one file
+  const low = Array.from({ length: 27 }, (_, i) => ({
+    id: `${i + 2}`,
+    file: `${i + 2}.json`,
+    text: "闲话",
+    from: "telegram:@someone",
+    chat: -1001234567890,
+  }));
+  const text = buildPacket(
+    input({
+      reason: "knock",
+      inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you", chat: 111 }, ...low],
+      lowInbox: low,
+      lowPending: 27,
+    }),
+  );
+  // one message, one chat: no phantom second person invented by the ambient half
+  assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
+  assert.match(text, /还有 27 条不叫醒你的在 \/inbox\/low\/（群里的闲话）。/);
+  assert.doesNotMatch(text, /有人在跟你说话：28 条|（2 个人）/);
+});
+
+test("a waking that carried only ambient chatter does not claim anybody is talking to it", () => {
+  const { input } = fixture();
+  const low = [
+    { id: "2", file: "2.json", text: "闲话", from: "telegram:@someone", chat: -1001234567890 },
+  ];
+  const text = buildPacket(input({ reason: "knock", inbox: low, lowInbox: low, lowPending: 1 }));
+  assert.doesNotMatch(text, /有人在跟你说话：/);
+  assert.match(text, /还有 1 条不叫醒你的在 \/inbox\/low\/（群里的闲话）。/);
+  // the last line still tells the truth about who is there, ambient included
+  assert.match(text, /现在有人在跟你说话/);
+});
+
+test("an unreadable file in inbox/low hides nothing that did arrive", () => {
+  const { input } = fixture();
+  // lowPending counts file names, lowInbox only what parses. A corrupt neighbour must
+  // not make a message that arrived look absent.
+  const text = buildPacket(
+    input({
+      reason: "knock",
+      inbox: [{ id: "1", file: "1.json", text: "在吗", from: "telegram:@you", chat: 111 }],
+      lowInbox: [],
+      lowPending: 3,
+    }),
+  );
+  assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
+  assert.match(text, /还有 3 条不叫醒你的在 \/inbox\/low\/（群里的闲话）。/);
+});
+
+test("a message on disk in both dirs is the knock, not ambient", () => {
+  const { input } = fixture();
+  // `<chat>-<message_id>.json` can be in inbox/ and inbox/low/ at once: a crash between
+  // writing it and recording the offset, then a routing change, delivers it twice. Root
+  // wins, so the page must not go quiet about a message that did knock.
+  const one = { id: "7", file: "7.json", text: "在吗", from: "telegram:@you", chat: 111 };
+  const text = buildPacket(input({ reason: "knock", inbox: [one, one], lowInbox: [one], lowPending: 1 }));
+  assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
 });

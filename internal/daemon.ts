@@ -366,7 +366,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
     // Read without consuming: the messages stay on disk (and inside the container's
     // read-only /state/inbox) until this wake has actually finished with them.
-    const inbox = [...peekInbox(paths.inbox), ...peekInbox(paths.inboxLow)];
+    const lowInbox = peekInbox(paths.inboxLow);
+    const inbox = [...peekInbox(paths.inbox), ...lowInbox];
     if (inbox.length > 0) reason = "knock";
 
     const nowMs = Date.now();
@@ -405,6 +406,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       filesUsedBytes: filesUsed.bytes,
       filesCapMb: policy.files.maxMb,
       inbox,
+      lowInbox,
       mutes: readMutes(paths.mute, nowMs),
       lastSaid: meta.lastSaid ?? null,
       lastCycle: meta.lastCycle ?? null,

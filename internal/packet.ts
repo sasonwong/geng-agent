@@ -29,7 +29,10 @@ export interface PacketInput {
   /** Where the read-only auxiliary mounts appear inside the container. */
   inboxPath: string;
   peoplePath: string;
+  /** Every message handed over this waking: the knock first, then the ambient. */
   inbox: InboxMsg[];
+  /** The ambient slice of `inbox`, so the two may be counted apart. */
+  lowInbox: InboxMsg[];
   /** Mutes that are still in force, shown as state — they do not change delivery. */
   mutes: Record<string, { until?: string | null }>;
   /** The previous waking died mid-flight. */
@@ -222,7 +225,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
+  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
 
   const out: string[] = [];
 
@@ -280,12 +283,21 @@ export function buildPacket(input: PacketInput): string {
     out.push("", `还没回的：${shown.join("、")}${more}。`);
   }
   if (thread) out.push("", ...renderThread(thread, peoplePath));
-  if (inbox.length > 0) {
+  // Only the knock lives in inbox/; the ambient chatter is in inbox/low/. Reporting the
+  // whole of `inbox` under the root path is what let a page say
+  // "有人在跟你说话：28 条，在 /inbox/" over a directory holding one file, and then count
+  // the same 28 a second time in the low line underneath.
+  // `inbox` is the knock first and the ambient after it (see PacketInput), so the part
+  // that belongs to inbox/ is what the low peek did not supply. Slicing rather than
+  // filtering by file name keeps a message that is on disk in both places — a crash
+  // between the write and the offset, then a routing change — counted as the knock it was.
+  const loud = inbox.slice(0, inbox.length - lowInbox.length);
+  if (loud.length > 0) {
     // the thread block above shows one conversation; say how many people are actually
     // waiting, or the page quietly privileges whoever spoke last
-    const people = new Set(inbox.map((m) => m.chat).filter((c) => typeof c === "number"));
+    const people = new Set(loud.map((m) => m.chat).filter((c) => typeof c === "number"));
     const who = people.size > 1 ? `（${people.size} 个人）` : "";
-    out.push("", `有人在跟你说话：${inbox.length} 条${who}，在 ${inboxPath}/。`);
+    out.push("", `有人在跟你说话：${loud.length} 条${who}，在 ${inboxPath}/。`);
   }
   // Files are counted, never described: what is in them is the agent's business to look at.
   const kinds = new Map<string, number>();
