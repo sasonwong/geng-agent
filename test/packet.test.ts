@@ -427,3 +427,13 @@ test("an unreadable file in inbox/low hides nothing that did arrive", () => {
   assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
   assert.match(text, /还有 3 条不叫醒你的在 \/inbox\/low\/（群里的闲话）。/);
 });
+
+test("a message on disk in both dirs is the knock, not ambient", () => {
+  const { input } = fixture();
+  // `<chat>-<message_id>.json` can be in inbox/ and inbox/low/ at once: a crash between
+  // writing it and recording the offset, then a routing change, delivers it twice. Root
+  // wins, so the page must not go quiet about a message that did knock.
+  const one = { id: "7", file: "7.json", text: "在吗", from: "telegram:@you", chat: 111 };
+  const text = buildPacket(input({ reason: "knock", inbox: [one, one], lowInbox: [one], lowPending: 1 }));
+  assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
+});

@@ -287,8 +287,11 @@ export function buildPacket(input: PacketInput): string {
   // whole of `inbox` under the root path is what let a page say
   // "有人在跟你说话：28 条，在 /inbox/" over a directory holding one file, and then count
   // the same 28 a second time in the low line underneath.
-  const ambientFiles = new Set(lowInbox.map((m) => m.file));
-  const loud = inbox.filter((m) => !ambientFiles.has(m.file));
+  // `inbox` is the knock first and the ambient after it (see PacketInput), so the part
+  // that belongs to inbox/ is what the low peek did not supply. Slicing rather than
+  // filtering by file name keeps a message that is on disk in both places — a crash
+  // between the write and the offset, then a routing change — counted as the knock it was.
+  const loud = inbox.slice(0, inbox.length - lowInbox.length);
   if (loud.length > 0) {
     // the thread block above shows one conversation; say how many people are actually
     // waiting, or the page quietly privileges whoever spoke last
