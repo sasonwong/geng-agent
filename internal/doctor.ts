@@ -302,6 +302,9 @@ const PROBE = [
   [
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
     'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
+    // the tools are a mount now, so "they are not there" is a silent state: nothing
+    // crashes, the agent just wakes up with fewer things it can do
+    'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l)"',
     // the positive control: without it, "everything blocked" passes every check below
     'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
@@ -327,6 +330,9 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   }
 
   const command = buildCommand(o, policy, "geng-doctor-probe", "probe", [], PROBE);
+  const onHost = existsSync(o.extensions)
+    ? readdirSync(o.extensions).filter((f) => f.endsWith(".ts")).length
+    : 0;
   const out = await new Promise<string>((resolve) => {
     const p = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "pipe"] });
     let text = "";
@@ -341,6 +347,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     p.on("error", () => resolve(`PROBE_FAILED ${String(p.spawnfile)}`));
     p.on("close", () => resolve(text));
   });
+  const inContainer = Number(/EXT_COUNT=(\d+)/.exec(out)?.[1] ?? -1);
 
   checks.push({
     name: "容器能上网",
@@ -354,6 +361,13 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     ok: out.includes("POLICY_HIDDEN"),
     detail: out.includes("POLICY_VISIBLE") ? "容器里能看到 policy.json —— 它不该在自己的书里读规则" : "看不见",
   });
+  const detail =
+    inContainer === onHost && onHost > 0
+      ? `${onHost} 个`
+      : inContainer < 0
+        ? "容器里看不到 /opt/geng/extensions"
+        : `宿主 image/extensions 里 ${onHost} 个，容器里 ${inContainer} 个`;
+  checks.push({ name: "工具挂载", ok: inContainer === onHost && onHost > 0, detail });
   checks.push({
     name: "云元数据不可达",
     ok: out.includes("META_BLOCKED"),

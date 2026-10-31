@@ -43,6 +43,18 @@ test("the tools are loaded from outside the agent's home", () => {
   assert.match(joined, /-e \/opt\/geng\/extensions\/mail\.ts/);
 });
 
+test("the tools are mounted, not baked, so editing one needs no rebuild", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  const { args } = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []);
+  // without :ro the agent could rewrite the tool that decides how it speaks to people
+  assert.notEqual(
+    args.indexOf(`${paths.extensions}:/opt/geng/extensions:ro`),
+    -1,
+    "扩展没有以只读挂载进容器：改一个工具又得重建镜像，或者它能改自己的嘴",
+  );
+});
+
 test("every -e value is really passed to docker as an env var", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const p = defaultPolicy();

@@ -32,8 +32,9 @@ export function packageVersion(root: string): string | null {
  */
 export function describeEnvChange(before: Env | undefined, now: Env): string | null {
   if (!before) return null; // first waking: nothing to compare against
-  // Only the image matters: it is what carries the tool list. A program update that
-  // does not rebuild the image changes how it is woken, which it experiences directly.
+  // Only the image matters: it carries pi and the toolchain. A program update that does
+  // not rebuild the image changes how it is woken, and a tool edit shows up in the tool
+  // list — both of which it experiences directly.
   const image = (before.imageId ?? null) !== (now.imageId ?? null);
   const tools = (before.search ?? false) !== (now.search ?? false);
   return image || tools ? "环境变了。" : null;

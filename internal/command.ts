@@ -92,6 +92,11 @@ export function buildCommand(
       // own book, so the mailbox is nothing it can delete or rewrite
       "-v",
       `${paths.mail}:/mail:ro`,
+      // the tools come from the checkout, not from an image layer: read-only, at the same
+      // absolute path the image used to copy them to, so `@earendil-works/pi-ai` keeps
+      // resolving. Read-only is the point — it must not be able to rewrite how it speaks.
+      "-v",
+      `${paths.extensions}:/opt/geng/extensions:ro`,
       "-v",
       `${paths.workspace}:/work`,
       "-w",
