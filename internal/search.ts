@@ -28,11 +28,18 @@ export interface SearchEnv {
  * A line like `GENG_SEARCH_DAILY=` carries no number, and `Number("")` is 0 — which the
  * quota then reads as "no searches today", silently, forever. An empty value means the
  * file does not carry that key: fall through to the environment, then to the default.
+ *
+ * A trailing note goes too: `docs/install.md` itself writes `GENG_SEARCH_DAILY=200   # 改
+ * 了不用重启`, and `EnvironmentFile=` hands that whole line over as the value. A number
+ * that stops being a number falls back *silently*, so this is the one reading worth being
+ * tolerant about; a mangled `GENG_SEARCH_BIND` fails loudly at listen time instead.
  */
 function limitOf(file: Record<string, string>, key: string, fallback: number): number {
   for (const raw of [file[key], process.env[key]]) {
-    if (raw === undefined || raw.trim() === "") continue;
-    const n = Number(raw.trim());
+    if (raw === undefined) continue;
+    const text = raw.replace(/\s+#.*$/, "").trim();
+    if (text === "") continue;
+    const n = Number(text);
     if (Number.isFinite(n)) return n;
   }
   return fallback;

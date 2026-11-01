@@ -57,6 +57,21 @@ test("an empty quota line means unset — not a quota of zero", () => {
   }
 });
 
+test("a trailing note on the quota line is the note's problem, not the quota's", () => {
+  // docs/install.md:346 writes the line with a note after it; `EnvironmentFile=` keeps the
+  // note in the value, so trimming alone leaves `200   # …`, which is not a finite number
+  // and used to be dropped in favour of the default — the operator's 300 silently becoming 200.
+  const f = fixture();
+  try {
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=300   # 少搜点\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 300);
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=  # 300\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 111); // comment-only counts as empty, not as 300
+  } finally {
+    f.restore();
+  }
+});
+
 test("the quota the agent is shown uses the same reading of an empty line", () => {
   const f = fixture();
   const instance = join(f.root, "instance.env");
