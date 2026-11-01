@@ -302,8 +302,9 @@ const PROBE = [
   [
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
     'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
-    // the tools are a mount now, so "they are not there" is a silent state: nothing
-    // crashes, the agent just wakes up with fewer things it can do
+    // the tools are a mount now, so "they are not there" is not a quiet degradation:
+    // pi is started with one -e per file, and a missing file makes it exit 1 — the
+    // wake dies instead of waking up with fewer things it can do
     'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l)"',
     // the positive control: without it, "everything blocked" passes every check below
     'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
