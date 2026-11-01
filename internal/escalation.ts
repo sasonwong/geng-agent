@@ -83,6 +83,22 @@ export function parkNotice(prev: Escalation, next: Escalation): string | null {
   return `连着 ${next.streak} 轮没有结果（${next.detail || label}），定时唤醒已经停了；再敲它一下还能醒。`;
 }
 
+/**
+ * The other line a person needs, for a failure that never reaches the parked rung: a
+ * round cut at the wall. Its cut record only reaches the agent itself, on the next page
+ * (packet.ts cutLine) — from the outside, a round killed mid-sentence looks exactly like
+ * one that finished and had nothing to say, and the words it was writing never arrive.
+ *
+ * Once per run of timeouts, for the same reason parkNotice is once: if the wall keeps
+ * being hit, the streak is the daemon's business until it parks, and four lines saying
+ * "cut again" teach the reader to skip the one that matters.
+ */
+export function timeoutNotice(prev: Escalation, next: Escalation): string | null {
+  if (next.symptom !== "timeout") return null;
+  if (prev.symptom === "timeout" && prev.streak > 0) return null;
+  return "有一轮跑到时间上限被杀了：做到一半，话可能没说完。不是出错，也不是没事，下一轮会接着看。";
+}
+
 function describe(symptom: Symptom, result?: { repeat?: { name: string; count: number } | null; durationMs?: number }): string {
   if (symptom === "repeat" && result?.repeat) {
     return `${result.repeat.name} 同样的参数重复了 ${result.repeat.count} 次`;

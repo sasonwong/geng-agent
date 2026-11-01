@@ -46,7 +46,7 @@ import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
-import { advance, loadEscalation, parkNotice, planFor, saveEscalation, type Escalation, type Plan } from "./escalation.ts";
+import { advance, loadEscalation, parkNotice, planFor, saveEscalation, timeoutNotice, type Escalation, type Plan } from "./escalation.ts";
 
 const POLL_MS = 5_000;
 const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
@@ -606,7 +606,14 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
     // the timer just stopped for good: say it once, where a person looks
     const notice = parkNotice(before, escalation);
-    if (notice) writeOps(ops, `daemon@${paths.instance}`, notice);
+    if (notice) {
+      writeOps(ops, `daemon@${paths.instance}`, notice);
+    } else {
+      // a round cut at the wall never reaches the parked rung on its own, but it is just
+      // as invisible from the outside; the parked line above already says more, if it fired
+      const cut = timeoutNotice(before, escalation);
+      if (cut) writeOps(ops, `daemon@${paths.instance}`, cut);
+    }
     if (escalation.level >= 3) {
       log(`  → 下一轮按第 ${escalation.level} 档（${escalation.symptom ? SYMPTOM_LABEL[escalation.symptom] : "?"}，连续 ${escalation.streak} 次）`);
     }
