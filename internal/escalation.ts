@@ -65,6 +65,24 @@ export function planFor(e: Escalation): Plan {
   }
 }
 
+/**
+ * The one line here that is not for the agent: the rung where the timer stops.
+ * `ops` is the only place a person looks, so it is said on the crossing into the
+ * parked rung and not on every later failure — level 4 repeats for as long as the
+ * streak lasts, and one line per failure would be noise for the only reader who
+ * can act on it. A knock still gets through, which is the part worth saying.
+ *
+ * It has to be the crossing, not "level >= 5": advance() caps the level at 4, so a
+ * test for a higher rung can never fire and the instance goes quiet unannounced.
+ */
+export function parkNotice(prev: Escalation, next: Escalation): string | null {
+  if (planFor(prev).parked || !planFor(next).parked) return null;
+  const label = next.symptom ? SYMPTOM_LABEL[next.symptom] : "上一轮";
+  // ops tags the line with the mouth that said it ([daemon@alice]); repeating the
+  // name here would be the same word twice in one sentence.
+  return `连着 ${next.streak} 轮没有结果（${next.detail || label}），定时唤醒已经停了；再敲它一下还能醒。`;
+}
+
 function describe(symptom: Symptom, result?: { repeat?: { name: string; count: number } | null; durationMs?: number }): string {
   if (symptom === "repeat" && result?.repeat) {
     return `${result.repeat.name} 同样的参数重复了 ${result.repeat.count} 次`;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advance, planFor, type Escalation } from "../internal/escalation.ts";
+import { advance, parkNotice, planFor, type Escalation } from "../internal/escalation.ts";
 import { classify } from "../internal/symptoms.ts";
 import type { RpcResult } from "../internal/rpc.ts";
 
@@ -78,4 +78,39 @@ test("the first failure only tells it what happened", () => {
   assert.equal(e.detail, "bash 同样的参数重复了 3 次");
   assert.equal(planFor(e).parked, false);
   assert.equal(planFor(e).backoff, 1);
+});
+
+test("the parked rung is announced once, on the way in, where a person looks", () => {
+  let e = FRESH;
+  const notices: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    const before = e;
+    e = advance(e, "start-failed");
+    const n = parkNotice(before, e);
+    if (n !== null) notices.push(n);
+  }
+  // the rung repeats for as long as the streak lasts; the line must not
+  assert.equal(notices.length, 1);
+  const [first] = notices;
+  assert.ok(first !== undefined);
+  assert.match(first, /连着 4 轮没有结果（没起来）/);
+  // the way back in is the part the reader can act on
+  assert.match(first, /再敲它一下还能醒/);
+});
+
+test("levels below the parked rung, and getting well again, are not announced", () => {
+  let e = FRESH;
+  for (let i = 0; i < 3; i++) {
+    const before = e;
+    e = advance(e, "empty");
+    assert.equal(parkNotice(before, e), null);
+  }
+  const before = e;
+  e = advance(e, "empty");
+  assert.equal(e.level, 4);
+  assert.notEqual(parkNotice(before, e), null);
+  // waking is not news, and it resets the streak
+  const ok = advance(e, "ok");
+  assert.equal(parkNotice(e, ok), null);
+  assert.equal(ok.streak, 0);
 });
