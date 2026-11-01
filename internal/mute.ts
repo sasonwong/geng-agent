@@ -23,7 +23,11 @@ export function readMutes(file: string, nowMs: number): MuteMap {
   return active;
 }
 
-/** `*` silences everything ambient; `dm` and `chat:<id>` are narrower. */
+/**
+ * `*` silences everything ambient; `dm` and `chat:<id>` are narrower — but `route()`
+ * settles dm / mention / reply before it ever reads this, so only `*` and a group's
+ * `chat:<id>` can bite (see `keyCanMute`).
+ */
 export function isMuted(
   mutes: MuteMap,
   opts: { chatId: number; isDm: boolean },
@@ -33,6 +37,16 @@ export function isMuted(
     if (mutes[key]) return { muted: true, key };
   }
   return { muted: false, key: null };
+}
+
+/**
+ * The only mute keys that can change anything: ambient group talk. `route()` decides dm,
+ * mention and reply *before* it looks at `muted`, so a `dm` entry is state that looks like
+ * a silence and is not one. The page and the mute tool both read this so neither of them
+ * announces a silence that does not exist.
+ */
+export function keyCanMute(key: string): boolean {
+  return key === "*" || /^chat:-?\d+$/.test(key);
 }
 
 export interface OutboxItem {

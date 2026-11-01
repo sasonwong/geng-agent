@@ -6,6 +6,7 @@ import { excerpt, readJson, readText } from "./state.ts";
 import { KIND_WORD } from "./attach.ts";
 import { localClock } from "./time.ts";
 import { formatDuration } from "./schedule.ts";
+import { keyCanMute } from "./mute.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -141,7 +142,8 @@ function renderAttention(
 }
 
 function renderMutes(mutes: Record<string, { until?: string | null }>): string | null {
-  const entries = Object.entries(mutes);
+  // a key that cannot bite is not a silence: printing it would make the page vouch for it
+  const entries = Object.entries(mutes).filter(([key]) => keyCanMute(key));
   if (entries.length === 0) return null;
   const parts = entries.map(([key, m]) => (m.until ? `${key}（到 ${m.until}）` : key));
   return `你静音了 ${parts.join("、")}。这不改变投递：私聊和点名照样叫醒你。`;

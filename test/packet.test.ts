@@ -252,6 +252,17 @@ test("a mute is stated as state, and says plainly that it changes nothing", () =
   assert.doesNotMatch(buildPacket(input({ mutes: {} })), /静音/);
 });
 
+test("a mute key that route() never reads is not printed as a silence", () => {
+  const { input } = fixture();
+  // `dm` was written by the old tool and shown by the page, and never silenced anything
+  assert.doesNotMatch(buildPacket(input({ mutes: { dm: { until: "2026-03-02T09:00:00Z" } } })), /静音/);
+  const mixed = buildPacket(
+    input({ mutes: { dm: { until: "2026-03-02T09:00:00Z" }, "*": { until: "2026-03-02T10:00:00Z" } } }),
+  );
+  assert.match(mixed, /你静音了 \*（到 2026-03-02T10:00:00Z）。/);
+  assert.doesNotMatch(mixed, /dm（到/);
+});
+
 test("the page says who is still waiting", () => {
   const text = buildPacket(
     fixture().input({

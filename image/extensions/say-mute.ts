@@ -261,12 +261,36 @@ const muteTool = defineTool({
   parameters: Type.Object({
     target: Type.String({
       description:
-        '要安静的来源："*"（全部环境噪音）、"dm"（私聊）、或 "chat:<id>"——id 就是「能说话的地方」里那些数字，写错等于没静音。',
+        '要安静的来源："*"（全部环境噪音）或 "chat:<id>"——id 就是「能说话的地方」里那些数字。只有群里的闲话能压；私聊、@、回复永远叫醒你，所以 "dm" 不是合法 target。',
     }),
     minutes: Type.Integer({ minimum: 1, maximum: 10080, description: "安静多少分钟。" }),
     why: Type.String({ description: "为什么。会写进你下次醒来的纸上。" }),
   }),
   async execute(_toolCallId, params) {
+    const target = params.target.trim();
+    // The gateway settles dm / mention / reply *before* it looks at mute.json, so those
+    // keys are silence in name only. Refusing beats writing a line that will never do
+    // anything and reporting “安静到 …”. Same rule as keyCanMute() in internal/mute.ts
+    // (this file ships in the image and cannot import from the daemon).
+    if (target === "dm") {
+      return {
+        content: [
+          {
+            type: "text",
+            text: 'dm 静音不起作用，没写：私聊在查静音之前就被判成「叫醒它」。要压群里的闲话用 "chat:<群 id>"，全部环境噪音用 "*"。',
+          },
+        ],
+        details: undefined,
+      };
+    }
+    if (target !== "*" && !/^chat:-?\d+$/.test(target)) {
+      return {
+        content: [
+          { type: "text", text: `不认识的 target：${params.target}。只能是 "*"（全部环境噪音）或 "chat:<id>"（id 是数字）。` },
+        ],
+        details: undefined,
+      };
+    }
     const until = new Date(Date.now() + params.minutes * 60_000).toISOString();
     let current: Record<string, unknown> = {};
     try {
@@ -274,11 +298,11 @@ const muteTool = defineTool({
     } catch {
       current = {};
     }
-    current[params.target] = { until, why: params.why };
+    current[target] = { until, why: params.why };
     writeAtomic(MUTE, JSON.stringify(current, null, 2) + "\n");
     return {
       content: [{ type: "text", text: `安静到 ${until}。` }],
-      details: { target: params.target, until },
+      details: { target, until },
     };
   },
 });
