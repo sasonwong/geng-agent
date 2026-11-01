@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { readSearchEnv, startSearchServer } from "../internal/search.ts";
+import { readSearchEnv, searchQuota, startSearchServer } from "../internal/search.ts";
 
 // systemd loads secrets/search.env with EnvironmentFile=, so by the time any request
 // arrives `process.env` holds the copy from startup. If the environment won, a rotated
@@ -36,6 +36,37 @@ test("the file beats the environment systemd froze at startup", () => {
     const env = readSearchEnv(f.root);
     assert.equal(env?.token, "new");
     assert.equal(env?.dailyLimit, 222);
+  } finally {
+    f.restore();
+  }
+});
+
+test("an empty quota line means unset — not a quota of zero", () => {
+  // Number("") is 0, so `GENG_SEARCH_DAILY=` used to shut search off silently and for good:
+  // every request answered "今天的搜索用完了" and the limit the server enforced was 0 too.
+  const f = fixture();
+  try {
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 111); // the file carries nothing: the environment does
+    delete process.env.GENG_SEARCH_DAILY;
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 200); // and then the code default
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=0\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 0); // a written zero is still a decision
+  } finally {
+    f.restore();
+  }
+});
+
+test("the quota the agent is shown uses the same reading of an empty line", () => {
+  const f = fixture();
+  const instance = join(f.root, "instance.env");
+  writeFileSync(instance, "GENG_SEARCH_URL=http://127.0.0.1:1\n");
+  try {
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=\n");
+    assert.equal(searchQuota(f.root, instance)?.limit, 111);
+    assert.equal(searchQuota(f.root, instance)?.left, 111);
+    delete process.env.GENG_SEARCH_DAILY;
+    assert.equal(searchQuota(f.root, instance)?.limit, 200);
   } finally {
     f.restore();
   }

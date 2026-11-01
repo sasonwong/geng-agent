@@ -24,6 +24,20 @@ export interface SearchEnv {
  * token stayed valid forever) and a quota edit a no-op. The environment is only the
  * fallback for a value the file does not carry.
  */
+/**
+ * A line like `GENG_SEARCH_DAILY=` carries no number, and `Number("")` is 0 — which the
+ * quota then reads as "no searches today", silently, forever. An empty value means the
+ * file does not carry that key: fall through to the environment, then to the default.
+ */
+function limitOf(file: Record<string, string>, key: string, fallback: number): number {
+  for (const raw of [file[key], process.env[key]]) {
+    if (raw === undefined || raw.trim() === "") continue;
+    const n = Number(raw.trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
 export function readSearchEnv(root: string): SearchEnv | null {
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const token = file.GENG_SEARCH_TOKEN ?? process.env.GENG_SEARCH_TOKEN ?? "";
@@ -35,7 +49,7 @@ export function readSearchEnv(root: string): SearchEnv | null {
     token,
     apiKey,
     bind: { host: host || "0.0.0.0", port: Number(port ?? 8787) },
-    dailyLimit: Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200),
+    dailyLimit: limitOf(file, "GENG_SEARCH_DAILY", 200),
   };
 }
 
@@ -65,7 +79,7 @@ export function searchQuota(root: string, instanceEnvFile: string): { limit: num
   if (!searchConfigured(instanceEnvFile)) return null;
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
-  const limit = q.limit ?? Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200);
+  const limit = q.limit ?? limitOf(file, "GENG_SEARCH_DAILY", 200);
   const used = q.day === today() ? (q.count ?? 0) : 0;
   return { limit, left: Math.max(0, limit - used) };
 }
