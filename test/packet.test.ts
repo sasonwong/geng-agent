@@ -174,6 +174,16 @@ test("an empty open-loops directory is stated plainly", () => {
   assert.match(buildPacket(input({})), /没有未闭合的事/);
 });
 
+test("a subdirectory of open-loops is not itself an unfinished thing", () => {
+  // the agent keeps closed ones under `closed/`; counting the directory would make the
+  // page say one more than there is, and the number is the only thing the page says
+  const { input, paths } = fixture();
+  mkdirSync(join(paths.openLoops, "closed"), { recursive: true });
+  writeText(join(paths.openLoops, "一件.md"), "x");
+  writeText(join(paths.openLoops, "closed", "已闭.md"), "x");
+  assert.match(buildPacket(input({})), /未闭合的事：1 件/);
+});
+
 test("a conversation carries how much was said and when it started", () => {
   const { input } = fixture();
   const text = buildPacket(

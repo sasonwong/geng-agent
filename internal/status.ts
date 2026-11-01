@@ -5,7 +5,8 @@ import { listSessionFiles } from "./command.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy } from "./policy.ts";
 import { formatDuration, readWaiting } from "./schedule.ts";
-import { readJson, readText } from "./state.ts";
+import { readText } from "./state.ts";
+import { countLoops } from "./packet.ts";
 import { readMeta, readWakes, DAY_MS } from "./meta.ts";
 import { listSnapshots } from "./backup.ts";
 
@@ -67,7 +68,7 @@ export async function printStatus(root: string, instance: string): Promise<void>
   const wait = readWaiting(p.waiting);
 
   const identity = readText(p.identity);
-  const loops = readJson<unknown[]>(p.openLoops, []);
+  const loops = countLoops(p);
   const sessions = listSessionFiles(p.sessionDir);
   const sessionBytes = sessions.reduce((n, f) => n + (statSync(f).size || 0), 0);
   const logTail = (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] ?? "（无）";
@@ -92,7 +93,7 @@ export async function printStatus(root: string, instance: string): Promise<void>
         ]
       : []),
     `  identity    ${identity ? bytes(Buffer.byteLength(identity, "utf8")) : "（未写）"}`,
-    `  未闭合      ${Array.isArray(loops) ? loops.length : 0} 件`,
+    `  未闭合      ${loops} 件`,
     `  session     ${sessions.length} 文件 / ${bytes(sessionBytes)}`,
     `  花费        ${spend.cycles} 轮 · ${spend.tokens} tokens · $${spend.cost.toFixed(4)}`,
     `  快照        ${

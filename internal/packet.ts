@@ -91,11 +91,15 @@ export interface PacketInput {
 
 /**
  * How many, not what. The count comes from the filesystem, so no shape it invents can
- * make the number wrong — one file per unfinished thing.
+ * make the number wrong — one file per unfinished thing. Directories are not unfinished
+ * things: keeping the closed ones under a subdirectory (`closed/`) must not inflate the
+ * number, and a subdirectory is not something that can be closed by deleting one file.
  */
-function countLoops(paths: Paths): number {
+export function countLoops(paths: Paths): number {
   try {
-    return readdirSync(paths.openLoops).filter((f) => !f.startsWith(".")).length;
+    return readdirSync(paths.openLoops, { withFileTypes: true }).filter(
+      (e) => e.isFile() && !e.name.startsWith("."),
+    ).length;
   } catch {
     return 0;
   }
@@ -229,8 +233,9 @@ export function buildPacket(input: PacketInput): string {
 
   const out: string[] = [];
 
-  // Only what changed since last time: the constants live in the system prompt, and the
-  // identity it wrote is its last section there.
+  // Only what changed since last time: the constants live in the system prompt. The
+  // identity is pasted verbatim further down, not in the system prompt (it rewrites that
+  // file whenever it likes; see prompt.ts, which says so out loud).
   const since =
     lastWakeMs === null ? "第一次醒来" : `距上次醒来 ${formatDuration(nowMs - lastWakeMs)}`;
   out.push(`现在：${new Date(nowMs).toISOString()} · ${localClock(nowMs, timezone)} · ${since}`);
