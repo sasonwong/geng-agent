@@ -62,3 +62,24 @@ test("a batch that trips by itself lands once the pause is over", () => {
   // the wire is armed again once that one message is through
   assert.equal(t.check(batch, start + opts.pauseMs + 2000), "repeat");
 });
+
+test("the same sentence gets out after the pause, and does not re-trip", () => {
+  // A pause ends by letting one message through — including an undelivered one whose own
+  // texts are enough to trip the repeat wire; on dev that message never landed.
+  // Two halves: the words get out once, and that pass is free — it does not count against
+  // the sentence that has just gone out (otherwise it mutes again a couple of sentences on).
+  const t = new Tripwire({ ...opts, rate: 999 });
+  const start = 1_000_000;
+  const tripAt = start + 2000;
+  assert.deepEqual(
+    [0, 1, 2].map((i) => t.check(["同一句"], start + i * 1000)),
+    [null, null, "repeat"],
+  );
+  assert.equal(t.check(["同一句"], start + 5000), "paused");
+  // the pause is over: the words go out
+  assert.equal(t.check(["同一句"], tripAt + opts.pauseMs + 1), null);
+  // and that pass is free: three more of the same sentence get through, the fourth trips
+  assert.equal(t.check(["同一句"], tripAt + opts.pauseMs + 2001), null);
+  assert.equal(t.check(["同一句"], tripAt + opts.pauseMs + 4001), null);
+  assert.equal(t.check(["同一句"], tripAt + opts.pauseMs + 6001), "repeat");
+});
