@@ -81,8 +81,9 @@ deploy/build.sh                          # 镜像：node + pi + 它的工具链�
 daemon 在宿主上跑，容器只装 pi 和它的工具链。
 
 扩展（`say`/`mute`/`forget`/`listen`/`mail`/`web_search`）在 `image/extensions/`，构建时**不进镜像**，
-运行时只读挂载到 `/opt/geng/extensions`。所以改一个工具只要存盘：下一轮醒来读到的就是新文件，
-既不用重建镜像，纸上的「环境变了」也不会响（那一行只说镜像变了）。
+运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是这个目录里的**每一个 `.ts`**。所以改一个
+工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
+「环境变了」也不会响（那一行只说镜像变了）。
 
 容器里改不了、删不了这些文件——工具必须不可变，否则它就能改自己和人对谈的方式。
 **实例也不能写自己的扩展**：扩展跑在 pi 进程里，而任何一个扩展加载失败都会让 pi 直接退出——
@@ -493,7 +494,7 @@ git fetch origin && git reset --hard origin/main
 | 没有 `daemon.log` 这一行，但状态里有一轮 | `ls -l data/<inst>/daemon.log` | 它是**目录**：容器挂载把不存在的路径建成了目录 |
 | unit 127，每十秒一次 | unit 里的 `@NODE@` | node 绝对路径错（nvm 不在 systemd 的 PATH 里） |
 | 容器压根没起来，日志里也没有一轮 | 手工跑一遍完整的 `docker run` | argv 里少了一个 `-e`（比如 `TZ=…` 没带 `-e`，docker 会把它当镜像名） |
-| 工具不见了 | `geng doctor <inst>` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（缺变量时它**不注册**自己） |
+| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（缺变量时它**不注册**自己） |
 | 它不回复，但进程正常 | `docker ps`、`daemon.log` 最后一行的用时 | 一轮还在跑（一轮可以跑 30 分钟）；或者它**选择了不说**——只有 `say` 会送出去，正文不会 |
 | 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数，不叫醒 |
 | 搜不到东西 | 纸上有「今天还能搜 N 次」吗 | 没有那一行 = `GENG_SEARCH_URL` 没进容器 |
