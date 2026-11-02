@@ -16,6 +16,8 @@ git pull --ff-only
 # restart daemons and the gateway if they are installed; a fresh clone has neither
 systemctl --user restart --all 'geng@*' 2>/dev/null || true
 systemctl --user restart geng-gateway 2>/dev/null || true
+# the quota reader lives in geng-search, so a search.ts fix is invisible until it restarts
+systemctl --user restart geng-search 2>/dev/null || true
 
 echo "更新完成：镜像 $(git rev-parse --short HEAD) 起的那份代码。"
 echo "下一次醒来会读到『环境变了』。"
