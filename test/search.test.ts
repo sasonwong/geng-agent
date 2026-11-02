@@ -110,3 +110,31 @@ test("a token rotated in the file is the one the endpoint accepts", async () => 
     f.restore();
   }
 });
+
+test("a quota file left at zero by an earlier run is not a permanent verdict", async () => {
+  // The bug writes `limit: 0` into usage/search.json on every start. An upgrade must not
+  // inherit that verdict: the endpoint rewrites the file from the limit it is actually
+  // enforcing, and a `null` (what JSON.stringify(NaN) leaves behind) reads as unset.
+  const f = fixture();
+  let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
+  const usage = join(f.root, "data", "_ops", "usage", "search.json");
+  const instance = join(f.root, "instance.env");
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    mkdirSync(join(f.root, "data", "_ops", "usage"), { recursive: true });
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_BIND=127.0.0.1:0\nGENG_SEARCH_DAILY=\n");
+    delete process.env.GENG_SEARCH_DAILY;
+    writeFileSync(instance, "GENG_SEARCH_URL=http://127.0.0.1:1\n");
+    writeFileSync(usage, JSON.stringify({ day, count: 0, limit: 0 }));
+    assert.equal(searchQuota(f.root, instance)?.left, 0); // before: the old zero wins
+    const env = readSearchEnv(f.root);
+    assert.ok(env);
+    server = await startSearchServer({ root: f.root, env, log: () => {} });
+    assert.deepEqual(searchQuota(f.root, instance), { limit: 200, left: 200 });
+    writeFileSync(usage, JSON.stringify({ day, count: 0, limit: null }));
+    assert.equal(searchQuota(f.root, instance)?.limit, 200); // NaN written as null = unset
+  } finally {
+    server?.close();
+    f.restore();
+  }
+});
