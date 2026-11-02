@@ -224,7 +224,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     return w;
   };
 
-  /** Tripwires look only at shape — rate, length, repetition. Never at meaning. */
+  /** Tripwires look only at shape — rate and repetition. Never at meaning. */
   const trip = (key: string, texts: string[]): string | null => {
     const w = watchFor(key);
     const verdict = w.check(texts, Date.now());

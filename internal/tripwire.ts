@@ -18,8 +18,11 @@ export interface TripwireOptions {
 
 export class Tripwire {
   private times: number[] = [];
-  private texts: string[] = [];
+  /** What it said, and when: the count is a window, not a buffer that keeps old words. */
+  private said: { text: string; at: number }[] = [];
   private pausedUntil = 0;
+  /** One message is let through as a pause ends; see `check`. */
+  private free = false;
   private readonly windowMs: number;
   private readonly rate: number;
   private readonly repeat: number;
@@ -35,19 +38,31 @@ export class Tripwire {
   /** `null` means go ahead. Nothing is recorded while paused. */
   check(texts: string[], now: number): Trip {
     if (now < this.pausedUntil) return "paused";
+    if (this.free) {
+      // A pause ends by letting one message through. The rate window empties itself while
+      // the pause runs, but the sweep hands an undelivered message back with its own
+      // texts: a batch already long enough to trip the repeat wire would trip it on every
+      // retry, that message would never land, and — the wire being per bot — the instance
+      // would never speak again. The words are not destroyed; they wait for this one pass.
+      this.free = false;
+      return null;
+    }
     this.times = this.times.filter((t) => now - t < this.windowMs);
     this.times.push(now);
+    this.said = this.said.filter((s) => now - s.at < this.windowMs);
     for (const t of texts) {
-      this.texts.push(t);
-      if (this.texts.length > 40) this.texts.shift();
+      this.said.push({ text: t, at: now });
+      if (this.said.length > 40) this.said.shift();
     }
     if (this.times.length > this.rate) {
       this.pausedUntil = now + this.pauseMs;
+      this.free = true;
       return "rate";
     }
-    const last = this.texts[this.texts.length - 1];
-    if (last !== undefined && this.texts.filter((t) => t === last).length >= this.repeat) {
+    const last = this.said[this.said.length - 1]?.text;
+    if (last !== undefined && this.said.filter((s) => s.text === last).length >= this.repeat) {
       this.pausedUntil = now + this.pauseMs;
+      this.free = true;
       return "repeat";
     }
     return null;
