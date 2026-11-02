@@ -60,7 +60,7 @@
 | 文件 | 谁写 | 约束 |
 |---|---|---|
 | `identity.md` | 它 | 硬上限 1~2KB |
-| `open-loops.json` | 它 | 带年龄 |
+| `open-loops/` | 它 | 一件一个文件 |
 | `waiting.json` | 它 | 下次什么时候醒 + 为什么 |
 | `journal/` | 它 | 索引也是它自己的 |
 | `intent.json` `world.json` | daemon | write-ahead / 世界快照 |
