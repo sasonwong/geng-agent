@@ -50,7 +50,8 @@ export interface PacketInput {
   /** The timezone its container runs in, so the page and its own `date` agree. */
   timezone: string;
   /** Where it may speak, so a window can be rendered with the names it knows. */
-  places: { id: number; label: string; home: boolean }[];
+  /** `kind` is what knownPlaces() read from chats.json: a dm can never be muted. */
+  places: { id: number; label: string; home: boolean; kind?: "private" | "group" }[];
   /** A window it opened itself with `listen`; past its end it is not shown at all. */
   attention: { chats: (number | "*")[]; untilMs: number; why?: string } | null;
   /** Where files people sent it live; injected so neither runner hardcodes a path. */
@@ -141,9 +142,17 @@ function renderAttention(
   return `你在听：${names.join("、")} 的全部消息，到 ${localClock(a.untilMs, timezone)} 为止。`;
 }
 
-function renderMutes(mutes: Record<string, { until?: string | null }>): string | null {
-  // a key that cannot bite is not a silence: printing it would make the page vouch for it
-  const entries = Object.entries(mutes).filter(([key]) => keyCanMute(key));
+function renderMutes(
+  mutes: Record<string, { until?: string | null }>,
+  places: { id: number; kind?: "private" | "group" }[],
+): string | null {
+  // a key that cannot bite is not a silence: printing it would make the page vouch for it.
+  // `dm` is settled before mute is read, and so is `chat:<私聊 id>` — route() returns dm
+  // first, so only a group's chat id (or `*`) can ever take effect.
+  const dms = new Set(places.filter((p) => p.kind === "private").map((p) => p.id));
+  const entries = Object.entries(mutes).filter(
+    ([key]) => keyCanMute(key) && !(key.startsWith("chat:") && dms.has(Number(key.slice("chat:".length)))),
+  );
   if (entries.length === 0) return null;
   const parts = entries.map(([key, m]) => (m.until ? `${key}（到 ${m.until}）` : key));
   return `你静音了 ${parts.join("、")}。这不改变投递：私聊和点名照样叫醒你。`;
@@ -170,7 +179,7 @@ function whoLine(inbox: InboxMsg[]): string {
 
 /** The rare-changing half of the picture: where it may speak, and its own knobs. */
 export function systemFacts(
-  places: { id: number; label: string; home: boolean }[],
+  places: { id: number; label: string; home: boolean; kind?: "private" | "group" }[],
   policyLine: string,
   capMinutes: number,
 ): string {
@@ -344,7 +353,7 @@ export function buildPacket(input: PacketInput): string {
       mailPending.senders.length === 0 ? "" : `，来自 ${mailPending.senders.join("、")}`;
     out.push(`邮件：${mailPending.count} 封没处理${first}${who}，在 ${mailPath}/。`);
   }
-  const muteLine = renderMutes(mutes);
+  const muteLine = renderMutes(mutes, places);
   const attentionLine = renderAttention(attention, places, timezone, nowMs);
   if (muteLine) out.push(muteLine);
   if (attentionLine) out.push(attentionLine);
