@@ -46,7 +46,7 @@ import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
-import { advance, loadEscalation, planFor, saveEscalation, type Escalation, type Plan } from "./escalation.ts";
+import { advance, loadEscalation, parkNotice, planFor, saveEscalation, timeoutNotice, type Escalation, type Plan } from "./escalation.ts";
 
 const POLL_MS = 5_000;
 const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
@@ -540,6 +540,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         [...inbox.map((m) => m.file), ...read],
       );
     }
+    const before = escalation;
     escalation = advance(escalation, symptom, result);
     saveEscalation(paths, escalation);
 
@@ -603,12 +604,15 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         `${new Date().toISOString()} ${symptom} lvl=${escalation.level} ${escalation.detail}`,
       );
     }
-    if (escalation.level >= 5) {
-      writeOps(
-        ops,
-        `daemon@${paths.instance}`,
-        `连续 ${escalation.streak} 轮没有结果（${escalation.detail}），下一轮按第 ${escalation.level} 档处理。`,
-      );
+    // the timer just stopped for good: say it once, where a person looks
+    const notice = parkNotice(before, escalation);
+    if (notice) {
+      writeOps(ops, `daemon@${paths.instance}`, notice);
+    } else {
+      // a cut round is just as invisible from the outside; on the fourth in a row the
+      // parked line above already says more, so only the first one gets its own
+      const cut = timeoutNotice(before, escalation);
+      if (cut) writeOps(ops, `daemon@${paths.instance}`, cut);
     }
     if (escalation.level >= 3) {
       log(`  → 下一轮按第 ${escalation.level} 档（${escalation.symptom ? SYMPTOM_LABEL[escalation.symptom] : "?"}，连续 ${escalation.streak} 次）`);

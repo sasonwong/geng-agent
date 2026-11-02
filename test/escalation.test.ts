@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advance, planFor, type Escalation } from "../internal/escalation.ts";
+import { advance, parkNotice, planFor, timeoutNotice, type Escalation } from "../internal/escalation.ts";
 import { classify } from "../internal/symptoms.ts";
 import type { RpcResult } from "../internal/rpc.ts";
 
@@ -78,4 +78,71 @@ test("the first failure only tells it what happened", () => {
   assert.equal(e.detail, "bash 同样的参数重复了 3 次");
   assert.equal(planFor(e).parked, false);
   assert.equal(planFor(e).backoff, 1);
+});
+
+test("the parked rung is announced once, on the way in, where a person looks", () => {
+  let e = FRESH;
+  const notices: string[] = [];
+  for (let i = 0; i < 6; i++) {
+    const before = e;
+    e = advance(e, "start-failed");
+    const n = parkNotice(before, e);
+    if (n !== null) notices.push(n);
+  }
+  // the rung repeats for as long as the streak lasts; the line must not
+  assert.equal(notices.length, 1);
+  const [first] = notices;
+  assert.ok(first !== undefined);
+  assert.match(first, /连着 4 轮没有结果（没起来）/);
+  // the way back in is the part the reader can act on
+  assert.match(first, /再敲它一下还能醒/);
+});
+
+test("levels below the parked rung, and getting well again, are not announced", () => {
+  let e = FRESH;
+  for (let i = 0; i < 3; i++) {
+    const before = e;
+    e = advance(e, "empty");
+    assert.equal(parkNotice(before, e), null);
+  }
+  const before = e;
+  e = advance(e, "empty");
+  assert.equal(e.level, 4);
+  assert.notEqual(parkNotice(before, e), null);
+  // waking is not news, and it resets the streak
+  const ok = advance(e, "ok");
+  assert.equal(parkNotice(e, ok), null);
+  assert.equal(ok.streak, 0);
+});
+
+test("a round cut at the wall is said once per run, not once per cut", () => {
+  let e = FRESH;
+  const first = advance(e, "timeout");
+  // the first cut is news: nothing else tells the reader that the words stopped
+  assert.match(timeoutNotice(e, first) ?? "", /跑到时间上限被杀了/);
+  // and the second one in the same run is not: the streak is the daemon's business now
+  const second = advance(first, "timeout");
+  assert.equal(timeoutNotice(first, second), null);
+  // a different symptom is not a timeout, and a clean round ends the run
+  const ok = advance(second, "ok");
+  assert.equal(timeoutNotice(second, ok), null);
+  assert.equal(ok.streak, 0);
+  // the next cut after a clean round is news again
+  assert.notEqual(timeoutNotice(ok, advance(ok, "timeout")), null);
+});
+
+test("a run of cuts says one thing until it parks, and the parked line says the rest", () => {
+  // four cuts in a row: the first is the only one worth a line, and the fourth parks it
+  let e = FRESH;
+  const said: string[] = [];
+  for (let i = 0; i < 4; i++) {
+    const before = e;
+    e = advance(e, "timeout");
+    const park = parkNotice(before, e);
+    const cut = park === null ? timeoutNotice(before, e) : null;
+    if (park !== null) said.push("park");
+    if (cut !== null) said.push("cut");
+  }
+  assert.deepEqual(said, ["cut", "park"]);
+  assert.equal(e.level, 4);
 });
