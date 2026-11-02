@@ -22,17 +22,31 @@
 | node 的**绝对路径** | systemd 的 PATH 里没有 nvm；`env node` 会让 unit 每十秒以 127 退出 | `command -v node` 记下来 |
 | docker + 当前用户在 `docker` 组 | 每轮醒来是一个 `--rm` 容器 | `docker ps`（不是 `sudo docker ps`） |
 | `rustic`、`flock`、`rsync` | 备份、单实例锁、迁移 | `rustic --version`、`flock --help` |
-| `deploy/egress.sh` | 建 `agent-net`，封掉元数据地址和私网段 | 见下 |
+| `deploy/egress.sh` | 建 `agent-net`，封掉元数据地址和私网段；装成 `geng-egress` unit 才活得过重启 | `sudo iptables -S DOCKER-USER \| grep br-`（有输出才算装上） |
 
 **docker 组要重新登录一次才生效。** 刚 `usermod -aG docker` 完就 `docker ps` 会报 socket 权限，
 那不是装错了。
 
 ### egress 规则
 
+规则只存在于 iptables 里，**重启就没了，而且没了不报错**：容器照常工作，只是元数据地址和私网段
+又通了。所以它装成 system unit（要 root，不是 user unit），每次开机重新写一遍：
+
 ```bash
-sudo deploy/egress.sh          # 建 agent-net，写 DOCKER-USER 规则
-docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
+cd ~/geng-agent
+sed -e "s|@ROOT@|$PWD|g" deploy/geng-egress.service \
+  | sudo tee /etc/systemd/system/geng-egress.service >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now geng-egress
+sudo iptables -S DOCKER-USER | grep br-        # 有输出 = 规则真的在
+systemctl is-enabled geng-egress               # enabled = 下次开机会重写
 ```
+
+`sudo systemctl reload geng-egress` 重跑一次（改过 `egress.sh` 之后用它）；全部撤掉用
+`sudo systemctl disable --now geng-egress` 加 `sudo iptables -F DOCKER-USER`。
+
+脚本在网络在、但网桥还没有地址时以 1 退出，unit 随之变红：那一刻搜索端点那条例外写不出来，
+只剩 DROP 的话容器能上网、搜不了，而且没有任何报错。
 
 它做三件事，顺序有意义：**先**封云元数据地址和私网段（`10/8`、`172.16/12`、`192.168/16`），
 **再**放行 80/443/53，**最后**一条兜底 DROP。顺序反了（比如用 `-I` 逐条插到最前面），兜底会先命中，
@@ -40,7 +54,6 @@ docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
 
 - 规则**只作用于 `-i br-<agent-net 的 id>`**，所以同机跑别的服务不受影响
 - 重跑是安全的：它先删掉提到这个网桥的规则再按顺序重加，不会叠
-- 想全部撤掉：`sudo iptables -F DOCKER-USER`
 - 如果容器里的 agent 需要够到宿主机上的**一个**服务（比如搜索端点），那是脚本里单独一条
   按端口的例外，写在 DROP 之前。**不要**为了省事把整段私网放开
 
@@ -295,7 +308,7 @@ node cmd/geng/index.ts bots allow alice rm 222222222
 
 | 字段 | 意思 |
 |---|---|
-| `chat` | 主动说话默认发到哪个会话。不写就记第一个跟它说话的会话——**所以先对 bot 说一句话** |
+| `chat` | 主动说话默认发到哪个会话。不写就记第一个跟它说话的会话——**所以先对 bot 说一句话**。`ops` 没有「第一条消息」可等：daemon 和 gateway 的运维消息正是借它发出来的，所以必须写死一个，不写 `geng doctor` 就报「没有 chat，运维消息发不出去」 |
 | `listen` | `all`（默认）群里的闲话进 `inbox/low`；`mentions` 表示群里的闲话直接丢掉 |
 | `allow` | 只让名单上的人碰它。**不写 = 不限制**，`[]` = 谁都不能进来，只剩它自己的闹钟 |
 
@@ -527,7 +540,7 @@ secrets/bots.json        每个实例一个 bot（token 就是路由键）
 secrets/search.env       搜索端点的 token、绑定地址、每日限额
 secrets/mail.json/.env   信箱的地址映射和收信 token
 secrets/rustic.env       备份口令——丢了快照就没了
-deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  egress.sh  mail-worker/
+deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-egress.service  egress.sh  mail-worker/
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
