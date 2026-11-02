@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { printStatus } from "../internal/status.ts";
@@ -23,6 +23,7 @@ test("status counts open loops the way the page does: files, not the old JSON sh
     await printStatus(root, "alice");
   } finally {
     console.log = old;
+    rmSync(root, { recursive: true, force: true });
   }
   assert.match(lines.join("\n"), /未闭合\s+1 件/);
 });
