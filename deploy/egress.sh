@@ -36,9 +36,14 @@ add() {
 # agent cannot search at all — which would leave the agent guessing URLs.
 SEARCH_PORT="${SEARCH_PORT:-8787}"
 GW=$(ip -4 -o addr show "$BR" | awk '{print $4}' | cut -d/ -f1 | head -1)
-if [ -n "$GW" ]; then
-  add -d "$GW" -p tcp --dport "$SEARCH_PORT" -j RETURN
+# Without the gateway there is no exception to write, and the DROPs below would take
+# the search endpoint away with them — silently, since the rules still apply. Refuse
+# to half-apply instead: the unit is then visible as failed.
+if [ -z "$GW" ]; then
+  echo "没有 $BR 的地址：$BRIDGE 的网桥还没建好，规则没有装" >&2
+  exit 1
 fi
+add -d "$GW" -p tcp --dport "$SEARCH_PORT" -j RETURN
 
 # the cloud metadata service is the classic credential-theft path
 add -d 169.254.0.0/16 -j DROP
