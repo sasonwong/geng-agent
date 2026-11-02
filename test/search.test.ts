@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { readSearchEnv, startSearchServer } from "../internal/search.ts";
+import { readSearchEnv, searchQuota, startSearchServer } from "../internal/search.ts";
 
 // systemd loads secrets/search.env with EnvironmentFile=, so by the time any request
 // arrives `process.env` holds the copy from startup. If the environment won, a rotated
@@ -41,6 +41,52 @@ test("the file beats the environment systemd froze at startup", () => {
   }
 });
 
+test("an empty quota line means unset — not a quota of zero", () => {
+  // Number("") is 0, so `GENG_SEARCH_DAILY=` used to shut search off silently and for good:
+  // every request answered "今天的搜索用完了" and the limit the server enforced was 0 too.
+  const f = fixture();
+  try {
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 111); // the file carries nothing: the environment does
+    delete process.env.GENG_SEARCH_DAILY;
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 200); // and then the code default
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=0\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 0); // a written zero is still a decision
+  } finally {
+    f.restore();
+  }
+});
+
+test("a trailing note on the quota line is the note's problem, not the quota's", () => {
+  // docs/install.md:346 writes the line with a note after it; `EnvironmentFile=` keeps the
+  // note in the value, so trimming alone leaves `200   # …`, which is not a finite number
+  // and used to be dropped in favour of the default — the operator's 300 silently becoming 200.
+  const f = fixture();
+  try {
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=300   # 少搜点\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 300);
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=  # 300\n");
+    assert.equal(readSearchEnv(f.root)?.dailyLimit, 111); // comment-only counts as empty, not as 300
+  } finally {
+    f.restore();
+  }
+});
+
+test("the quota the agent is shown uses the same reading of an empty line", () => {
+  const f = fixture();
+  const instance = join(f.root, "instance.env");
+  writeFileSync(instance, "GENG_SEARCH_URL=http://127.0.0.1:1\n");
+  try {
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_DAILY=\n");
+    assert.equal(searchQuota(f.root, instance)?.limit, 111);
+    assert.equal(searchQuota(f.root, instance)?.left, 111);
+    delete process.env.GENG_SEARCH_DAILY;
+    assert.equal(searchQuota(f.root, instance)?.limit, 200);
+  } finally {
+    f.restore();
+  }
+});
+
 test("a token rotated in the file is the one the endpoint accepts", async () => {
   const f = fixture();
   let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
@@ -59,6 +105,34 @@ test("a token rotated in the file is the one the endpoint accepts", async () => 
     };
     assert.equal(await post("old"), 401);
     assert.equal(await post("new"), 404);
+  } finally {
+    server?.close();
+    f.restore();
+  }
+});
+
+test("a quota file left at zero by an earlier run is not a permanent verdict", async () => {
+  // The bug writes `limit: 0` into usage/search.json on every start. An upgrade must not
+  // inherit that verdict: the endpoint rewrites the file from the limit it is actually
+  // enforcing, and a `null` (what JSON.stringify(NaN) leaves behind) reads as unset.
+  const f = fixture();
+  let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
+  const usage = join(f.root, "data", "_ops", "usage", "search.json");
+  const instance = join(f.root, "instance.env");
+  const day = new Date().toISOString().slice(0, 10);
+  try {
+    mkdirSync(join(f.root, "data", "_ops", "usage"), { recursive: true });
+    writeFileSync(join(f.root, "secrets", "search.env"), "GENG_SEARCH_TOKEN=new\nDEEPSEEK_API_KEY=sk-test\nGENG_SEARCH_BIND=127.0.0.1:0\nGENG_SEARCH_DAILY=\n");
+    delete process.env.GENG_SEARCH_DAILY;
+    writeFileSync(instance, "GENG_SEARCH_URL=http://127.0.0.1:1\n");
+    writeFileSync(usage, JSON.stringify({ day, count: 0, limit: 0 }));
+    assert.equal(searchQuota(f.root, instance)?.left, 0); // before: the old zero wins
+    const env = readSearchEnv(f.root);
+    assert.ok(env);
+    server = await startSearchServer({ root: f.root, env, log: () => {} });
+    assert.deepEqual(searchQuota(f.root, instance), { limit: 200, left: 200 });
+    writeFileSync(usage, JSON.stringify({ day, count: 0, limit: null }));
+    assert.equal(searchQuota(f.root, instance)?.limit, 200); // NaN written as null = unset
   } finally {
     server?.close();
     f.restore();
