@@ -60,8 +60,8 @@ systemctl is-enabled geng-egress               # enabled = 下次开机会重写
 验证（两条都要，缺一条就说明规则位置错了）：
 
 ```bash
-docker run --rm geng-agent:latest sh -lc 'curl -sS -m 5 -o /dev/null -w "%{http_code}\n" https://api.github.com'   # 应该出 200/301
-docker run --rm geng-agent:latest sh -lc 'curl -sS -m 5 http://169.254.169.254/ ; echo exit=$?'                    # 应该超时
+docker run --rm --network agent-net geng-agent:latest sh -lc 'curl -sS -m 5 -o /dev/null -w "%{http_code}\n" https://api.github.com'   # 应该出 200/301
+docker run --rm --network agent-net geng-agent:latest sh -lc 'curl -sS -m 5 http://169.254.169.254/ ; echo exit=$?'                    # 应该超时
 ```
 
 > 「连不上」和「被封住」在容器里长得一样。所以在 `geng doctor <inst> --probe` 里有一个
