@@ -42,18 +42,12 @@ export function writeFakeState(p: Paths, o: FakeOptions = {}): string[] {
     [p.identity, () => writeText(p.identity, identityFor(p.instance))],
     [
       p.openLoops,
-      () =>
-        writeJson(p.openLoops, [
-          {
-            title: "弄清那个没人写过的问题",
-            since: new Date(Date.now() - 26 * 3600_000).toISOString(),
-            state: "查过两次，没有结论",
-          },
-          {
-            title: "把 /work 里那个半成品收尾",
-            since: new Date(Date.now() - 3 * 3600_000).toISOString(),
-          },
-        ]),
+      () => {
+        // one file per unfinished thing, the shape the page and `geng status` count
+        ensureDirs([p.openLoops]);
+        writeText(join(p.openLoops, "弄清那个没人写过的问题.md"), "查过两次，没有结论\n");
+        writeText(join(p.openLoops, "把那个半成品收尾.md"), "还没开始\n");
+      },
     ],
     [p.journalIndex, () => writeText(p.journalIndex, INDEX)],
     [join(p.journal, "2026-03-03.md"), () => writeText(join(p.journal, "2026-03-03.md"), JOURNAL)],

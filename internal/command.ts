@@ -24,6 +24,25 @@ function localEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * Which files the container loads as extensions: whatever the mounted directory carries.
+ * It was three hardcoded paths, so a fourth tool was mounted into the container and never
+ * loaded — and nothing said so, while the page and the docs promise "add a tool, save it".
+ * Sorted, so argv does not depend on readdir order.
+ */
+function extensionArgs(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".ts"))
+      .map((e) => e.name)
+      .sort()
+      .flatMap((f) => ["-e", `/opt/geng/extensions/${f}`]);
+  } catch {
+    // no checkout at all: `geng doctor --probe` has a count check for that
+    return [];
+  }
+}
+
 export function buildCommand(
   paths: Paths,
   policy: Policy,
@@ -92,6 +111,11 @@ export function buildCommand(
       // own book, so the mailbox is nothing it can delete or rewrite
       "-v",
       `${paths.mail}:/mail:ro`,
+      // the tools come from the checkout, not from an image layer: read-only, at the same
+      // absolute path the image used to copy them to, so `@earendil-works/pi-ai` keeps
+      // resolving. Read-only is the point — it must not be able to rewrite how it speaks.
+      "-v",
+      `${paths.extensions}:/opt/geng/extensions:ro`,
       "-v",
       `${paths.workspace}:/work`,
       "-w",
@@ -110,12 +134,7 @@ export function buildCommand(
         sessionId,
         "--system-prompt",
         systemPrompt,
-        "-e",
-        "/opt/geng/extensions/say-mute.ts",
-        "-e",
-        "/opt/geng/extensions/websearch.ts",
-        "-e",
-        "/opt/geng/extensions/mail.ts",
+        ...extensionArgs(paths.extensions),
       ]),
     );
     return { cmd: "docker", args, env: process.env, cwd: paths.workspace };

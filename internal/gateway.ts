@@ -118,7 +118,7 @@ export function noteChat(chats: Chats, chat: KnownChat, id: number, seen: boolea
 export function knownPlaces(
   root: string,
   key: string,
-): { id: number; label: string; home: boolean }[] {
+): { id: number; label: string; home: boolean; kind: "private" | "group" }[] {
   const chats = readChats(join(root, "data", "_gateway", "chats.json"))[key];
   if (!chats) return [];
   const home = chats.home;
@@ -126,6 +126,7 @@ export function knownPlaces(
     id: Number(id),
     label: c.kind === "private" ? `私聊${c.who ? ` ${c.who}` : ""}` : `群「${c.title ?? id}」`,
     home: Number(id) === home,
+    kind: c.kind,
   }));
 }
 
@@ -224,7 +225,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     return w;
   };
 
-  /** Tripwires look only at shape — rate, length, repetition. Never at meaning. */
+  /** Tripwires look only at shape — rate and repetition. Never at meaning. */
   const trip = (key: string, texts: string[]): string | null => {
     const w = watchFor(key);
     const verdict = w.check(texts, Date.now());

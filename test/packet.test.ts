@@ -174,6 +174,16 @@ test("an empty open-loops directory is stated plainly", () => {
   assert.match(buildPacket(input({})), /没有未闭合的事/);
 });
 
+test("a subdirectory of open-loops is not itself an unfinished thing", () => {
+  // the agent keeps closed ones under `closed/`; counting the directory would make the
+  // page say one more than there is, and the number is the only thing the page says
+  const { input, paths } = fixture();
+  mkdirSync(join(paths.openLoops, "closed"), { recursive: true });
+  writeText(join(paths.openLoops, "一件.md"), "x");
+  writeText(join(paths.openLoops, "closed", "已闭.md"), "x");
+  assert.match(buildPacket(input({})), /未闭合的事：1 件/);
+});
+
 test("a conversation carries how much was said and when it started", () => {
   const { input } = fixture();
   const text = buildPacket(
@@ -250,6 +260,39 @@ test("a mute is stated as state, and says plainly that it changes nothing", () =
   assert.match(text, /你静音了 chat:-1001234（到 2026-03-02T09:00:00Z）/);
   assert.match(text, /不改变投递/);
   assert.doesNotMatch(buildPacket(input({ mutes: {} })), /静音/);
+});
+
+test("a mute key that route() never reads is not printed as a silence", () => {
+  const { input } = fixture();
+  // `dm` was written by the old tool and shown by the page, and never silenced anything
+  assert.doesNotMatch(buildPacket(input({ mutes: { dm: { until: "2026-03-02T09:00:00Z" } } })), /静音/);
+  const mixed = buildPacket(
+    input({ mutes: { dm: { until: "2026-03-02T09:00:00Z" }, "*": { until: "2026-03-02T10:00:00Z" } } }),
+  );
+  assert.match(mixed, /你静音了 \*（到 2026-03-02T10:00:00Z）。/);
+  assert.doesNotMatch(mixed, /dm（到/);
+});
+
+test("a chat id that names a private chat is a silence in name only, like dm", () => {
+  const { input } = fixture();
+  // route() returns dm before it looks at mute.json, so `chat:<私聊 id>` cannot bite either;
+  // the page has the kinds (knownPlaces) and must not vouch for it
+  const places = [
+    { id: 111, label: "私聊 张三", home: true, kind: "private" as const },
+    { id: -1001234567890, label: "群「测试」", home: false, kind: "group" as const },
+  ];
+  const text = buildPacket(
+    input({
+      places,
+      mutes: {
+        "chat:111": { until: "2026-03-02T10:00:00Z" },
+        "chat:-1001234567890": { until: "2026-03-02T11:00:00Z" },
+      },
+    }),
+  );
+  // the group one is real: it is the only shape that reaches the muted branch
+  assert.match(text, /你静音了 chat:-1001234567890（到 2026-03-02T11:00:00Z）。/);
+  assert.doesNotMatch(text, /chat:111（到/);
 });
 
 test("the page says who is still waiting", () => {

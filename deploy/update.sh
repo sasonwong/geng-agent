@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Pull the program, rebuild the image, restart whatever is running it.
 #
-# The image is what carries its tools, and every waking starts a fresh container
-# from `geng-agent:latest` — so rebuilding is the whole update. Nothing restarts
-# the running agent mid-cycle: the daemon picks the new image up on its next waking,
-# and the wake paper says the environment changed.
+# The image carries pi and the toolchain; the tools themselves are mounted from the
+# checkout, so an edit to one needs no rebuild. Every waking still starts a fresh
+# container from `geng-agent:latest`, so a Dockerfile change lands on the next waking,
+# and the wake paper says the environment changed. Nothing restarts the running agent
+# mid-cycle.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -16,6 +17,8 @@ git pull --ff-only
 # restart daemons and the gateway if they are installed; a fresh clone has neither
 systemctl --user restart --all 'geng@*' 2>/dev/null || true
 systemctl --user restart geng-gateway 2>/dev/null || true
+# the quota reader lives in geng-search, so a search.ts fix is invisible until it restarts
+systemctl --user restart geng-search 2>/dev/null || true
 
 echo "更新完成：镜像 $(git rev-parse --short HEAD) 起的那份代码。"
-echo "下一次醒来会读到『环境变了』。"
+echo "下一次醒来：镜像换过就会读到『环境变了』；只改了 daemon 或 image/extensions/ 里的工具则不会。"

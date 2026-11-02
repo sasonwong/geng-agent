@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readdirSync, readSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
@@ -263,17 +263,38 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     checks.push({ name: "data 未被 git 跟踪", ok: true, detail: "不是 git 仓库，跳过", warnOnly: true });
   }
 
-  const keyish = scanForSecrets(p.data);
+  // Two checks, because a key is not always a file: one pasted into a log stays a *line*.
+  const keyish = keyFiles(p.data).join(", ");
   checks.push({
-    name: "data 里没有 key",
+    name: "data 里没有 key 文件",
     ok: keyish === "",
     detail: keyish === "" ? "干净" : keyish,
+  });
+
+  const scan = scanLogBodies(p.data);
+  const leaked = scan.hits.join(", ");
+  checks.push({
+    name: "日志里没有 key 形状",
+    ok: leaked === "",
+    // 只警告不 FAIL：老日志里的旧 token 删不掉也轮换不回去，一个永远红的检查会被当成背景噪音。
+    warnOnly: true,
+    detail:
+      leaked !== ""
+        ? `${leaked}${scan.more > 0 ? `（另有 ${scan.more} 处没列出）` : ""} —— 先换掉那个 token；删日志不会让它变回没泄过`
+        : scan.truncated.length > 0
+          // 「干净」不带这个后缀就是一句假话：再往前的字节没人看过
+          ? `干净（${scan.truncated.join("、")} 超过 8 MiB，只看了最后 8 MiB）`
+          : "干净",
   });
 
   return checks;
 }
 
-function scanForSecrets(dir: string): string {
+/** Directories that never hold config of ours and are huge: walking them only costs time. */
+const SKIP_DIRS = new Set(["seen", "node_modules", ".git"]);
+
+/** Key-shaped *file names* under data/. A token pasted into a log has another shape: see scanLogBodies. */
+export function keyFiles(dir: string): string[] {
   const hits: string[] = [];
   const walk = (d: string) => {
     let entries;
@@ -285,15 +306,90 @@ function scanForSecrets(dir: string): string {
     for (const e of entries) {
       const full = join(d, e.name);
       if (e.isDirectory()) {
-        if (e.name === "seen") continue;
-        walk(full);
+        if (!SKIP_DIRS.has(e.name)) walk(full);
       } else if (/\.(env|pem|key)$/.test(e.name)) {
         hits.push(full);
       }
     }
   };
   walk(dir);
-  return hits.join(", ");
+  return hits;
+}
+
+/** A token in a log is worth finding: this is where a retry prints the URL that failed.
+ *
+ * 这七条是从 `tools/gate/patterns.mjs` 的凭据表里选出来的（那份表是每次合并前跑的门）。
+ * 没搬过来的那些是赋值形状（`TOKEN=…`、`Bearer …`、连接串）：日志里天天有，一条见谁都报的
+ * 检查最后就没人看了。那边加了凭据形状，这里也该加。
+ */
+const SECRET_SHAPES: Array<[RegExp, string]> = [
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "私钥"],
+  [/\bgh[pousr]_[A-Za-z0-9]{36,}/, "GitHub token"],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}/, "GitHub token"],
+  [/\bsk-[A-Za-z0-9_-]{20,}/, "sk- 形状的 key"],
+  [/\bxox[baprs]-[A-Za-z0-9-]{10,}/, "Slack token"],
+  [/\bAKIA[0-9A-Z]{16}\b/, "AWS access key"],
+  [/\b\d{8,10}:[A-Za-z0-9_-]{35}\b/, "Telegram bot token"],
+];
+
+/** daemon.log is appended to forever and never rotated: read the tail, not the file. */
+const LOG_TAIL_LIMIT = 8 * 1024 * 1024;
+
+function tailText(file: string): { text: string; truncated: boolean } | null {
+  try {
+    const size = statSync(file).size;
+    if (size <= LOG_TAIL_LIMIT) return { text: readFileSync(file, "utf8"), truncated: false };
+    const fd = openSync(file, "r");
+    try {
+      const buf = Buffer.alloc(LOG_TAIL_LIMIT);
+      const read = readSync(fd, buf, 0, LOG_TAIL_LIMIT, size - LOG_TAIL_LIMIT);
+      return { text: buf.subarray(0, read).toString("utf8"), truncated: true };
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** What the scan found, and what it could not see: a lenient reader must not call that clean. */
+export interface LogScan {
+  hits: string[];
+  /** Logs bigger than the tail limit, by name: only their last 8 MiB was read. */
+  truncated: string[];
+  /** Hits the cap kept out of `hits`. */
+  more: number;
+}
+
+export function scanLogBodies(dir: string): LogScan {
+  const hits: string[] = [];
+  const truncated: string[] = [];
+  const walk = (d: string) => {
+    let entries;
+    try {
+      entries = readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(full);
+        continue;
+      }
+      if (!e.name.endsWith(".log")) continue;
+      const tail = tailText(full);
+      if (tail === null) continue;
+      if (tail.truncated) truncated.push(e.name);
+      for (const [re, label] of SECRET_SHAPES) {
+        const n = tail.text.match(new RegExp(re, "g"))?.length ?? 0;
+        if (n > 0) hits.push(`${full}: ${label}${n > 1 ? ` ×${n}` : ""}`);
+      }
+    }
+  };
+  walk(dir);
+  // the detail is one line in a doctor table: ten is already more than anyone reads
+  return { hits: hits.slice(0, 10), truncated, more: Math.max(0, hits.length - 10) };
 }
 
 const PROBE = [
@@ -302,6 +398,10 @@ const PROBE = [
   [
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
     'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
+    // the tools are a mount now, so "they are not there" is not a quiet degradation:
+    // pi is started with one -e per file, and a missing file makes it exit 1 — the
+    // wake dies instead of waking up with fewer things it can do
+    'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l)"',
     // the positive control: without it, "everything blocked" passes every check below
     'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
@@ -327,6 +427,9 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   }
 
   const command = buildCommand(o, policy, "geng-doctor-probe", "probe", [], PROBE);
+  const onHost = existsSync(o.extensions)
+    ? readdirSync(o.extensions).filter((f) => f.endsWith(".ts")).length
+    : 0;
   const out = await new Promise<string>((resolve) => {
     const p = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "pipe"] });
     let text = "";
@@ -341,6 +444,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     p.on("error", () => resolve(`PROBE_FAILED ${String(p.spawnfile)}`));
     p.on("close", () => resolve(text));
   });
+  const inContainer = Number(/EXT_COUNT=(\d+)/.exec(out)?.[1] ?? -1);
 
   checks.push({
     name: "容器能上网",
@@ -354,6 +458,13 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     ok: out.includes("POLICY_HIDDEN"),
     detail: out.includes("POLICY_VISIBLE") ? "容器里能看到 policy.json —— 它不该在自己的书里读规则" : "看不见",
   });
+  const detail =
+    inContainer === onHost && onHost > 0
+      ? `${onHost} 个`
+      : inContainer < 0
+        ? "容器里看不到 /opt/geng/extensions"
+        : `宿主 image/extensions 里 ${onHost} 个，容器里 ${inContainer} 个`;
+  checks.push({ name: "工具挂载", ok: inContainer === onHost && onHost > 0, detail });
   checks.push({
     name: "云元数据不可达",
     ok: out.includes("META_BLOCKED"),

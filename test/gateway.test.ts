@@ -121,8 +121,8 @@ test("the page is told where it may speak, and which one is the default", () => 
   );
   const places = knownPlaces(root, "alice");
   assert.deepEqual(places, [
-    { id: 111, label: "私聊 telegram:@owner", home: true },
-    { id: -222, label: "群「g」", home: false },
+    { id: 111, label: "私聊 telegram:@owner", home: true, kind: "private" },
+    { id: -222, label: "群「g」", home: false, kind: "group" },
   ]);
 });
 

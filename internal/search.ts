@@ -17,6 +17,27 @@ export interface SearchEnv {
 }
 
 /**
+ * A line like `GENG_SEARCH_DAILY=` carries no number, and `Number("")` is 0 — which the
+ * quota then reads as "no searches today", silently, forever. An empty value means the
+ * file does not carry that key: fall through to the environment, then to the default.
+ *
+ * A trailing note goes too: `docs/install.md` itself writes `GENG_SEARCH_DAILY=200   # 改
+ * 了不用重启`, and `EnvironmentFile=` hands that whole line over as the value. A number
+ * that stops being a number falls back *silently*, so this is the one reading worth being
+ * tolerant about; a mangled `GENG_SEARCH_BIND` fails loudly at listen time instead.
+ */
+function limitOf(file: Record<string, string>, key: string, fallback: number): number {
+  for (const raw of [file[key], process.env[key]]) {
+    if (raw === undefined) continue;
+    const text = raw.replace(/\s+#.*$/, "").trim();
+    if (text === "") continue;
+    const n = Number(text);
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
+/**
  * The file first, the environment second.
  *
  * `geng-search.service` loads the same file with `EnvironmentFile=`, which freezes its
@@ -35,7 +56,7 @@ export function readSearchEnv(root: string): SearchEnv | null {
     token,
     apiKey,
     bind: { host: host || "0.0.0.0", port: Number(port ?? 8787) },
-    dailyLimit: Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200),
+    dailyLimit: limitOf(file, "GENG_SEARCH_DAILY", 200),
   };
 }
 
@@ -65,7 +86,7 @@ export function searchQuota(root: string, instanceEnvFile: string): { limit: num
   if (!searchConfigured(instanceEnvFile)) return null;
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
-  const limit = q.limit ?? Number(file.GENG_SEARCH_DAILY ?? process.env.GENG_SEARCH_DAILY ?? 200);
+  const limit = q.limit ?? limitOf(file, "GENG_SEARCH_DAILY", 200);
   const used = q.day === today() ? (q.count ?? 0) : 0;
   return { limit, left: Math.max(0, limit - used) };
 }

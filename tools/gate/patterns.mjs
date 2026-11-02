@@ -29,7 +29,10 @@
  * makes the documented examples legal. Two sources for one fact drift apart.
  */
 
-const RULES = [
+// 导出是为了让「别处复制了这份表」的地方能有一个可对照的源：internal/doctor.ts 的
+// SECRET_SHAPES 就是其中一处，对照的测试在 test/doctor-keys-parity.test.ts。
+// 别的地方仍然只该用 scanLine()——规则表的形状（`src`/`re` 并存）不是给调用方用的 API。
+export const RULES = [
   // --- 凭据 ---
   { name: "私钥块", sev: "critical", src: String.raw`-----BEGIN [A-Z ]*PRIVATE KEY-----` },
   { name: "AWS AK", sev: "critical", src: String.raw`\bAKIA[0-9A-Z]{16}\b` },

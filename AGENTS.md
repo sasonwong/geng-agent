@@ -51,8 +51,14 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 
 ## 容器里的扩展
 
-`image/extensions/*.ts` 在镜像里被拷进 `~/.pi/agent/extensions/`，不挂载 ——
-它不该能改自己和人对谈用的工具。本地 runner 看不到这些扩展，这是已知差异。
+`image/extensions/*.ts` 从 checkout **只读挂载**到 `/opt/geng/extensions`，用 `-e` 加载，不进镜像。
+改一个工具不用重建镜像：下一轮醒来读到的就是新文件。
+
+**实例不能写自己的扩展。** 扩展跑在 pi 进程里——能读会话、能替换 tool 结果、能改系统提示词——
+而且任何一个扩展加载失败都会让 pi 直接退出：它写错一个文件，下一轮还没醒就死，死前说不出话。
+要新工具就写在唤醒纸上，由操作者写进 `image/extensions/`。
+
+本地 runner 看不到这些扩展，这是已知差异。
 
 ## 写代码时的固定动作
 
