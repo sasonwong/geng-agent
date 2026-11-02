@@ -609,8 +609,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     if (notice) {
       writeOps(ops, `daemon@${paths.instance}`, notice);
     } else {
-      // a round cut at the wall never reaches the parked rung on its own, but it is just
-      // as invisible from the outside; the parked line above already says more, if it fired
+      // a cut round is just as invisible from the outside; on the fourth in a row the
+      // parked line above already says more, so only the first one gets its own
       const cut = timeoutNotice(before, escalation);
       if (cut) writeOps(ops, `daemon@${paths.instance}`, cut);
     }
