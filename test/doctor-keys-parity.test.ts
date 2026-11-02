@@ -67,7 +67,7 @@ function labelsIn(logText: string): string[] {
   const root = mkdtempSync(join(tmpdir(), "geng-parity-"));
   try {
     writeFileSync(join(root, "daemon.log"), logText + "\n");
-    return scanLogBodies(root).map((h) => h.split(": ")[1] ?? "");
+    return scanLogBodies(root).hits.map((h) => h.split(": ")[1] ?? "");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

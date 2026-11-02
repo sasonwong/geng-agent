@@ -38,9 +38,9 @@ test("scanLogBodies: token 粘在日志里也能认出来（这条以前说「�
     );
     writeFileSync(join(r, "usage", "symptoms.log"), "2026-11-01T08:01:00Z timeout lvl=1\n");
   });
-  const hits = scanLogBodies(root);
-  assert.equal(hits.length, 1, hits.join(" | "));
-  assert.match(hits[0] ?? "", /daemon\.log: Telegram bot token$/);
+  const scan = scanLogBodies(root);
+  assert.equal(scan.hits.length, 1, scan.hits.join(" | "));
+  assert.match(scan.hits[0] ?? "", /daemon\.log: Telegram bot token$/);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -58,8 +58,7 @@ test("scanLogBodies: 私钥、GitHub token、sk- 都算形状；普通日志不�
     );
     writeFileSync(join(r, "notes.txt"), "ghp_" + "a".repeat(36));
   });
-  const hits = scanLogBodies(root);
-  const labels = hits.map((h) => h.split(": ")[1] ?? "").sort();
+  const labels = scanLogBodies(root).hits.map((h) => h.split(": ")[1] ?? "").sort();
   assert.deepEqual(labels, ["GitHub token", "sk- 形状的 key", "私钥"].sort());
   rmSync(root, { recursive: true, force: true });
 });
@@ -70,7 +69,7 @@ test("scanLogBodies: .log 以外的正文不看，node_modules 里的 log 也不
     writeFileSync(join(r, "workspace", "node_modules", "pkg", "install.log"), "ghp_" + "c".repeat(36));
     writeFileSync(join(r, "last-output.txt"), "ghp_" + "c".repeat(36));
   });
-  assert.deepEqual(scanLogBodies(root), []);
+  assert.deepEqual(scanLogBodies(root).hits, []);
   rmSync(root, { recursive: true, force: true });
 });
 
@@ -81,6 +80,19 @@ test("scanLogBodies: 大日志只读尾巴，头部那句旧 token 不算（口�
     const tail = "2026-11-01T08:00:00Z round ok\n";
     writeFileSync(join(r, "daemon.log"), head + padding + tail);
   });
-  assert.deepEqual(scanLogBodies(root), []);
+  const scan = scanLogBodies(root);
+  assert.deepEqual(scan.hits, []);
+  // and this is what a person may see: 「干净」 must not cover 「其余的字节没人看过」
+  assert.deepEqual(scan.truncated, ["daemon.log"]);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("scanLogBodies: 报十条就够了，但要说还有几条没列出来", () => {
+  const root = tree((r) => {
+    for (let i = 0; i < 12; i++) writeFileSync(join(r, `${i}.log`), "ghp_" + "e".repeat(36));
+  });
+  const scan = scanLogBodies(root);
+  assert.equal(scan.hits.length, 10);
+  assert.equal(scan.more, 2);
   rmSync(root, { recursive: true, force: true });
 });

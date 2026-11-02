@@ -271,16 +271,20 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     detail: keyish === "" ? "干净" : keyish,
   });
 
-  const leaked = scanLogBodies(p.data).join(", ");
+  const scan = scanLogBodies(p.data);
+  const leaked = scan.hits.join(", ");
   checks.push({
     name: "日志里没有 key 形状",
     ok: leaked === "",
     // 只警告不 FAIL：老日志里的旧 token 删不掉也轮换不回去，一个永远红的检查会被当成背景噪音。
     warnOnly: true,
     detail:
-      leaked === ""
-        ? "干净"
-        : `${leaked} —— 先换掉那个 token；删日志不会让它变回没泄过`,
+      leaked !== ""
+        ? `${leaked}${scan.more > 0 ? `（另有 ${scan.more} 处没列出）` : ""} —— 先换掉那个 token；删日志不会让它变回没泄过`
+        : scan.truncated.length > 0
+          // 「干净」不带这个后缀就是一句假话：再往前的字节没人看过
+          ? `干净（${scan.truncated.join("、")} 超过 8 MiB，只看了最后 8 MiB）`
+          : "干净",
   });
 
   return checks;
@@ -331,15 +335,15 @@ const SECRET_SHAPES: Array<[RegExp, string]> = [
 /** daemon.log is appended to forever and never rotated: read the tail, not the file. */
 const LOG_TAIL_LIMIT = 8 * 1024 * 1024;
 
-function tailText(file: string): string | null {
+function tailText(file: string): { text: string; truncated: boolean } | null {
   try {
     const size = statSync(file).size;
-    if (size <= LOG_TAIL_LIMIT) return readFileSync(file, "utf8");
+    if (size <= LOG_TAIL_LIMIT) return { text: readFileSync(file, "utf8"), truncated: false };
     const fd = openSync(file, "r");
     try {
       const buf = Buffer.alloc(LOG_TAIL_LIMIT);
       const read = readSync(fd, buf, 0, LOG_TAIL_LIMIT, size - LOG_TAIL_LIMIT);
-      return buf.subarray(0, read).toString("utf8");
+      return { text: buf.subarray(0, read).toString("utf8"), truncated: true };
     } finally {
       closeSync(fd);
     }
@@ -348,8 +352,18 @@ function tailText(file: string): string | null {
   }
 }
 
-export function scanLogBodies(dir: string): string[] {
+/** What the scan found, and what it could not see: a lenient reader must not call that clean. */
+export interface LogScan {
+  hits: string[];
+  /** Logs bigger than the tail limit, by name: only their last 8 MiB was read. */
+  truncated: string[];
+  /** Hits the cap kept out of `hits`. */
+  more: number;
+}
+
+export function scanLogBodies(dir: string): LogScan {
   const hits: string[] = [];
+  const truncated: string[] = [];
   const walk = (d: string) => {
     let entries;
     try {
@@ -364,16 +378,18 @@ export function scanLogBodies(dir: string): string[] {
         continue;
       }
       if (!e.name.endsWith(".log")) continue;
-      const text = tailText(full);
-      if (text === null) continue;
+      const tail = tailText(full);
+      if (tail === null) continue;
+      if (tail.truncated) truncated.push(e.name);
       for (const [re, label] of SECRET_SHAPES) {
-        const n = text.match(new RegExp(re, "g"))?.length ?? 0;
+        const n = tail.text.match(new RegExp(re, "g"))?.length ?? 0;
         if (n > 0) hits.push(`${full}: ${label}${n > 1 ? ` ×${n}` : ""}`);
       }
     }
   };
   walk(dir);
-  return hits.slice(0, 10);
+  // the detail is one line in a doctor table: ten is already more than anyone reads
+  return { hits: hits.slice(0, 10), truncated, more: Math.max(0, hits.length - 10) };
 }
 
 const PROBE = [
