@@ -19,4 +19,4 @@ systemctl --user restart --all 'geng@*' 2>/dev/null || true
 systemctl --user restart geng-gateway 2>/dev/null || true
 
 echo "更新完成：镜像 $(git rev-parse --short HEAD) 起的那份代码。"
-echo "下一次醒来会读到『环境变了』。"
+echo "下一次醒来：镜像换过就会读到『环境变了』；只改了 daemon 或 image/extensions/ 里的工具则不会。"
