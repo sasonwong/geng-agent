@@ -482,6 +482,7 @@ deploy/update.sh      # git pull --ff-only + 重建镜像 + 重启已装的 unit
 | `internal/`、`cmd/` | `git pull` + 重启 unit | 直接经历到（不同的纸、不同的行为） |
 | `image/extensions/` | 存盘（`build.sh` 对它没有作用） | 下一轮醒来工具就是新的 |
 | `Dockerfile` | 重建镜像 | 下一张纸开头多一行 `环境变了。` |
+| `<inst>.env` 的 `GENG_SEARCH_URL`（从有到无，或反过来） | 改完重启 unit | 下一张纸开头多一行 `环境变了。` |
 | `deploy/policy.json`（模板） | **没有用**，老实例的 policy 是生成时的副本；要手改 `data/<inst>/policy.json` | — |
 
 最后一行是最容易漏的：模板只是 `init` 的输入。所以升级之后值得跑一次
