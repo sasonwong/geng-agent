@@ -251,6 +251,9 @@ daemon 只读不搬。**消息在这一轮真正跑完之前不动**，跑完了
 
 `mute(target, until, why)` 把来源从 push 压成 pull，消息一条不丢。
 **直接对它说话（@ / 回复 / DM）永远穿透 mute** —— mute 挡的是环境噪音，挡不住有人当面叫它。
+所以 target 只有两个：`"*"`（全部环境噪音）和 `"chat:<id>"`（某个群的闲话）。`"dm"` 不是合法的
+target：`route()` 在查静音之前就把私聊判成“叫醒”，那个键写进去也永远不会生效，工具因此直
+接拒收——一张只说真话的纸不能被一个空转的键骗。
 
 所以没有"解除静音"这条命令，也不需要：直接找它就是解除。人都到你面前了，还要先按一下
 按钮才能被听见，那不叫自主权，那叫逼它看手机。静音也必然到期（`until` 必填），不留永久
@@ -393,7 +396,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | `{schema, runner, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,network}}` |
 | `palimpsest/policy.proposal.json` | 它 | 同一形状，只允许白名单里的键，越界即拒绝 |
 | `palimpsest/waiting.json` | 它 | `{wake:{after:"20m"}\|{at:"ISO"},\ why}` 或 `null` |
-| `palimpsest/mute.json` | 它 | `{"*"\|"dm"\|"chat:<id>": {until:"ISO", why}}` |
+| `palimpsest/mute.json` | 它 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
 | `inbox/*.json` | gateway | `{id, text, from, at, chat, route}` |
 | `outbox/*.json` | 它 | `{id, messages: string[]}` |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?}` |
