@@ -17,14 +17,6 @@ export interface SearchEnv {
 }
 
 /**
- * The file first, the environment second.
- *
- * `geng-search.service` loads the same file with `EnvironmentFile=`, which freezes its
- * contents at start: reading `process.env` first made a token rotation invisible (the old
- * token stayed valid forever) and a quota edit a no-op. The environment is only the
- * fallback for a value the file does not carry.
- */
-/**
  * A line like `GENG_SEARCH_DAILY=` carries no number, and `Number("")` is 0 — which the
  * quota then reads as "no searches today", silently, forever. An empty value means the
  * file does not carry that key: fall through to the environment, then to the default.
@@ -45,6 +37,14 @@ function limitOf(file: Record<string, string>, key: string, fallback: number): n
   return fallback;
 }
 
+/**
+ * The file first, the environment second.
+ *
+ * `geng-search.service` loads the same file with `EnvironmentFile=`, which freezes its
+ * contents at start: reading `process.env` first made a token rotation invisible (the old
+ * token stayed valid forever) and a quota edit a no-op. The environment is only the
+ * fallback for a value the file does not carry.
+ */
 export function readSearchEnv(root: string): SearchEnv | null {
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const token = file.GENG_SEARCH_TOKEN ?? process.env.GENG_SEARCH_TOKEN ?? "";
