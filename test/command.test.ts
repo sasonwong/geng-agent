@@ -1,11 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildCommand } from "../internal/command.ts";
 import { makePaths } from "../internal/paths.ts";
 import { defaultPolicy } from "../internal/policy.ts";
+
+/** The checkout's tool directory, as the daemon sees it before the mount. */
+function tools(root: string, names: string[]): void {
+  mkdirSync(join(root, "image", "extensions"), { recursive: true });
+  for (const n of names) writeFileSync(join(root, "image", "extensions", n), "// tool\n");
+}
 
 test("the container's /outbox is the directory the gateway reads", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -36,6 +42,7 @@ test("only what the page points at is mounted, and never the rules", () => {
 
 test("the tools are loaded from outside the agent's home", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  tools(root, ["mail.ts", "say-mute.ts", "websearch.ts"]);
   const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []);
   const joined = args.join(" ");
   assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
@@ -43,6 +50,21 @@ test("the tools are loaded from outside the agent's home", () => {
   assert.match(joined, /-e \/opt\/geng\/extensions\/mail\.ts/);
 });
 
+test("a tool dropped into image/extensions/ is loaded, with no other edit", () => {
+  // the page and the docs promise "add a tool, save it": three hardcoded -e paths meant
+  // the fourth file was mounted into the container and never loaded, and nothing said so
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  tools(root, ["say-mute.ts", "websearch.ts", "mail.ts", "calendar.ts", "README.md", "helper.js"]);
+  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy(), runner: "docker" }, "geng-alice", "P", []);
+  const loaded = args.filter((a) => a.startsWith("/opt/geng/extensions/"));
+  assert.deepEqual(loaded, [
+    "/opt/geng/extensions/calendar.ts",
+    "/opt/geng/extensions/mail.ts",
+    "/opt/geng/extensions/say-mute.ts",
+    "/opt/geng/extensions/websearch.ts",
+  ]);
+  for (const a of loaded) assert.equal(args[args.indexOf(a) - 1], "-e", `${a} 少了 -e`);
+});
 test("the tools are mounted, not baked, so editing one needs no rebuild", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");

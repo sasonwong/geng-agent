@@ -24,6 +24,25 @@ function localEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * Which files the container loads as extensions: whatever the mounted directory carries.
+ * It was three hardcoded paths, so a fourth tool was mounted into the container and never
+ * loaded — and nothing said so, while the page and the docs promise "add a tool, save it".
+ * Sorted, so argv does not depend on readdir order.
+ */
+function extensionArgs(dir: string): string[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".ts"))
+      .map((e) => e.name)
+      .sort()
+      .flatMap((f) => ["-e", `/opt/geng/extensions/${f}`]);
+  } catch {
+    // no checkout at all: `geng doctor --probe` has a count check for that
+    return [];
+  }
+}
+
 export function buildCommand(
   paths: Paths,
   policy: Policy,
@@ -115,12 +134,7 @@ export function buildCommand(
         sessionId,
         "--system-prompt",
         systemPrompt,
-        "-e",
-        "/opt/geng/extensions/say-mute.ts",
-        "-e",
-        "/opt/geng/extensions/websearch.ts",
-        "-e",
-        "/opt/geng/extensions/mail.ts",
+        ...extensionArgs(paths.extensions),
       ]),
     );
     return { cmd: "docker", args, env: process.env, cwd: paths.workspace };
