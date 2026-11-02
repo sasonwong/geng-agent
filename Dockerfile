@@ -32,14 +32,14 @@ RUN npm config set registry "$NPM_REGISTRY" \
 # No memory extension on purpose: every waking is its own session, so there is nothing
 # to compact and nothing to carry. Its memory is the palimpsest, not the context.
 ENV HOME=/home/agent
-RUN mkdir -p /home/agent/.pi/agent/sessions /home/agent/.pi/agent/extensions \
+RUN mkdir -p /home/agent/.pi/agent/sessions \
   && chmod -R 0777 /home/agent
 
-# say / mute / web_search live outside the agent's home and are loaded with -e, so
-# neither writing nor deleting them is possible: chmod on the files alone would not
-# stop `rm -rf`, because the directory above them is writable.
-COPY image/extensions/ /opt/geng/extensions/
-RUN chown -R root:root /opt/geng/extensions && chmod -R 0555 /opt/geng/extensions
+# say / mute / web_search are mounted read-only at run time (see internal/command.ts) from
+# image/extensions/, not copied in: a tool that changes during development must not cost a
+# rebuild of the apt and npm layers above it. The mountpoint lives outside the agent's home
+# so that neither writing nor deleting them is possible.
+RUN mkdir -p /opt/geng/extensions
 
 WORKDIR /work
 ENTRYPOINT []
