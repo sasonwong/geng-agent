@@ -5,10 +5,6 @@ import { readJson, writeJson } from "./state.ts";
 import { STATE_SCHEMA } from "./schema.ts";
 import type { KnockHold } from "./schedule.ts";
 
-/**
- * Everything the daemon counts about itself. One reader, used by the daemon, by
- * status and by doctor: two readers is how "上次醒来" quietly goes stale.
- */
 /** What the waking was run with, so a change of environment can be stated as fact. */
 export interface Env {
   imageId?: string | null;
@@ -17,6 +13,10 @@ export interface Env {
   search?: boolean;
 }
 
+/**
+ * Everything the daemon counts about itself. One reader, used by the daemon, by
+ * status and by doctor: two readers is how "上次醒来" quietly goes stale.
+ */
 export interface Meta {
   /** Stamped by writeMeta: the shape the code expects to read back. */
   stateSchema?: number;

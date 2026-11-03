@@ -196,10 +196,6 @@ export async function sendMessage(
   return sent;
 }
 
-/**
- * "I am working on it" for up to five seconds; clients clear it the moment a message
- * arrives. Not a read receipt — the Bot API has no such thing for bots.
- */
 /** Bots may download up to 20 MB; anything bigger is not ours to fetch. */
 export const FILE_LIMIT = 20 * 1024 * 1024;
 
@@ -253,6 +249,10 @@ export async function sendFile(token: string, chat: number, path: string): Promi
   if (!body.ok) throw new Error(`sendFile: ${body.description ?? `HTTP ${response.status}`}`);
 }
 
+/**
+ * "I am working on it" for up to five seconds; clients clear it the moment a message
+ * arrives. Not a read receipt — the Bot API has no such thing for bots.
+ */
 export async function sendTyping(token: string, chat: number): Promise<void> {
   await call(token, "sendChatAction", { chat_id: chat, action: "typing" });
 }
