@@ -158,7 +158,7 @@ GENG_SEARCH_TOKEN=...
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
-| `data/<inst>/palimpsest/.gh/hosts.yml` | 它自己 | 容器里的 `gh` | 推不了代码 |
+| `data/<inst>/book/.gh/hosts.yml` | 它自己 | 容器里的 `gh` | 推不了代码 |
 
 三处是**同一个值要在两个地方逐字相同**，也是抄错率最高的三处：
 
@@ -234,7 +234,7 @@ tail -1 data/alice/daemon.log                # 第一行 key=value
 timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是时间线、
 花费账和归属记录——**journald 永远不进备份**。
 
-> 第一次醒来之前 `daemon.log` 是空的、`status` 说"从未"、`palimpsest/` 里只有 `journal/`：
+> 第一次醒来之前 `daemon.log` 是空的、`status` 说"从未"、`book/` 里只有 `journal/`：
 > 那是刚出生，不是坏了。它自己设的第一个闹钟到点才醒。
 
 ### 改配置不用重启
@@ -456,7 +456,7 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 ## 7. 它的运行参数
 
 `data/<inst>/policy.json` 是**你**的（它在书外面，容器里看不见也写不着）。它自己只能通过
-`propose` 提请求（落盘是 `palimpsest/policy.proposal.json`），每一轮开头被检查：
+`propose` 提请求（落盘是 `book/policy.proposal.json`），每一轮开头被检查：
 
 | 它能改 | 范围 |
 |---|---|
@@ -522,7 +522,7 @@ git fetch origin && git reset --hard origin/main
 
 ```
 data/<instance>/
-  palimpsest/   它的书：identity.md  open-loops/  journal/  几个没人读的 json
+  book/   它的书：identity.md  open-loops/  journal/  几个没人读的 json
                 mail.read.json（打开过的邮件 id）· 只有 identity.md 挂进容器，可写
   policy.json   它活在什么规矩下——在书外面，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）
@@ -546,7 +546,7 @@ deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-egress.ser
 挂载是逐条论证过的，不是攒出来的：`/state/identity.md`（唯一一个它直接写的文件）、`/work`（干活）、
 `data/<inst>/pi/settings.json`（只读，它不能换模型）。
 
-书本身**不挂**：`palimpsest/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
+书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`，
 两条路都是 unix socket 到 daemon，所以账本数得清每一次。`daemon.log`、`meta/`、`usage/`、
 `secrets/`、`policy.json` 都不在里面。

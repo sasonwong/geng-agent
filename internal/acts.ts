@@ -1,4 +1,4 @@
-import { appendLine } from "./state.ts";
+import { appendLine } from "./fs.ts";
 import type { ToolCall } from "./rpc.ts";
 
 /**

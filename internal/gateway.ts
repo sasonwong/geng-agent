@@ -13,7 +13,7 @@ import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
 import { readBots, type Bots } from "./bots.ts";
-import { readJson, writeJson } from "./state.ts";
+import { readJson, writeJson } from "./fs.ts";
 import {
   getMe,
   getUpdates,
@@ -358,7 +358,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
 
     const listen = cfg.listen ?? "all";
-    const mutes = readMutes(join(p.palimpsest, "mute.json"), Date.now());
+    const mutes = readMutes(join(p.book, "mute.json"), Date.now());
     const attention = parseAttention(readJson(p.attention, null));
     const muted = isMuted(mutes, { chatId: message.chat.id, isDm: message.chat.type === "private" });
 

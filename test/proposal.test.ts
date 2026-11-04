@@ -7,19 +7,19 @@ import { applyProposal } from "../internal/proposal.ts";
 import { makePaths } from "../internal/paths.ts";
 import { loadPolicy } from "../internal/policy.ts";
 import { defaultPolicy } from "../internal/policy.ts";
-import { writeJson } from "../internal/state.ts";
+import { writeJson } from "../internal/fs.ts";
 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
-  for (const d of [paths.palimpsest, paths.meta]) mkdirSync(d, { recursive: true });
+  for (const d of [paths.book, paths.meta]) mkdirSync(d, { recursive: true });
   writeJson(paths.policy, defaultPolicy());
   return paths;
 }
 
 test("a negotiable field is applied and the old policy is archived", () => {
   const paths = fixture();
-  writeJson(join(paths.palimpsest, "policy.proposal.json"), {
+  writeJson(join(paths.book, "policy.proposal.json"), {
     cycle: { defaultWakeMinutes: 45 },
   });
 
@@ -33,7 +33,7 @@ test("a negotiable field is applied and the old policy is archived", () => {
 
 test("out-of-range values are rejected and nothing is written", () => {
   const paths = fixture();
-  writeJson(join(paths.palimpsest, "policy.proposal.json"), {
+  writeJson(join(paths.book, "policy.proposal.json"), {
     cycle: { defaultWakeMinutes: 100000 },
   });
   const result = applyProposal(paths);
@@ -44,7 +44,7 @@ test("out-of-range values are rejected and nothing is written", () => {
 
 test("the frame is not negotiable", () => {
   const paths = fixture();
-  writeJson(join(paths.palimpsest, "policy.proposal.json"), {
+  writeJson(join(paths.book, "policy.proposal.json"), {
     container: { network: null },
     cycle: { timeoutSec: 999999 },
   });
@@ -63,7 +63,7 @@ test("no proposal means no work", () => {
 
 test("a malformed proposal is set aside, not obeyed", () => {
   const paths = fixture();
-  writeFileSync(join(paths.palimpsest, "policy.proposal.json"), "{not json");
+  writeFileSync(join(paths.book, "policy.proposal.json"), "{not json");
   const result = applyProposal(paths);
   assert.equal(result?.applied.length, 0);
   assert.equal(result?.rejected[0]?.key, "*");

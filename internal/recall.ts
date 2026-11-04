@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { listFiles } from "./ids.ts";
 import { basename, join } from "node:path";
 import type { Paths } from "./paths.ts";
-import { readJson, writeJson } from "./state.ts";
+import { readJson, writeJson } from "./fs.ts";
 
 /**
  * The reading half of the book, on the host.

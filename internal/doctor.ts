@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
-import { readJson, readText } from "./state.ts";
+import { readJson, readText } from "./fs.ts";
 
 function readdirSafe(dir: string): number {
   try {

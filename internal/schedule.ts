@@ -1,5 +1,5 @@
 import { statSync } from "node:fs";
-import { readJson } from "./state.ts";
+import { readJson } from "./fs.ts";
 
 export interface WaitSpec {
   dueAtMs: number;

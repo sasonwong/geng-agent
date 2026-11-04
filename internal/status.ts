@@ -5,7 +5,7 @@ import { listSessionFiles } from "./command.ts";
 import { makePaths, type Paths } from "./paths.ts";
 import { loadPolicy } from "./policy.ts";
 import { formatDuration, readWaiting } from "./schedule.ts";
-import { readText } from "./state.ts";
+import { readText } from "./fs.ts";
 import { countLoops } from "./packet.ts";
 import { readMeta, readWakes, DAY_MS } from "./meta.ts";
 import { listSnapshots } from "./backup.ts";

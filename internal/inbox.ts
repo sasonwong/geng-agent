@@ -1,6 +1,6 @@
 import { readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { readJson } from "./state.ts";
+import { readJson } from "./fs.ts";
 
 export interface InboxMsg {
   id: string;

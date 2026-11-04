@@ -21,7 +21,7 @@ import {
   type WaitSpec,
 } from "./schedule.ts";
 import { repairTail } from "./session.ts";
-import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./state.ts";
+import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./fs.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import {
@@ -300,7 +300,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // which drops root-owned directories into the agent's own book.
   const at = (inContainer: string, host: string): string =>
     policy.runner === "docker" ? inContainer : host;
-  const statePath = at("/state", paths.palimpsest);
+  const statePath = at("/state", paths.book);
   // A preview computes the same note without touching the disk: --dry must not eat what
   // it is showing, but it must still say what a real start would say.
   const leftover = leftoverCut(paths, !o.dry);
@@ -602,7 +602,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         // both halves: a cycle that only wrote a journal entry did something, and a
         // count that only watches /work would quietly teach it to touch files instead
         touched:
-          countTouched(paths.workspace, startedMs) + countTouched(paths.palimpsest, startedMs),
+          countTouched(paths.workspace, startedMs) + countTouched(paths.book, startedMs),
         // how much memory traffic has no name yet; the page states it so the number has
         // somewhere to go down to when the tools exist
       },

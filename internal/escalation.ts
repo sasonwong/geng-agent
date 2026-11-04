@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { SYMPTOM_LABEL, type Symptom } from "./symptoms.ts";
-import { readJson, writeJson } from "./state.ts";
+import { readJson, writeJson } from "./fs.ts";
 
 export interface Escalation {
   /** 0 = fine. 1..4 are the repair levels. */

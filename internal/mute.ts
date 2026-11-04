@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { readJson, writeJson } from "./state.ts";
+import { readJson, writeJson } from "./fs.ts";
 
 export interface MuteEntry {
   until?: string | null;

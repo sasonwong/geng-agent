@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { bookHandler } from "../internal/book.ts";
 import { openText, recallText } from "../internal/recall.ts";
-import { ensureDirs } from "../internal/state.ts";
+import { ensureDirs } from "../internal/fs.ts";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "geng-recall-"));

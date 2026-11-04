@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "../paths.ts";
-import { ensureDirs, writeJson, writeText } from "../state.ts";
+import { ensureDirs, writeJson, writeText } from "../fs.ts";
 
 function identityFor(instance: string): string {
   return `我是 ${instance}，一个跑在这台服务器上的进程。
@@ -53,7 +53,7 @@ export function writeFakeState(p: Paths, o: FakeOptions = {}): string[] {
     [join(p.journal, "2026-03-03.md"), () => writeText(join(p.journal, "2026-03-03.md"), JOURNAL)],
   ];
 
-  ensureDirs([p.palimpsest, p.journal, p.inbox, p.inboxSeen]);
+  ensureDirs([p.book, p.journal, p.inbox, p.inboxSeen]);
 
   for (const [file, write] of targets) {
     if (existsSync(file) && !o.force) continue;

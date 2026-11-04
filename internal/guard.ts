@@ -1,6 +1,6 @@
 import { rmSync } from "node:fs";
 import { ExpectedError } from "./errors.ts";
-import { readJson, writeJson } from "./state.ts";
+import { readJson, writeJson } from "./fs.ts";
 
 function alive(pid: number): boolean {
   try {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { printStatus } from "../internal/status.ts";
 import { makePaths } from "../internal/paths.ts";
-import { writeText } from "../internal/state.ts";
+import { writeText } from "../internal/fs.ts";
 
 test("status counts open loops the way the page does: files, not the old JSON shape", async () => {
   // `open-loops` used to be a single JSON file and became one file per thing. Reading it

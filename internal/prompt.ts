@@ -1,5 +1,5 @@
 import type { Paths } from "./paths.ts";
-import { readText } from "./state.ts";
+import { readText } from "./fs.ts";
 
 /**
  * The system prompt is the constant half of waking up: where it is, and the two

@@ -7,7 +7,7 @@ import { bookHandler, socketPath, startBookServer } from "../internal/book.ts";
 import { countLoops } from "../internal/packet.ts";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { readWaiting } from "../internal/schedule.ts";
-import { ensureDirs, readText } from "../internal/state.ts";
+import { ensureDirs, readText } from "../internal/fs.ts";
 import { getToFile, postJson } from "../image/extensions/lib/uds.ts";
 
 function fixture() {
@@ -246,8 +246,8 @@ test("a file leaves the book as bytes over the same socket, and only by id", asy
     assert.deepEqual([...readFileSync(dest)], [0, 1, 2, 255]);
     // an id nothing has is a refusal, not an empty file
     await assert.rejects(() => getToFile(sock, "/files/F9", join(root, "nope.bin")), /没有这个文件/);
-    // and the id cannot be a path: `F1-0-report.pdf` is a file, `../alice/palimpsest` is not
-    await assert.rejects(() => getToFile(sock, "/files/..%2Fpalimpsest%2Fidentity.md", join(root, "x")), /没有这个文件/);
+    // and the id cannot be a path: `F1-0-report.pdf` is a file, `../alice/book` is not
+    await assert.rejects(() => getToFile(sock, "/files/..%2Fbook%2Fidentity.md", join(root, "x")), /没有这个文件/);
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }

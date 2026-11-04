@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { CutRecord } from "./meta.ts";
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
-import { excerpt, mtimeMs, readJson, readText } from "./state.ts";
+import { excerpt, mtimeMs, readJson, readText } from "./fs.ts";
 import { KIND_WORD } from "./attach.ts";
 import { localClock } from "./time.ts";
 import { formatDuration } from "./schedule.ts";
@@ -24,7 +24,7 @@ export interface PacketInput {
   lastWakeMs: number | null;
   /** 1-based: how many times this instance has woken. */
   waking: number;
-  /** Where the agent sees the palimpsest: /state in docker, an absolute path for the local runner. */
+  /** Where the agent sees the book: /state in docker, an absolute path for the local runner. */
   statePath: string;
   /** What arrived by mail and was never opened. Mail never knocks: it waits. */
   mailPending: { count: number; senders: string[]; oldestMs: number | null };

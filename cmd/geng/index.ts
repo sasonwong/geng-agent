@@ -9,7 +9,7 @@ import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
 import { runGateway } from "../../internal/gateway.ts";
 import { getMe } from "../../internal/telegram.ts";
-import { readJson } from "../../internal/state.ts";
+import { readJson } from "../../internal/fs.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 import { describeConfig, loadMailConfig, readMailEnv } from "../../internal/mail.ts";
 import { addBot, describeBot, editAllow, readBots } from "../../internal/bots.ts";

@@ -8,7 +8,7 @@ import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
 import { parseAfter } from "./schedule.ts";
-import { readJson, readText, writeJson, writeText } from "./state.ts";
+import { readJson, readText, writeJson, writeText } from "./fs.ts";
 
 /**
  * The book endpoint: the only way into `/state` once the container's mount is read-only.

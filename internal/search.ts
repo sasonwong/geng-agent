@@ -3,7 +3,7 @@ import { chmodSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
-import { readJson, readText, writeJson } from "./state.ts";
+import { readJson, readText, writeJson } from "./fs.ts";
 
 /**
  * The search key must not live in the container, so the container only gets a socket

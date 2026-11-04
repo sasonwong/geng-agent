@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { clockArmed, clockNotice, freshForSteer, handedOver, INJECT_CAP, injectionText } from "../internal/inject.ts";
 import { peekInbox } from "../internal/inbox.ts";
-import { writeJson } from "../internal/state.ts";
+import { writeJson } from "../internal/fs.ts";
 
 const msg = (id: string) => ({ id, file: `${id}.json`, text: `话 ${id}`, from: "telegram:@x" });
 

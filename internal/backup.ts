@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import type { Policy } from "./policy.ts";
-import { readJson, readText, writeJson } from "./state.ts";
+import { readJson, readText, writeJson } from "./fs.ts";
 
 /**
  * Snapshot the whole life, cheaply, by dumping the directory and letting rustic's
@@ -293,7 +293,7 @@ export async function restore(o: RestoreOptions): Promise<{ ok: boolean; detail:
 
 /** rustic restores absolute paths under the target, so look for the instance root. */
 function findInstanceRoot(dir: string, depth = 0): string | null {
-  if (existsSync(join(dir, "palimpsest"))) return dir;
+  if (existsSync(join(dir, "book"))) return dir;
   if (depth >= 8) return null;
   let entries: string[];
   try {
@@ -313,15 +313,15 @@ function findInstanceRoot(dir: string, depth = 0): string | null {
 /** The one check that proves a backup exists: it can be read back. */
 export function restoredLooksWhole(dir: string): { ok: boolean; missing: string[] } {
   const instanceDir = findInstanceRoot(dir);
-  if (!instanceDir) return { ok: false, missing: ["palimpsest/"] };
+  if (!instanceDir) return { ok: false, missing: ["book/"] };
   const missing: string[] = [];
   for (const rel of ["meta/deploy.json", "session"]) {
     if (!existsSync(join(instanceDir, rel))) missing.push(rel);
   }
   try {
-    if (readdirSync(join(instanceDir, "palimpsest")).length === 0) missing.push("palimpsest/ 是空的");
+    if (readdirSync(join(instanceDir, "book")).length === 0) missing.push("book/ 是空的");
   } catch {
-    missing.push("palimpsest/");
+    missing.push("book/");
   }
   return { ok: missing.length === 0, missing };
 }

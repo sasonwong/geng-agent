@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { knownPlaces, noteChat, readChats, route } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
-import { writeJson } from "../internal/state.ts";
+import { writeJson } from "../internal/fs.ts";
 import { makePaths } from "../internal/paths.ts";
 
 test("direct address is always high and always delivered", () => {

@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { appendLine } from "./state.ts";
+import { appendLine } from "./fs.ts";
 
 /**
  * What was actually exchanged with one address, in order, forever. Append-only and

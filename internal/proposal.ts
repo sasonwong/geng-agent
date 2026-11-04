@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFil
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
-import { readJson } from "./state.ts";
+import { readJson } from "./fs.ts";
 
 /**
  * What the agent may change about its own running conditions — and nothing else.

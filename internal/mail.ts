@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import { makePaths, type Paths } from "./paths.ts";
 import { allocate } from "./ids.ts";
 import { readEnvFile } from "./secret.ts";
-import { mtimeMs, readJson, writeJson } from "./state.ts";
+import { mtimeMs, readJson, writeJson } from "./fs.ts";
 
 /**
  * Mail arrives from Cloudflare through a Worker, because a Worker is the only thing that

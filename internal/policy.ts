@@ -1,5 +1,5 @@
 import { ExpectedError } from "./errors.ts";
-import { readText } from "./state.ts";
+import { readText } from "./fs.ts";
 
 export type Runner = "docker" | "local";
 

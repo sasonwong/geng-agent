@@ -20,7 +20,7 @@ import {
   startMailServer,
   type MailConfig,
 } from "../internal/mail.ts";
-import { writeJson } from "../internal/state.ts";
+import { writeJson } from "../internal/fs.ts";
 
 const FROM = "someone@example.org";
 

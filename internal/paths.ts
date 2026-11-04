@@ -7,7 +7,7 @@ export interface Paths {
   instance: string;
   data: string;
   sessionDir: string;
-  palimpsest: string;
+  book: string;
   workspace: string;
   usage: string;
   meta: string;
@@ -69,19 +69,19 @@ export function makePaths(root: string, instance: string): Paths {
   }
   const r = resolve(root);
   const data = join(r, "data", instance);
-  const palimpsest = join(data, "palimpsest");
+  const book = join(data, "book");
   const inbox = join(data, "inbox");
   const mail = join(data, "mail");
   const outbox = join(data, "outbox");
   const filesDir = join(data, "files");
-  const filesForget = join(palimpsest, "files.forget.json");
-  const journal = join(palimpsest, "journal");
+  const filesForget = join(book, "files.forget.json");
+  const journal = join(book, "journal");
   return {
     root: r,
     instance,
     data,
     sessionDir: join(data, "session"),
-    palimpsest,
+    book,
     workspace: join(data, "workspace"),
     usage: join(data, "usage"),
     meta: join(data, "meta"),
@@ -92,21 +92,21 @@ export function makePaths(root: string, instance: string): Paths {
     inboxSeen: join(inbox, "seen"),
     inboxLow: join(inbox, "low"),
     mail,
-    mailRead: join(palimpsest, "mail.read.json"),
+    mailRead: join(book, "mail.read.json"),
     outbox,
     filesDir,
     filesForget,
     daemonLog: join(data, "daemon.log"),
     policy: join(data, "policy.json"),
-    identity: join(palimpsest, "identity.md"),
-    openLoops: join(palimpsest, "open-loops"),
+    identity: join(book, "identity.md"),
+    openLoops: join(book, "open-loops"),
     people: join(data, "people"),
-    waiting: join(palimpsest, "waiting.json"),
-    attention: join(palimpsest, "attention.json"),
-    proposal: join(palimpsest, "policy.proposal.json"),
-    mute: join(palimpsest, "mute.json"),
-    waitingConsumed: join(palimpsest, "waiting.consumed.json"),
-    intent: join(palimpsest, "intent.json"),
+    waiting: join(book, "waiting.json"),
+    attention: join(book, "attention.json"),
+    proposal: join(book, "policy.proposal.json"),
+    mute: join(book, "mute.json"),
+    waitingConsumed: join(book, "waiting.consumed.json"),
+    intent: join(book, "intent.json"),
     journal,
     journalIndex: join(journal, "INDEX.md"),
     secrets: join(r, "secrets", `${instance}.env`),
@@ -125,7 +125,7 @@ export function requiredDirs(p: Paths): string[] {
   return [
     p.data,
     p.sessionDir,
-    p.palimpsest,
+    p.book,
     p.journal,
     p.workspace,
     p.usage,

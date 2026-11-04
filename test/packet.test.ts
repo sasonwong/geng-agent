@@ -4,7 +4,7 @@ import { mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { buildPacket, type PacketInput } from "../internal/packet.ts";
 import { makePaths } from "../internal/paths.ts";
-import { writeJson, writeText } from "../internal/state.ts";
+import { writeJson, writeText } from "../internal/fs.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 
@@ -15,7 +15,7 @@ function fixture(): {
 } {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
-  for (const d of [paths.palimpsest, paths.journal, paths.inbox, paths.workspace, paths.meta]) {
+  for (const d of [paths.book, paths.journal, paths.inbox, paths.workspace, paths.meta]) {
     mkdirSync(d, { recursive: true });
   }
   const base: PacketInput = {

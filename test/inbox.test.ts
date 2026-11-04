@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxCount, markSeen, newestKnock, peekInbox, quarantine } from "../internal/inbox.ts";
-import { writeJson } from "../internal/state.ts";
+import { writeJson } from "../internal/fs.ts";
 
 function inbox(): { dir: string; seen: string } {
   const base = mkdtempSync(join(tmpdir(), "geng-test-"));

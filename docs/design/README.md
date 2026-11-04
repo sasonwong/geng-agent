@@ -23,7 +23,7 @@
 | 部件 | 数量 | 职责 |
 |---|---|---|
 | pi | 每轮一容器、一轮一会话 | 上下文、工具 |
-| palimpsest（状态层） | 每实例一目录 | 会话之间的"自我" |
+| book（状态层，旧名 palimpsest） | 每实例一目录 | 会话之间的"自我" |
 | daemon | 每实例一个 | 执行闹钟、数症状、换档、记账 |
 | gateway | 全局一个 | 消息搬运，只通过文件 |
 
@@ -53,7 +53,7 @@
 11. 秘密的位置要让"挂错一次"不致命
 12. 不服役它写：不测谎，只留原始层
 
-## 3. 状态层（palimpsest）
+## 3. 状态层（book，旧名 palimpsest）
 
 可变的自述盖在不可变的原始层上，旧字迹还在底下透出来 —— 因此得名。
 
@@ -400,9 +400,9 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | 文件 | 写者 | 形状 |
 |---|---|---|
 | `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | `{schema, runner, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,network}}` |
-| `palimpsest/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
-| `palimpsest/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
-| `palimpsest/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
+| `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
+| `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
+| `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
 | `inbox/*.json` | gateway | `{id, text, from, at, chat, route}` |
 | `outbox/*.json` | 它 | `{id, messages: string[]}` |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?}` |
@@ -504,7 +504,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 现在这样断掉）。真正缺的不是阈值，是**它自己愿不愿意听**：
 
 `listen(chats, until, why)` 让它自己开一个窗口——"这个会话接下来这段时间的消息直接叫我"，
-写进 `palimpsest/attention.json`，gateway 判路由时读它。四件事是刻意的：
+写进 `book/attention.json`，gateway 判路由时读它。四件事是刻意的：
 
 - **必须有过期时间**，最长四小时。没有期限的"一直听"不是注意力，是规则——而且会让它和另一个
   实例之间形成没人喊停的自动接话。

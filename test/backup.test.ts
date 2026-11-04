@@ -10,7 +10,7 @@ import { maybeBackup, backupRepo, parseSnapshots, restore, restoredLooksWhole } 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
-  for (const d of [paths.palimpsest, paths.meta, paths.sessionDir, paths.workspace]) {
+  for (const d of [paths.book, paths.meta, paths.sessionDir, paths.workspace]) {
     mkdirSync(d, { recursive: true });
   }
   writeFileSync(paths.policy, JSON.stringify(defaultPolicy()));
@@ -47,10 +47,10 @@ test("a restored tree is found even when rustic nests the absolute paths", () =>
   const paths = fixture();
   const target = join(paths.root, "restored");
   const nested = join(target, "tmp", "geng", "data", "alice");
-  mkdirSync(join(nested, "palimpsest"), { recursive: true });
+  mkdirSync(join(nested, "book"), { recursive: true });
   mkdirSync(join(nested, "meta"), { recursive: true });
   mkdirSync(join(nested, "session"), { recursive: true });
-  writeFileSync(join(nested, "palimpsest", "identity.md"), "我是 alice\n");
+  writeFileSync(join(nested, "book", "identity.md"), "我是 alice\n");
   writeFileSync(join(nested, "meta", "deploy.json"), "{}\n");
 
   assert.deepEqual(restoredLooksWhole(target), { ok: true, missing: [] });
@@ -62,7 +62,7 @@ test("an empty or partial restore is reported, not passed", () => {
   mkdirSync(target, { recursive: true });
   const result = restoredLooksWhole(target);
   assert.equal(result.ok, false);
-  assert.deepEqual(result.missing, ["palimpsest/"]);
+  assert.deepEqual(result.missing, ["book/"]);
 });
 
 test("both rustic snapshot JSON shapes parse", () => {

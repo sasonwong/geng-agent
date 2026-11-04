@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import type { Policy } from "./policy.ts";
-import { readJson } from "./state.ts";
+import { readJson } from "./fs.ts";
 import type { Env } from "./meta.ts";
 
 /** The image the next cycle will actually run, by content id rather than by tag. */

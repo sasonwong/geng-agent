@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { chmodSync, existsSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { readJson } from "./state.ts";
+import { readJson } from "./fs.ts";
 import type { BotConfig } from "./telegram.ts";
 
 /**
