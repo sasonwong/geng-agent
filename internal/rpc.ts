@@ -273,7 +273,10 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     resolveSettled();
   });
   child.on("close", () => {
-    if (!settled) startFailed = true;
+    // A round killed at the wall dies without settling too. `timedOut` already says why it
+    // ended, and classify() reads startFailed first, so setting it here made a cut round
+    // report as "没起来" and the timeout notice never fire.
+    if (!settled && !timedOut) startFailed = true;
     failPending();
     resolveSettled();
   });
