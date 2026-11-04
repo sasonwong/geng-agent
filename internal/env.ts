@@ -32,10 +32,12 @@ export function packageVersion(root: string): string | null {
  */
 export function describeEnvChange(before: Env | undefined, now: Env): string | null {
   if (!before) return null; // first waking: nothing to compare against
-  // Only the image matters: it carries pi and the toolchain. A program update that does
+  // Two things it cannot read off the page by itself: the image (it carries pi and the
+  // toolchain) and whether search exists at all — a tool that silently is not there is
+  // exactly the kind of change that has to be said out loud. A program update that does
   // not rebuild the image changes how it is woken, and a tool edit shows up in the tool
-  // list — both of which it experiences directly.
+  // list; it experiences those directly, so they are not stated.
   const image = (before.imageId ?? null) !== (now.imageId ?? null);
-  const tools = (before.search ?? false) !== (now.search ?? false);
-  return image || tools ? "环境变了。" : null;
+  const search = (before.search ?? false) !== (now.search ?? false);
+  return image || search ? "环境变了。" : null;
 }
