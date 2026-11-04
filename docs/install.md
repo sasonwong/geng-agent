@@ -110,7 +110,7 @@ node cmd/geng/index.ts init alice
 
 `init` 会建目录树、从 `deploy/policy.json` 拷一份 policy、生成 `secrets/alice.env` 模板（600）、
 从 `deploy/settings.json` 拷一份 pi 配置，并在 `secrets/rustic.env` 里生成备份口令。
-**它不会写 `identity.md`、`open-loops/`、`waiting.json`** —— 那几个空白就是它的出生。
+**它出生时不带 `identity.md`、不带一行日记、不带一件没闭合的事** —— 那几个空白就是它的出生。
 
 ### 3.1 改 policy（这一步不能忘）
 
@@ -156,7 +156,7 @@ GENG_SEARCH_TOKEN=...
 | `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search` |
 | `<inst>.env` 的 `GENG_SEARCH_TOKEN` | 你（或 `secrets init`） | 容器里的扩展 | 容器里的 `web_search` 要它；和 `secrets/search.env` 里那串不一致 = 每次 401 |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
-| `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `/mail`；纸上那行也不会出现 |
+| `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
 | `data/<inst>/palimpsest/.gh/hosts.yml` | 它自己 | 容器里的 `gh` | 推不了代码 |
 
@@ -410,7 +410,7 @@ tunnel 上加一个指向 `http://localhost:8788` 的 hostname、Email Routing �
 **机器上已经有 tunnel 就不要新建**，加一个 Public Hostname 就够。
 
 行为上要知道的三件事：**只收不回**（`say` 只说到会话）；**收信是 pull**——邮件只进
-`data/<inst>/mail/`，纸上报「邮件：2 封没处理」，不叫醒它；`From` 可伪造，所以邮件不叫醒它。
+`data/<inst>/mail/`，纸上报「邮件：2 封没打开」，不叫醒它；`From` 可伪造，所以邮件不叫醒它。
 
 改白名单不用重启：`mail.json` 跟着 gateway 的 `reload` 一起换（见 §4）。
 
@@ -456,7 +456,7 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 ## 7. 它的运行参数
 
 `data/<inst>/policy.json` 是**你**的（它在书外面，容器里看不见也写不着）。它自己只能通过
-`palimpsest/policy.proposal.json` 提请求，每一轮开头被检查：
+`propose` 提请求（落盘是 `palimpsest/policy.proposal.json`），每一轮开头被检查：
 
 | 它能改 | 范围 |
 |---|---|
@@ -507,7 +507,7 @@ git fetch origin && git reset --hard origin/main
 | 容器压根没起来，日志里也没有一轮 | 手工跑一遍完整的 `docker run` | argv 里少了一个 `-e`（比如 `TZ=…` 没带 `-e`，docker 会把它当镜像名） |
 | 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（缺变量时它**不注册**自己） |
 | 它不回复，但进程正常 | `docker ps`、`daemon.log` 最后一行的用时 | 一轮还在跑（一轮可以跑 30 分钟）；或者它**选择了不说**——只有 `say` 会送出去，正文不会 |
-| 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数，不叫醒 |
+| 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数；读靠 `recall`/`open` |
 | 搜不到东西 | `doctor` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |
 | 备份说 ok 但 `--list` 是空的 | `geng backup <inst> --list` | rustic 版本不同，成功信息在 stderr、JSON 形状也不同。看落下来的快照，不看成功那行 |
 | 某个 bot 突然不回消息，unit 还 active | `journalctl --user -u geng-gateway`（找「轮询断了」）、`ls data/_ops/outbox` | 401（token 被吊销）/ 409（有 webhook，或同一个 token 有第二个消费者）不会自愈：gateway 杀掉那个 poller，没有别的 bot 就退出、十秒后重试，还有别的 bot 就**要 `reload` 一次才回来**。429 / 5xx / 断网会原地重试。409 先 `deleteWebhook` |
@@ -522,13 +522,13 @@ git fetch origin && git reset --hard origin/main
 
 ```
 data/<instance>/
-  palimpsest/   它的书：identity.md  open-loops/  waiting.json  journal/  mute.json
+  palimpsest/   它的书：identity.md  open-loops/  journal/  几个没人读的 json
                 mail.read.json（它标过已读的邮件 id）· 挂成 /state（可写）
   policy.json   它活在什么规矩下——在书外面，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）
   files/        别人发来的图片和文件，挂成 /files（只读）
   inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
-  mail/         收到的邮件，一封一个文件，挂成 /mail（只读）
+  mail/         收到的邮件，一封一个文件（不进容器，靠 recall 读）
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
   session/      pi 的会话文件，一轮一个（可写，但纸上不提它）
@@ -543,10 +543,13 @@ deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-egress.ser
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
 
-挂载是逐条论证过的，不是攒出来的：`/state`（记忆）、`/work`（干活）、`/inbox`（别人说了什么）、
-`/people`（比纸上的摘录更早的对话）、`/outbox`（唯一的出口）、`/files`、`/mail`（都是只读，它改不了
-别人给它的东西）、`data/<inst>/pi/settings.json`（只读，它不能换模型）。`daemon.log`、`meta/`、
-`usage/`、`secrets/`、`policy.json` 都**不在**里面。
+挂载是逐条论证过的，不是攒出来的：`/state/identity.md`（唯一一个它直接写的文件）、`/work`（干活）、
+`/outbox`（唯一出口）、`/files`（别人发来的文件，只读）、`data/<inst>/pi/settings.json`（只读，它不能换模型）。
+
+书本身**不挂**：`palimpsest/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
+读走 `recall`/`open`，写走 `journal`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`，
+两条路都是 unix socket 到 daemon，所以账本数得清每一次。`daemon.log`、`meta/`、`usage/`、
+`secrets/`、`policy.json` 都不在里面。
 
 ---
 
