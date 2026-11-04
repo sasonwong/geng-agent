@@ -409,7 +409,7 @@ test("mail is counted with its senders, and never pretends to have woken it", ()
     }),
   );
   // 3 days before the page's clock, and both senders named once
-  assert.match(text, /邮件：2 封没处理，最早一封 3 天前，来自 someone@example\.org、other@example\.net，在 \/mail\/。/);
+  assert.match(text, /邮件：2 封没打开，最早一封 3 天前，来自 someone@example\.org、other@example\.net，在 \/mail\/。/);
   // mail is pull: it must not be dressed up as a conversation or as somebody waiting
   assert.doesNotMatch(text, /有人在跟你说话/);
   assert.doesNotMatch(text, /还没回的/);

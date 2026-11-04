@@ -26,7 +26,7 @@ export interface PacketInput {
   waking: number;
   /** Where the agent sees the palimpsest: /state in docker, an absolute path for the local runner. */
   statePath: string;
-  /** What arrived by mail and was never marked read. Mail never knocks: it waits. */
+  /** What arrived by mail and was never opened. Mail never knocks: it waits. */
   mailPending: { count: number; senders: string[]; oldestMs: number | null };
   /** Where the mailbox appears inside the container. */
   mailPath: string;
@@ -392,7 +392,7 @@ export function buildPacket(input: PacketInput): string {
         : `，最早一封 ${waited >= DAY_MS ? `${Math.round(waited / DAY_MS)} 天` : formatDuration(waited)}前`;
     const who =
       mailPending.senders.length === 0 ? "" : `，来自 ${mailPending.senders.join("、")}`;
-    out.push(`邮件：${mailPending.count} 封没处理${first}${who}，在 ${mailPath}/。`);
+    out.push(`邮件：${mailPending.count} 封没打开${first}${who}，在 ${mailPath}/。`);
   }
   const muteLine = renderMutes(mutes, places);
   const attentionLine = renderAttention(attention, places, timezone, nowMs);
