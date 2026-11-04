@@ -392,6 +392,21 @@ export function scanLogBodies(dir: string): LogScan {
   return { hits: hits.slice(0, 10), truncated, more: Math.max(0, hits.length - 10) };
 }
 
+/** One string over every tool in a directory, from `cksum` output: the file names and
+ *  their bytes. Counting files is not enough — the tools used to be baked into the image,
+ *  so "same count, different bytes" (a stale mount, a half-synced checkout) was invisible.
+ *  Run on both sides so the two strings are comparable byte for byte. */
+export function toolsDigest(dir: string): string {
+  const script =
+    `[ -d "${dir}" ] || exit 0; ls "${dir}"/*.ts >/dev/null 2>&1 || exit 0; ` +
+    `(cd "${dir}" && LC_ALL=C cksum ./*.ts) | sha1sum | cut -c1-40`;
+  try {
+    return execFileSync("sh", ["-c", script], { encoding: "utf8" }).trim();
+  } catch {
+    return "";
+  }
+}
+
 const PROBE = [
   "sh",
   "-c",
@@ -401,7 +416,7 @@ const PROBE = [
     // the tools are a mount now, so "they are not there" is not a quiet degradation:
     // pi is started with one -e per file, and a missing file makes it exit 1 — the
     // wake dies instead of waking up with fewer things it can do
-    'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l)"',
+    'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l) EXT_DIGEST=$( (cd /opt/geng/extensions && LC_ALL=C cksum ./*.ts) 2>/dev/null | sha1sum | cut -c1-40)"',
     // the positive control: without it, "everything blocked" passes every check below
     'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
@@ -430,6 +445,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   const onHost = existsSync(o.extensions)
     ? readdirSync(o.extensions).filter((f) => f.endsWith(".ts")).length
     : 0;
+  const digestOnHost = onHost > 0 ? toolsDigest(o.extensions) : "";
   const out = await new Promise<string>((resolve) => {
     const p = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "pipe"] });
     let text = "";
@@ -445,6 +461,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     p.on("close", () => resolve(text));
   });
   const inContainer = Number(/EXT_COUNT=(\d+)/.exec(out)?.[1] ?? -1);
+  const digestInContainer = /EXT_DIGEST=([0-9a-f]{40})/.exec(out)?.[1] ?? "";
 
   checks.push({
     name: "容器能上网",
@@ -458,13 +475,19 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     ok: out.includes("POLICY_HIDDEN"),
     detail: out.includes("POLICY_VISIBLE") ? "容器里能看到 policy.json —— 它不该在自己的书里读规则" : "看不见",
   });
-  const detail =
-    inContainer === onHost && onHost > 0
-      ? `${onHost} 个`
-      : inContainer < 0
-        ? "容器里看不到 /opt/geng/extensions"
-        : `宿主 image/extensions 里 ${onHost} 个，容器里 ${inContainer} 个`;
-  checks.push({ name: "工具挂载", ok: inContainer === onHost && onHost > 0, detail });
+  const mounted = onHost > 0 && digestInContainer === digestOnHost;
+  const detail = mounted
+    ? `${onHost} 个，内容与宿主一致（${digestOnHost.slice(0, 8)}）`
+    : inContainer < 0
+      ? "探针没数出来 —— 容器里读不到 /opt/geng/extensions"
+      : onHost === 0
+        ? `宿主 image/extensions 里没有 .ts，容器里 ${inContainer} 个 —— 检查无从比起`
+        : inContainer === 0
+          ? `容器里 /opt/geng/extensions 是空的，宿主 ${onHost} 个 —— 挂载缺了；pi 收到不存在的 -e 会 exit(1)，agent 起不来`
+          : inContainer === onHost
+            ? `${onHost} 个，个数相同但内容不同（${digestOnHost.slice(0, 8)} → ${digestInContainer.slice(0, 8)}）—— 旧挂载或半同步的 checkout`
+            : `宿主 image/extensions 里 ${onHost} 个（${digestOnHost.slice(0, 8)}），容器里 ${inContainer} 个（${digestInContainer.slice(0, 8)}）`;
+  checks.push({ name: "工具挂载", ok: mounted, detail });
   checks.push({
     name: "云元数据不可达",
     ok: out.includes("META_BLOCKED"),
