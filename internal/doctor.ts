@@ -17,6 +17,7 @@ import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { envProblem, mailWiringProblem, searchPairProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
+import { makeJwt, readGhApp } from "./ghapp.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -108,6 +109,34 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
           ? "只装镜像里自带的那几个"
           : listed.join(", ")
         : `这份 settings 里写了镜像没装的：${missing.join(", ")}——镜像里没有，醒来会直接退出`,
+  });
+
+  // Three states, because "not configured" and "configured but wrong" look identical from
+  // the container: git just says the remote asked for a password.
+  const gh = readGhApp(p);
+  // Signing is the half of the exchange that can be checked without the network, and a
+  // truncated or re-wrapped PEM is exactly how this breaks: the file exists, the doctor
+  // says fine, and git says nothing at all for the rest of the day.
+  let ghSigns = false;
+  let ghWhy = "";
+  if (gh.app !== null) {
+    try {
+      makeJwt(gh.app, Date.now());
+      ghSigns = true;
+    } catch (err) {
+      ghWhy = (err as Error).message;
+    }
+  }
+  checks.push({
+    name: "GitHub App",
+    ok: gh.app !== null && ghSigns,
+    warnOnly: gh.app === null,
+    detail:
+      gh.app === null
+        ? `没配（${gh.missing.join("、")}）：git push 会要求密码，别的都不受影响`
+        : ghSigns
+          ? `app ${gh.app.appId}，installation ${gh.app.installationId}`
+          : `私钥签不动：${ghWhy}——git push 会要求密码`,
   });
 
   if (policy.runner === "docker") {

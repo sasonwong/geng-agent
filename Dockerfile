@@ -34,10 +34,21 @@ RUN set -eux; \
   rm -rf /tmp/gh.tgz "/tmp/gh_${GH_VERSION}_linux_${arch}"; \
   gh --version
 
-# `git clone`/`push` authenticate through gh, which reads GH_TOKEN from the injected
-# environment. The agent's own HOME is thrown away every waking, so this has to be
-# system-wide or it would have to be redone each cycle.
-RUN printf '[credential "https://github.com"]\n\thelper = !/usr/local/bin/gh auth git-credential\n' >> /etc/gitconfig
+# `git clone`/`push` authenticate by asking the daemon for an installation token over the
+# book socket. The agent never holds a long-lived credential, and the shell script cannot
+# read anything else on the host: the socket only answers this one question.
+RUN cat > /usr/local/bin/geng-gh-credential <<'SH'
+#!/bin/sh
+# git calls this with `get`/`store`/`erase`; only `get` has an answer, and it comes from
+# the host. No socket or no app means no credential — the clone then fails as an auth
+# error, which is the truth.
+[ "$1" = "get" ] || exit 0
+token=$(curl -fsS --unix-socket "${GENG_BOOK_SOCK:-/run/geng/book.sock}" http://localhost/gh/token 2>/dev/null) || exit 0
+[ -n "$token" ] || exit 0
+printf 'username=x-access-token\npassword=%s\n' "$token"
+SH
+RUN chmod 0755 /usr/local/bin/geng-gh-credential \
+  && printf '[credential "https://github.com"]\n\thelper = !/usr/local/bin/geng-gh-credential\n' >> /etc/gitconfig
 
 # pi itself: a Bun-compiled release binary, pinned like gh. No node in the image, so
 # there is no npm, no package manager and no second copy of a JS runtime to keep patched.

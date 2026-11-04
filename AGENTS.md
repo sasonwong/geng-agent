@@ -148,9 +148,10 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 
 - **工作副本放 `/work/geng`**，不要放 `/work` 根目录：那儿是它自己的活儿，混在一起会让
   `ls /work` 失去意义，也会让"这轮动了什么"数不准。
-- **`GH_TOKEN` 从环境注入**（`secrets/<instance>.env`，每轮新建容器时读）。`git clone` / `push`
-  走镜像里 `/etc/gitconfig` 的 `gh auth git-credential`，不需要每轮登录。凭据在容器里能被读到，
-  所以它必须是最小权限、只对一个仓库。
+- **容器里没有 GitHub 凭据**。`git clone` / `push` 走 `/etc/gitconfig` 里的
+  `geng-gh-credential`：它去 `book.sock` 上问一次，daemon 用 GitHub App 的私钥换一个
+  一小时的 installation token。所以 `env` 里翻不到 token，也不需要每轮登录。
+  没配 App 时这条链路安静地拿不到凭据，git 会说"要密码"——`doctor` 的「GitHub App」先说话。
 - **没有 token 也能贡献**：`git format-patch` 出补丁，用 `say` 的 `files` 发给主人，宿主机上
   `git am` 落地。这条路随时可用，不依赖任何凭据。
 - 提交身份用 `git -c user.name=… -c user.email=<id>+<login>@users.noreply.github.com` 传：

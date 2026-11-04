@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
+import { installationToken, readGhApp } from "./ghapp.ts";
 import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -438,6 +439,23 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       } catch (err) {
         reply(500, { error: `读不出来：${(err as Error).message}` });
       }
+      return;
+    }
+    // Plain text, not JSON, because the reader is `git`, not an agent: a credential helper
+    // is a shell script that prints `username=…` / `password=…`. The token is minted here
+    // and handed out once per git command, so nothing durable ever holds it.
+    if (req.method === "GET" && url === "/gh/token") {
+      const app = readGhApp(o.paths);
+      if (app.app === null) {
+        reply(503, { error: `没有配置 GitHub App：缺 ${app.missing.join("、")}` });
+        return;
+      }
+      installationToken(app.app, Date.now())
+        .then((t) => {
+          res.writeHead(200, { "content-type": "text/plain" });
+          res.end(t.token);
+        })
+        .catch(guard);
       return;
     }
     if (req.method !== "POST") {

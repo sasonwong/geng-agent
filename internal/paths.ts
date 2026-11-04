@@ -53,6 +53,7 @@ export interface Paths {
   journal: string;
   journalDiscarded: string;
   secrets: string;
+  ghAppKey: string;
   systemMd: string;
   /** The tools, from the checkout rather than the image: mounting them read-only means
    *  editing one takes effect on the next waking instead of a rebuild. */
@@ -110,6 +111,8 @@ export function makePaths(root: string, instance: string): Paths {
     journal,
     journalDiscarded: join(journal, "discarded"),
     secrets: join(r, "secrets", `${instance}.env`),
+    // never mounted, never in an env file: the daemon signs with it and nothing else reads it
+    ghAppKey: join(r, "secrets", "gh-app.pem"),
     systemMd: join(r, "deploy", "SYSTEM.md"),
     extensions: join(r, "image", "extensions"),
     piDir: join(data, "pi"),

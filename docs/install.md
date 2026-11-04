@@ -158,7 +158,7 @@ GENG_SEARCH_TOKEN=...
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
-| `data/<inst>/book/.gh/hosts.yml` | 它自己 | 容器里的 `gh` | 推不了代码 |
+| `secrets/gh-app.pem` + `<inst>.env` 里的两个 id | 你 | daemon 换 installation token | `git push` 要求密码；**别的都不受影响**（见 5.3） |
 
 三处是**同一个值要在两个地方逐字相同**，也是抄错率最高的三处：
 
@@ -386,7 +386,35 @@ socket 不存在时，daemon 干脆不挂它（docker 会把缺失的宿主路�
 
 限额在宿主这边执行，容器改不了；用完时工具返回的是人话「今天的搜索用完了」，不是错误码。
 
-### 5.3 邮件
+### 5.3 GitHub App（让它能推代码）
+
+审计发现原来的做法是把一个**永不过期**的 PAT 放进 `secrets/<inst>.env`，而那个文件是
+`--env-file` 注入的——容器里 `env` 就能读到它，已经有一轮真的读过了。改成 App：
+
+1. 建一个 GitHub App（Settings → Developer settings → GitHub Apps），权限只要
+   `Contents: Read and write`，`Metadata: Read-only` 自带；
+2. 在 App 页面生成一个 private key，存成 `secrets/gh-app.pem`（600）；
+3. 把 App 装到那个仓库/组织上，记下 installation id（`.../installations/<id>`）；
+4. 两个 id 写进 `secrets/alice.env`：
+
+```
+GENG_GH_APP_ID=123456
+GENG_GH_INSTALLATION_ID=7890
+```
+
+容器里没有 token，也没有会过期的 token：`git` 要凭据时，`/usr/local/bin/geng-gh-credential`
+去 `book.sock` 上问一次（`GET /gh/token`，明文，因为读它的是 `git` 不是模型），daemon 用私钥
+签一个 JWT 换 installation token，缓存到过期前五分钟。**一次唤醒换一个**，谁都没有长期凭据。
+
+```bash
+node cmd/geng/index.ts doctor --instance alice     # 「GitHub App」那一行
+git -C /work/geng remote -v                        # 在容器里：git pull 不再要密码
+```
+
+三态是分开的：没配 = `warn`（别的都正常）、配了但私钥签不动 = `FAIL`、签得动 = `ok`。
+签不动是这里最常见的坏法（PEM 被编辑器重排过），而它之前的症状是 git 安静地说要密码。
+
+### 5.4 邮件
 
 给它一个真地址：Cloudflare Email Routing 收信 → 一个 Email Worker 解 MIME → POST 回宿主。
 
@@ -418,7 +446,7 @@ tunnel 上加一个指向 `http://localhost:8788` 的 hostname、Email Routing �
 验证：给那个地址发一封，`ls data/alice/mail/` 多一个文件，下一张纸上出现那一行。
 白名单外的人**在落盘之前**就被丢掉，日志一行 `mail ← guest …（没送）`。
 
-### 5.4 备份
+### 5.5 备份
 
 一次清醒一张快照，用 [rustic](https://rustic.cli.rs/)。`geng init` 已经生成了
 `secrets/rustic.env`（`RUSTIC_PASSWORD`）——**丢了它，快照就永远打不开了**。

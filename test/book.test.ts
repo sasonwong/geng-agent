@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bookHandler, socketPath, startBookServer } from "../internal/book.ts";
@@ -318,4 +319,29 @@ test("a discarded entry keeps its number out of circulation", async () => {
   rmSync(paths.ids, { force: true });
   const next = await handle({ url: "/journal", method: "POST" } as never, JSON.stringify({ texts: ["b"] }));
   assert.notEqual((next.body as { ids: string[] }).ids[0], id);
+});
+
+test("git's credential question is answered by the host, or not at all", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const server = await startBookServer({ paths, log: () => {} });
+  try {
+    const reply = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = request({ socketPath: socketPath(paths), path: "/gh/token", method: "GET" }, (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    // not configured is a refusal that names what is missing, not an empty credential
+    assert.equal(reply.status, 503);
+    assert.match(reply.body, /GENG_GH_APP_ID/);
+    assert.match(reply.body, /gh-app\.pem/);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
 });
