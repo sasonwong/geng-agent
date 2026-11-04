@@ -413,9 +413,10 @@ const PROBE = [
   [
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
     'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
-    // the tools are a mount now, so "they are not there" is not a quiet degradation:
-    // pi is started with one -e per file, and a missing file makes it exit 1 — the
-    // wake dies instead of waking up with fewer things it can do
+    // the tools are a mount now: pi is started with one -e per file, and a file that is
+    // listed and then missing makes it exit 1, so that shape dies loudly. But if the
+    // directory itself is gone, extensionArgs yields no -e at all, and the wake comes up
+    // with no tools and says nothing — the digest check below is the only net for that one
     'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l) EXT_DIGEST=$( (cd /opt/geng/extensions && LC_ALL=C cksum ./*.ts) 2>/dev/null | sha1sum | cut -c1-40)"',
     // the positive control: without it, "everything blocked" passes every check below
     'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',

@@ -55,12 +55,6 @@ export function peekInbox(dir: string): InboxMsg[] {
   return out;
 }
 
-/**
- * Move the messages this wake actually handed over into seen/. Until then they stay
- * put: a cycle that dies before the model reads them must not eat what a human said.
- * Anything unparseable is quarantined as *.bad — one broken message must never block
- * a whole waking.
- */
 /** The newest knock, for the sake of showing "working on it" in the right chat. */
 export function newestKnock<T extends { at?: string; chat?: number }>(messages: T[]): T | null {
   const withChat = messages.filter((m) => typeof m.chat === "number");
@@ -68,6 +62,12 @@ export function newestKnock<T extends { at?: string; chat?: number }>(messages: 
   return withChat.reduce((a, b) => ((Date.parse(b.at ?? "") || 0) > (Date.parse(a.at ?? "") || 0) ? b : a));
 }
 
+/**
+ * Move the messages this wake actually handed over into seen/. Until then they stay
+ * put: a cycle that dies before the model reads them must not eat what a human said.
+ * Anything unparseable is quarantined as *.bad — one broken message must never block
+ * a whole waking.
+ */
 export function markSeen(dirs: string[], seenDir: string, files: string[]): void {
   for (const file of files) {
     for (const dir of dirs) {
