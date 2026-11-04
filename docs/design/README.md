@@ -44,7 +44,7 @@
 2. daemon 只执行闹钟，不设闹钟
 3. 只认症状，不认病
 4. daemon 不判断、不总结、不写话，只填空
-5. 语义判断伪装成文件存在性（`waiting.json` 在 = 合法空转）
+5. 语义判断伪装成文件存在性（`waiting.json` 在 = 合法空转）——现在这个文件只由宿主写，所以它至少不能再伪造
 6. **测不准的东西不许有权力**——例如"世界变了没"只进观测，不进判定
 7. 三层重试一层一个主人：harness 内 / daemon 整轮 / 模型自己改主意
 8. daemon 无全局可变状态（除总账）
@@ -59,19 +59,21 @@
 
 | 文件 | 谁写 | 约束 |
 |---|---|---|
-| `identity.md` | 它 | 硬上限 1~2KB |
-| `open-loops/` | 它 | 一件一个文件 |
-| `waiting.json` | 它 | 下次什么时候醒 + 为什么 |
-| `journal/` | 它 | 索引也是它自己的 |
+| `identity.md` | 它，直接写文件 | 硬上限 1~2KB；容器里唯一一个有写权限的路径 |
+| `journal/` `open-loops/` | 它发起，宿主落盘 | id 由宿主发，它拿不到文件名 |
+| `waiting.json` | 它发起，宿主落盘 | 下次什么时候醒 + 为什么 |
 | `intent.json` `world.json` | daemon | write-ahead / 世界快照 |
-| `policy.json` | 人 | 容器里单文件只读 |
+| `policy.json` `mute.json` `attention.json` | 人 / gateway / daemon | 容器里一个都不挂 |
 
-**写权限不能混。** 身份和承诺只有它写，世界和意图只有 daemon 写。混了就不是它了。
+**书不挂进容器。** `/state`、`/inbox`、`/people`、`/mail` 全在容器外面，写走
+`journal`/`loop_*`/`wait`/…，读走 `recall`/`open`，两条路都是 unix socket 到 daemon。
+"谁写"因此不是权限位的问题，是路由的问题：一个事实只有一个入口，入口在账本里留一行。
+唯一直接写文件的例外是 `identity.md`——它是一页它随时重画的东西，不是一次动作。
 
 ## 4. 唤醒纸
 
 **上下文里最贵的是工具定义，所以 system prompt 只放操作者控制的东西。** 顺序是：一句处境 →
-两个接口（waiting.json、policy.proposal.json）→ 能说话的地方 → 可以调的运行参数。这些都只在
+工具清单（谁写谁读）→ 能说话的地方 → 可以调的运行参数。这些都只在
 操作者动过之后才变，所以它下面那一大块工具定义能跨轮次命中缓存。
 
 **identity 不在 system prompt 里。** 它自己随时会重写那个文件，放在工具定义前面就等于每改一次
@@ -93,8 +95,8 @@
 它上次说在等什么 / 最后一次对话的最后一句是谁说的
 还没回的：谁的哪句话还挂着（每个对话记录的最后一条是对方说的）
 最近 24 小时醒了 N 次 / 定时唤醒停了（如果有）
-未闭合的事：N 件，在 /state/open-loops/
-有人在跟你说话：N 条（M 个人），在 /inbox/；还有 N 条群里的在 /inbox/low/
+未闭合的事：N 件（用 recall(sources:["loops"]) 看是哪几件）
+有人在跟你说话：N 条（M 个人）（recall(sources:["inbox"]) 里翻得到）
 它静音了 X（到某时为止）—— 并明说这不改变投递
 上一轮是怎么死的（如果是被杀的/断的/被打断的）
 你写下的自己（/state/identity.md）：原文；还没写过时是一行事实
@@ -136,8 +138,8 @@ in-cycle 的观察和跨轮的升级提示同样适用。
 
 **数目录，不数内容。** daemon 要的每个数字都必须来自文件系统——有几件未闭合的事是
 `readdir` 的长度，搁了多久是 mtime，叫什么看文件名。这样它想怎么写内容都不会让数字变错，
-也就不存在"它换了一种格式我们跟着改一版"。需要定死 schema 的只有两处：`waiting.json`
-（它给 daemon 下指令，是接口）和 `policy.json`（操作者的）。旧格式不静默兼容，doctor 报警。
+也就不存在"它换了一种格式我们跟着改一版"。需要定死 schema 的只有 `policy.json`（操作者的）
+和 `waiting.json`——后者现在是宿主根据 `wait` 的参数写出来的，它连格式都碰不到。
 
 **和人的往来**：`people/<chat>.jsonl`，一个地址一个文件，只追加，两个方向都记，由 gateway
 写。纸上在 knock 时贴最近 10 句，带总句数、文件大小、最早那句的年龄——**但没有"画像"**。
@@ -146,8 +148,9 @@ in-cycle 的观察和跨轮的升级提示同样适用。
 
 **收件箱归谁**：gateway 往 `inbox/*.json`（有人点名）和 `inbox/low/*.json`（群里的闲话）写，
 daemon 只读不搬。**消息在这一轮真正跑完之前不动**，跑完了才移进 `seen/` —— 否则容器半路被杀，
-人说的话就被"已读"吃掉了。整个 inbox 以只读方式挂进容器（`/state/inbox`），所以它读得到，
-但删不掉、改不了。
+人说的话就被"已读"吃掉了。inbox **不挂进容器**：`recall(sources:["inbox"])` 列出来，`open(id)` 读一条。
+可见性和可数性是一件事的两面——把目录挂进去，"我知道有 1 条"和"我读了那条"在账本里
+就分不开了。
 
 ## 5. daemon
 
@@ -155,7 +158,7 @@ daemon 只读不搬。**消息在这一轮真正跑完之前不动**，跑完了
 
 ```
 锁 → 清孤儿容器 → 读 policy → 组纸 → 拉容器
-  → 看门狗 → 观测 → 数症状 → 按表换档 → 收尾（截尾 / 记账）→ 睡到 waiting.json
+  → 看门狗 → 观测 → 数症状 → 按表换档 → 收尾（截尾 / 记账）→ 睡到闹钟
 ```
 
 **判定只认五个症状**：启动失败、超时、被中止、没走到收尾、同工具同参数重复 ≥3、空回复
@@ -196,7 +199,8 @@ daemon 只读不搬。**消息在这一轮真正跑完之前不动**，跑完了
 
 ## 6. 自我调度
 
-`waiting.json` 是它自己设的闹钟，daemon 只执行。
+闹钟是它自己设的（`wait`），daemon 只执行。落盘仍是 `waiting.json`，写的人是宿主：
+相对时间在收到请求的那一刻被折成绝对时刻，所以"什么时候"只有一个读者。
 
 ```json
 { "wake": { "after": "20m" },              "why": "等 CI 跑完" }
@@ -270,7 +274,7 @@ ops 是**一个说话者**，daemon 和 gateway 借它同一张嘴，所以消�
 
 ### 邮件
 
-邮箱是**第二个来源，不是第二个收件箱**。`/inbox` 是敲过门就消失的东西，`/mail` 是等它自己
+邮箱是**第二个来源，不是第二个收件箱**。收件箱是敲过门就消失的东西，邮件是等它自己
 动手的东西——两种节奏不该共用一个目录，`markSeen` 那套「交给你了就算送到」的语义套到邮件上，
 投递当天就成了已读。
 
@@ -279,8 +283,9 @@ ops 是**一个说话者**，daemon 和 gateway 借它同一张嘴，所以消�
 - **邮件不叫醒它。** Worker 手里的只有原始头，Cloudflare 不给 SPF/DKIM/DMARC 的结论，于是
   `From` 可伪造：让「白名单里的人」叫醒它，等于让任何会写这个头的人叫醒它。所以邮件一律进
   pull，纸上报条数、发件人、最老一封等了多久。
-- **已读是它的声明，不是 daemon 的推断。** `/mail` 只读挂载，邮件本体永不移动；已读是一张
-  名单（`/state/mail.read.json`），只有 `mail` 工具写。它把名单删了，全部邮件重新算未读——
+- **已读是它的声明，不是 daemon 的推断。** 邮件本体永不移动；已读是一张名单
+  （`mail.read.json`），由 `open` 在宿主上、和读正文的同一次调用里写——没有"读了但忘了标"
+  这个中间态。它把名单删了，全部邮件重新算未读——
   反向错误，无害；反过来，让 daemon 猜「读没读过」是没有信号的。
 - **邮件只收不回。** 现在没有回信通道，`say` 只说到会话。要答一个人就换它找得到他的地方。
 
@@ -394,9 +399,9 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | 文件 | 写者 | 形状 |
 |---|---|---|
 | `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | `{schema, runner, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,network}}` |
-| `palimpsest/policy.proposal.json` | 它 | 同一形状，只允许白名单里的键，越界即拒绝 |
-| `palimpsest/waiting.json` | 它 | `{wake:{after:"20m"}\|{at:"ISO"},\ why}` 或 `null` |
-| `palimpsest/mute.json` | 它 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
+| `palimpsest/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
+| `palimpsest/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
+| `palimpsest/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
 | `inbox/*.json` | gateway | `{id, text, from, at, chat, route}` |
 | `outbox/*.json` | 它 | `{id, messages: string[]}` |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?}` |
@@ -560,7 +565,7 @@ transcript 的**入站**行因此多了一个 `id` 字段（纯增量），出�
 ### 挂载表
 
 容器只看见这些：`/state`（书，读写）、`/work`、`/outbox`、`/inbox`（只读）、`/people`（只读）、
-`/files`（只读）、`/mail`（只读）、自己的 session 目录、只读的 `settings.json`。
+`/files`（只读）、`/state/identity.md`（唯一可写）、自己的 session 目录、只读的 `settings.json`。
 
 **看不见的**：`daemon.log`（纸上的「上一轮」「24 小时醒了 N 次」已经说过）、`policy.json`
 （它活在什么规矩下不是它要读的书；可协商的那几个值由纸印出来）、`meta/`、`usage/`、`backup/`、
