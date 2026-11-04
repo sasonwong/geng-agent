@@ -29,10 +29,7 @@ export interface PacketInput {
   /** What arrived by mail and was never opened. Mail never knocks: it waits. */
   mailPending: { count: number; senders: string[]; oldestMs: number | null };
   /** Where the mailbox appears inside the container. */
-  mailPath: string;
   /** Where the read-only auxiliary mounts appear inside the container. */
-  inboxPath: string;
-  peoplePath: string;
   /** Every message handed over this waking: the knock first, then the ambient. */
   inbox: InboxMsg[];
   /** The ambient slice of `inbox`, so the two may be counted apart. */
@@ -146,7 +143,7 @@ export interface ThreadInput {
   }[];
 }
 
-function renderThread(t: ThreadInput, peoplePath: string): string[] {
+function renderThread(t: ThreadInput): string[] {
   const oldest = t.lines[0]?.at ? Date.parse(t.lines[0].at) : NaN;
   const age = Number.isNaN(oldest) ? "" : `，最早的一句在 ${formatDuration(Date.now() - oldest)}前`;
   const out = [`你和 ${t.who} 说过 ${t.total} 句，下面是最新的 ${t.lines.length} 句${age}：`];
@@ -154,7 +151,8 @@ function renderThread(t: ThreadInput, peoplePath: string): string[] {
     const back = line.quote?.text ? `（回：${excerpt(line.quote.text, 60)}）` : "";
     out.push(`  ${line.dir === "out" ? "你" : "对方"}：${excerpt(line.text, 200)}${back}`);
   }
-  out.push(`全部在 ${peoplePath}/${t.chat}.jsonl（${t.total} 句，${Math.round(t.bytes / 1024)} KB）。`);
+  // the file is not in the container any more: the way back to it is the tool
+  out.push(`一共 ${t.total} 句（${Math.round(t.bytes / 1024)} KB）。用 open("chat:${t.chat}") 读全部。`);
   return out;
 }
 
@@ -264,8 +262,8 @@ function flatten(text: string): string {
 }
 
 export function buildPacket(input: PacketInput): string {
-  const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath, inboxPath, peoplePath } = input;
-  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending, mailPath } = input;
+  const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath } = input;
+  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending } = input;
 
   const out: string[] = [];
 
@@ -331,7 +329,7 @@ export function buildPacket(input: PacketInput): string {
     const more = waiting.length > 3 ? `，还有 ${waiting.length - 3} 个` : "";
     out.push("", `还没回的：${shown.join("、")}${more}。`);
   }
-  if (thread) out.push("", ...renderThread(thread, peoplePath));
+  if (thread) out.push("", ...renderThread(thread));
   // Only the knock lives in inbox/; the ambient chatter is in inbox/low/. Reporting the
   // whole of `inbox` under the root path is what let a page say
   // "有人在跟你说话：28 条，在 /inbox/" over a directory holding one file, and then count

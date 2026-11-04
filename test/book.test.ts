@@ -162,24 +162,6 @@ test("an alarm nearer than the shortest allowed wait is raised, and says so", as
   assert.equal(readWaiting(paths.waiting)?.dueAtMs, at);
 });
 
-test("opening a mail is what makes it no longer new, and the host keeps the list", async () => {
-  const f = fixture();
-  writeFileSync(join(f.paths.mail, "m1.json"), JSON.stringify({ id: "abc123", text: "写的什么" }));
-  writeFileSync(join(f.paths.mail, "m2.json"), JSON.stringify({ id: "def456", text: "另一封" }));
-  // /state is a mount the container may not write, so the list lives where the host can
-  assert.equal(existsSync(f.paths.mailRead), false);
-  const r = await f.call("/mail/read", { ids: ["abc123"] });
-  assert.equal(r.status, 200);
-  assert.equal((r.body as { left: number }).left, 1);
-  assert.deepEqual(JSON.parse(readText(f.paths.mailRead) ?? "[]"), ["abc123"]);
-  // opening the same one twice does not grow the list, and says so
-  const again = await f.call("/mail/read", { ids: ["abc123"] });
-  assert.equal((again.body as { left: number }).left, 1);
-  assert.deepEqual(JSON.parse(readText(f.paths.mailRead) ?? "[]"), ["abc123"]);
-  // and it never claims to have marked something it was not given
-  const bad = await f.call("/mail/read", { ids: [] });
-  assert.equal(bad.status, 400);
-});
 
 test("mute, listen, forget and propose are written by the host, in the shape it reads", async () => {
   const f = fixture();

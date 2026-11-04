@@ -140,15 +140,6 @@ function appendText(file: string, addition: string): void {
   writeText(file, `${before}${glue}${addition}\n`);
 }
 
-/** How many mails there are, so a reply can say how many are left unopened. */
-function mailCount(dir: string): number {
-  try {
-    return readdirSync(dir).filter((n) => n.endsWith(".json")).length;
-  } catch {
-    return 0;
-  }
-}
-
 function parseWhen(when: string): number | null {
   const delta = parseAfter(when);
   if (delta !== null) return Date.now() + delta;
@@ -242,21 +233,6 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
     // mail/read: the one write a read is allowed to cause. /state is a mount the container
     // may not write once it is read-only, and the list of what has been opened is part of
     // the agent's own book — so the host keeps it, and `open` is what adds to it.
-    if (route === "/mail/read") {
-      const ids = list(params, "ids");
-      if (ids === null) return { status: 400, body: { error: "ids 要是非空字符串数组" } };
-      const had = readJson<unknown>(paths.mailRead, []);
-      const before = new Set(Array.isArray(had) ? had.filter((x): x is string => typeof x === "string") : []);
-      for (const id of ids) before.add(id.trim());
-      writeJson(paths.mailRead, [...before]);
-      const total = mailCount(paths.mail);
-      return { status: 200, body: { ids, left: Math.max(0, total - before.size), at: nowIso } };
-    }
-
-    // The rest of what the container used to write into /state: three files the gateway
-    // reads, and the one about timing. Each takes the words the tool was given and builds
-    // the file here — the book's shape is a fact of the host, so a container that may not
-    // write the mount must not be the one deciding what goes into it either.
     if (route === "/mute/set") {
       const target = text(params, "target")?.trim();
       if (target === undefined || !keyCanMute(target)) {

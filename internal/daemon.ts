@@ -409,8 +409,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       lastWakeMs: typeof meta.lastWakeMs === "number" ? meta.lastWakeMs : null,
       waking,
       statePath,
-      inboxPath: at("/inbox", paths.inbox),
-      peoplePath: at("/people", paths.people),
       timezone: policy.timezone,
       places,
       attention: parseAttention(readJson(paths.attention, null)),
@@ -449,7 +447,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       hint: plan.hint,
       lowPending: pendingLow(paths),
       mailPending: pendingMail(paths),
-      mailPath: at("/mail", paths.mail),
       wakes24h: wakes24h + 1,
       parked: plan.parked,
 

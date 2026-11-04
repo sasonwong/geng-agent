@@ -26,8 +26,6 @@ function fixture(): {
     lastWakeMs: Date.parse("2026-03-02T08:00:00Z"),
     waking: 2,
     statePath: "/state",
-    inboxPath: "/inbox",
-    peoplePath: "/people",
     timezone: "Asia/Shanghai",
     places: [{ id: -1001234567890, label: "群「测试」", home: false }],
     attention: null,
@@ -47,7 +45,6 @@ function fixture(): {
     parked: false,
     lowPending: 0,
     mailPending: { count: 0, senders: [], oldestMs: null },
-    mailPath: "/mail",
     searchLeft: 12,
     envChanged: null,
     lastSaid: null,
@@ -204,7 +201,7 @@ test("a conversation carries how much was said and when it started", () => {
   assert.match(text, /你和 telegram:@you 说过 214 句，下面是最新的 3 句/);
   assert.match(text, /对方：它在干嘛/);
   assert.match(text, /你：在看自己写的 status.sh/);
-  assert.match(text, /全部在 \/people\/123456789\.jsonl（214 句，43 KB）。/);
+  assert.match(text, /一共 214 句（43 KB）。用 open\("chat:123456789"\) 读全部。/);
   // no summary of the relationship, ever
   assert.doesNotMatch(text, /关系|关心|画像/);
 });
