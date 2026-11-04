@@ -35,7 +35,10 @@ export function describeEnvChange(before: Env | undefined, now: Env): string | n
   // Only the image matters: it carries pi and the toolchain. A program update that does
   // not rebuild the image changes how it is woken, and a tool edit shows up in the tool
   // list — both of which it experiences directly.
-  const image = (before.imageId ?? null) !== (now.imageId ?? null);
+  // An id we could not read is not evidence of a change: `docker image inspect` fails
+  // when the daemon is unreachable, and claiming "环境变了" then is a page that lies
+  // about the one thing it says rarely enough to be believed.
+  const image = now.imageId !== null && (before.imageId ?? null) !== now.imageId;
   const tools = (before.search ?? false) !== (now.search ?? false);
   return image || tools ? "环境变了。" : null;
 }
