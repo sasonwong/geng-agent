@@ -9,8 +9,8 @@
  * with it; this file is a messenger that turns a refusal into a sentence a person can act
  * on. A missing socket is reported as itself, never as "failed".
  */
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { tool } from "./lib/tool.ts";
 import { postJson } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
@@ -35,17 +35,23 @@ function say(r: Reply, ok: string): string {
   return ok;
 }
 
-const journalTool = defineTool({
+const journalTool = tool({
   name: "journal",
   label: "Journal",
   description: '往日记里写。texts 是字符串数组（1–20 条，一条一个元素），一次调用写几条。返回 {ids}：每条拿到的 id，形如 J20260302-2，可以用 open(id) 读回来。内容格式你定，没人解析。',
-  parameters: Type.Object({
-    texts: Type.Array(Type.String({ description: "一条一个元素。" }), {
-      minItems: 1,
-      maxItems: 20,
-      description: "要写下的东西，最多 20 条。",
-    }),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      texts: {
+        type: "array",
+        items: { type: "string", description: "一条一个元素。" },
+        minItems: 1,
+        maxItems: 20,
+        description: "要写下的东西，最多 20 条。",
+      },
+    },
+    required: ["texts"],
+  },
   async execute(_id, params) {
     const r = await call("/journal", { texts: params.texts });
     const ids = Array.isArray(r.ids) ? (r.ids as string[]) : [];
@@ -56,13 +62,15 @@ const journalTool = defineTool({
   },
 });
 
-const loopOpenTool = defineTool({
+const loopOpenTool = tool({
   name: "loop_open",
   label: "Open loop",
   description: '记一件没闭合的事。text 写清这件事是什么、怎么算做完——下一轮的你才认得出什么时候算完。返回 {id}，形如 L12。它会出现在每张唤醒纸的条数里，直到 loop_close。',
-  parameters: Type.Object({
-    text: Type.String({ description: "这件事是什么，以及怎么算闭合。" }),
-  }),
+  parameters: {
+    type: "object",
+    properties: { text: { type: "string", description: "这件事是什么，以及怎么算闭合。" } },
+    required: ["text"],
+  },
   async execute(_id, params) {
     const r = await call("/loop/open", { text: params.text });
     return {
@@ -72,14 +80,18 @@ const loopOpenTool = defineTool({
   },
 });
 
-const loopCloseTool = defineTool({
+const loopCloseTool = tool({
   name: "loop_close",
   label: "Close loop",
   description: '关掉一件没闭合的事。id 来自 loop_open 的返回（形如 L12，不是文件名）。note 可选，写一句为什么算完了，附在文件末尾。不删内容，只是移到 open-loops/closed/，所以纸上的条数减一。返回 {id, closed}。',
-  parameters: Type.Object({
-    id: Type.String({ description: '要关的那件事，形如 "L12"。' }),
-    note: Type.Optional(Type.String({ description: "为什么算完了，一句话。" })),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: '要关的那件事，形如 "L12"。' },
+      note: { type: "string", description: "为什么算完了，一句话。" },
+    },
+    required: ["id"],
+  },
   async execute(_id, params) {
     const r = await call("/loop/close", { id: params.id, note: params.note });
     return {
@@ -89,14 +101,18 @@ const loopCloseTool = defineTool({
   },
 });
 
-const discardTool = defineTool({
+const discardTool = tool({
   name: "discard",
   label: "Discard journal entry",
   description: '撤掉一条写错的日记。id 来自 journal 的返回（形如 J20261104-3）。why 可选，写一句为什么不算数，附在文末。不删文件，只是移到 journal/discarded/，recall 里标「已丢弃」，open 仍然读得到。返回 {id, discarded}。已经丢弃过的再调一次不算错。',
-  parameters: Type.Object({
-    id: Type.String({ description: '要撤的那条，形如 "J20261104-3"。' }),
-    why: Type.Optional(Type.String({ description: "为什么不算数，一句话。" })),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: '要撤的那条，形如 "J20261104-3"。' },
+      why: { type: "string", description: "为什么不算数，一句话。" },
+    },
+    required: ["id"],
+  },
   async execute(_id, params) {
     const r = await call("/discard", { id: params.id, why: params.why });
     return {
@@ -106,14 +122,18 @@ const discardTool = defineTool({
   },
 });
 
-const waitTool = defineTool({
+const waitTool = tool({
   name: "wait",
   label: "Wait",
   description: '定下一次什么时候醒。when 写一段时长（"20m"、"2h"、"90s"、"1d"）或者一个带时区的时刻（2026-03-02T09:15:00Z）；why 可选，写一句到时候你还认得出为什么。返回 {at}：真正生效的时刻——比最短间隔更近的会被抬到最短，回复的是抬完的时间。不调就按默认间隔醒。',
-  parameters: Type.Object({
-    when: Type.String({ description: '还要等多久，形如 "20m"；或者时刻 2026-03-02T09:15:00Z。' }),
-    why: Type.Optional(Type.String({ description: "为什么那时候醒，一句话。" })),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      when: { type: "string", description: '还要等多久，形如 "20m"；或者时刻 2026-03-02T09:15:00Z。' },
+      why: { type: "string", description: "为什么那时候醒，一句话。" },
+    },
+    required: ["when"],
+  },
   async execute(_id, params) {
     const r = await call("/wait", { when: params.when, why: params.why });
     return {

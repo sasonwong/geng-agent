@@ -84,13 +84,13 @@ docker run --rm --network agent-net geng-agent:latest sh -lc 'curl -sS -m 5 http
 git clone https://github.com/sasonwong/geng-agent ~/geng-agent && cd ~/geng-agent
 npm ci                                   # 只有 @types/node 和 typescript，运行时零依赖
 npx tsc --noEmit && npm test             # 十秒内应该全绿
-deploy/build.sh                          # 镜像：node + pi + 它的工具链（不含扩展）
+deploy/build.sh                          # 镜像：pi 的独立二进制 + gh + git（不含 node，也不含扩展）
 ```
 
 **什么时候需要重建镜像**：只有 `Dockerfile` 变了。只改 `internal/`、`cmd/` 不用重建——
 daemon 在宿主上跑，容器只装 pi 和它的工具链。
 
-扩展（`say`/`mute`/`forget`/`listen`/`mail`/`web_search`/`web_fetch`）在 `image/extensions/`，构建时**不进镜像**，
+扩展（`say`/`mute`/`forget`/`listen`/`recall`/`download`/`web_search`/`web_fetch`）在 `image/extensions/`，构建时**不进镜像**，
 运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是这个目录里的**每一个 `.ts`**。所以改一个
 工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
 「环境变了」也不会响（那一行只说镜像变了）。

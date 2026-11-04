@@ -1,4 +1,21 @@
-FROM node:24-slim
+# Two stages. The first has npm, which is the only way to install pi packages; the
+# second has no node at all — pi ships a standalone binary, and the container is the one
+# place where "one less runtime" is worth a build stage.
+FROM node:24-slim AS packages
+ARG NPM_REGISTRY=https://registry.npmjs.org
+RUN npm config set registry "$NPM_REGISTRY" \
+  && npm config set fetch-retries 5 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm i -g --fetch-retries=5 --fetch-retry-maxtimeout=120000 @earendil-works/pi-coding-agent
+ENV HOME=/home/agent
+# Installed here, at build time: the running container has no network of its own, so
+# anything fetched per waking would be fetched and then lost. The list has to match
+# `deploy/settings.json` — that file is mounted over this image's copy at run time, and a
+# package declared there but never installed makes pi exit on the first waking.
+RUN pi install npm:@dietrichgebert/ponytail \
+  && pi install npm:@ff-labs/pi-fff
+
+FROM debian:bookworm-slim
 
 # tzdata is not in the slim base: without it TZ=Asia/Shanghai silently means UTC
 RUN apt-get update \
@@ -22,26 +39,31 @@ RUN set -eux; \
 # system-wide or it would have to be redone each cycle.
 RUN printf '[credential "https://github.com"]\n\thelper = !/usr/local/bin/gh auth git-credential\n' >> /etc/gitconfig
 
-# registry/retry are build args because a flaky proxy is the normal case
-ARG NPM_REGISTRY=https://registry.npmjs.org
-RUN npm config set registry "$NPM_REGISTRY" \
-  && npm config set fetch-retries 5 \
-  && npm config set fetch-retry-maxtimeout 120000 \
-  && npm i -g --fetch-retries=5 --fetch-retry-maxtimeout=120000 @earendil-works/pi-coding-agent
+# pi itself: a Bun-compiled release binary, pinned like gh. No node in the image, so
+# there is no npm, no package manager and no second copy of a JS runtime to keep patched.
+ARG PI_VERSION=1.5.0
+ARG PI_SHA256=""
+RUN set -eux; \
+  case "$(dpkg --print-architecture)" in arm64) arch=arm64 ;; *) arch=x64 ;; esac; \
+  curl -fsSL -o /tmp/pi.tgz \
+    "https://github.com/earendil-works/pi/releases/download/v${PI_VERSION}/pi-linux-${arch}.tar.gz"; \
+  if [ -n "$PI_SHA256" ]; then echo "$PI_SHA256  /tmp/pi.tgz" | sha256sum -c -; fi; \
+  mkdir -p /opt; \
+  tar -xzf /tmp/pi.tgz -C /opt; \
+  rm -f /tmp/pi.tgz; \
+  ln -s /opt/pi/pi /usr/local/bin/pi; \
+  pi --version
 
 # No memory extension on purpose: every waking is its own session, so there is nothing
 # to compact and nothing to carry. Its memory is the book, not the context.
 ENV HOME=/home/agent
+COPY --from=packages /home/agent/.pi/agent/npm /home/agent/.pi/agent/npm
+COPY --from=packages /home/agent/.pi/agent/settings.json /home/agent/.pi/agent/settings.json
 RUN mkdir -p /home/agent/.pi/agent/sessions \
-  && chmod -R 0777 /home/agent
-
-# Packages are installed here, at build time: the running container has no network of
-# its own, so anything fetched per waking would be fetched and then lost. The list has to
-# match `deploy/settings.json` — that file is mounted over this image's copy at run time,
-# and a package declared there but never installed makes pi exit on the first waking.
-RUN pi install npm:@dietrichgebert/ponytail \
-  && pi install npm:@ff-labs/pi-fff \
-  && chmod -R a+rX /home/agent/.pi/agent/npm
+  && chmod -R a+rX /home/agent/.pi \
+  # pi writes trust.json and its lock next to settings.json, and the container runs as
+  # an arbitrary uid: without a writable agent dir it exits on the first waking
+  && chmod 0777 /home/agent/.pi/agent /home/agent/.pi/agent/sessions
 
 # say / mute / web_search are mounted read-only at run time (see internal/command.ts) from
 # image/extensions/, not copied in: a tool that changes during development must not cost a

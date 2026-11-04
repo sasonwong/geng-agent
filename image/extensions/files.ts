@@ -7,15 +7,15 @@
  */
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { tool } from "./lib/tool.ts";
 import { resolveUnder } from "./lib/under.ts";
 import { getToFile } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
 const WORK = process.env.GENG_WORK ?? "/work";
 
-const downloadTool = defineTool({
+const downloadTool = tool({
   name: "download",
   label: "Download",
   description:
@@ -23,10 +23,14 @@ const downloadTool = defineTool({
     "to 是你自己定的落地路径，必须在 /work 下，例如 /work/in/photo.jpg；目录会自己建。" +
     "返回 {path, bytes}。取到的文件是副本，改它不影响原件。" +
     "要发出去不必先取——say 可以直接写 F12。",
-  parameters: Type.Object({
-    id: Type.String({ description: '文件 id，形如 "F12"。' }),
-    to: Type.String({ description: '落到哪里，必须写 /work 下的路径，形如 "/work/in/report.pdf"。' }),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: '文件 id，形如 "F12"。' },
+      to: { type: "string", description: '落到哪里，必须写 /work 下的路径，形如 "/work/in/report.pdf"。' },
+    },
+    required: ["id", "to"],
+  },
   async execute(_toolCallId, params) {
     const say = (text: string) => ({ content: [{ type: "text" as const, text }], details: undefined });
     if (SOCKET === "") return say("没有配置记忆端点：GENG_BOOK_SOCK 是空的。");

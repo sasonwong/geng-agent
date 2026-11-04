@@ -10,8 +10,8 @@
  * None of it talks to Telegram. The container has no bot token, and must not have one.
  */
 import { existsSync } from "node:fs";
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { tool } from "./lib/tool.ts";
 import { postJson } from "./lib/uds.ts";
 
 const STATE = process.env.GENG_STATE ?? "/state";
@@ -30,7 +30,7 @@ async function send(route: string, body: Record<string, unknown>): Promise<{ ok:
   }
 }
 
-const sayTool = defineTool({
+const sayTool = tool({
   name: "say",
   label: "Say",
   description:
@@ -40,30 +40,30 @@ const sayTool = defineTool({
     "replyTo: 引用某一句话，写 {\"chat\": -1001234567890, \"messageId\": 151}；这两个数在" +
     "recall 列出的消息 id（形如 M-1001234567890-151）和人的对话（每句后面的 #…）里。\n" +
     "返回 {id, count}：id 是这条排队记录的编号（不是 Telegram 的消息号，那要等发出去之后才有）。发不出去会明说哪一处不对。",
-  parameters: Type.Object({
-    messages: Type.Array(Type.String(), {
-      minItems: 1,
-      maxItems: 20,
-      description: "要说的话，一句一个元素。",
-    }),
-    to: Type.Optional(
-      Type.String({
-        description: "发到哪个 chat：「能说话的地方」里那些数字 id（不是 @handle）。",
-      }),
-    ),
-    files: Type.Optional(
-      Type.Array(Type.String(), {
+  parameters: {
+    type: "object",
+    properties: {
+      messages: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: 20,
+        description: "要说的话，一句一个元素。",
+      },
+      to: { type: "string", description: "发到哪个 chat：「能说话的地方」里那些数字 id（不是 @handle）。" },
+      files: {
+        type: "array",
+        items: { type: "string" },
         maxItems: 10,
-        description: "一起发出去的文件，写 /work 里的绝对路径（例如 /work/report.html）。",
-      }),
-    ),
-    replyTo: Type.Optional(
-      Type.String({
-        description:
-          "引用哪一条：chat id-消息 id，形如 -1001234567890-151。写了它就发到那条消息所在的会话，to 可以省。",
-      }),
-    ),
-  }),
+        description: "一起发出去的文件：别人发来的写 id（F12），自己做的写 /work 里的绝对路径。",
+      },
+      replyTo: {
+        type: "string",
+        description: "引用哪一条：chat id-消息 id，形如 -1001234567890-151。写了它就发到那条消息所在的会话，to 可以省。",
+      },
+    },
+    required: ["messages"],
+  },
   async execute(_toolCallId, params) {
     const messages = params.messages.map((m) => m.trim()).filter((m) => m !== "");
     if (messages.length === 0) {
@@ -89,25 +89,27 @@ const sayTool = defineTool({
   },
 });
 
-const listenTool = defineTool({
+const listenTool = tool({
   name: "listen",
   label: "Listen",
   description: '让某些会话的消息直接叫醒你——平时它们只摆在收件箱里等你醒。chats 是 chat id 数组，写 "*" 表示全部，空数组表示不听了。until 可选，ISO 时刻，不写就是四小时后，最长四小时。why 可选。返回 {chats, until}。',
-  parameters: Type.Object({
-    chats: Type.Array(Type.String(), {
-      // the handler below already turns an empty list into "不听了" and clears
-      // attention.json; minItems: 1 was the only thing standing between the two.
-      maxItems: 10,
-      description:
-        "要听哪些会话的 chat id（纯数字，不是 @handle，也不是 telegram:xxx）。写 * 是所有会话。空数组表示不再听了。",
-    }),
-    until: Type.Optional(
-      Type.String({
-        description: "听到什么时候，ISO 时间（例如 2026-10-26T17:00:00Z）。不写就是四小时后。最长四小时。",
-      }),
-    ),
-    why: Type.Optional(Type.String({ description: "为什么听——给自己看的一句话。" })),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      chats: {
+        type: "array",
+        items: { type: "string" },
+        // an empty list means "不听了" and clears attention.json, which is why there is
+        // no minItems here
+        maxItems: 10,
+        description:
+          "要听哪些会话的 chat id（纯数字，不是 @handle，也不是 telegram:xxx）。写 * 是所有会话。空数组表示不再听了。",
+      },
+      until: { type: "string", description: "听到什么时候，ISO 时间（例如 2026-10-26T17:00:00Z）。不写就是四小时后。最长四小时。" },
+      why: { type: "string", description: "为什么听——给自己看的一句话。" },
+    },
+    required: ["chats"],
+  },
   async execute(_toolCallId, params) {
     const raw = params.chats.map((c) => c.trim()).filter((c) => c !== "");
     const chats: (number | "*")[] = [];
@@ -132,17 +134,23 @@ const listenTool = defineTool({
   },
 });
 
-const forgetTool = defineTool({
+const forgetTool = tool({
   name: "forget",
   label: "Forget files",
-  description: '删掉 /files 里的文件腾地方，下一轮醒来之前生效——这一轮你还读得到它们。files 是路径数组，形如 /files/123456789-1-photo.jpg，一次最多 50 个。返回 {files}：删掉之后还剩的待删清单。',
-  parameters: Type.Object({
-    files: Type.Array(Type.String(), {
-      minItems: 1,
-      maxItems: 50,
-      description: "要删的文件，写 /files 里的路径，例如 /files/123456789-1-photo.jpg。",
-    }),
-  }),
+  description: '删掉别人发来的文件腾地方，下一轮醒来之前生效——这一轮你还听得到它。files 是 id 数组（形如 "F12"；老写法的 /files/… 路径也认），一次最多 50 个。返回 {files}：删掉之后还剩的待删清单。',
+  parameters: {
+    type: "object",
+    properties: {
+      files: {
+        type: "array",
+        items: { type: "string" },
+        minItems: 1,
+        maxItems: 50,
+        description: "要删的文件：写文件 id（F12），或者老写法的 /files/… 路径。",
+      },
+    },
+    required: ["files"],
+  },
   async execute(_toolCallId, params) {
     const files = params.files.map((f) => f.trim()).filter((f) => f !== "");
     if (files.length === 0) {
@@ -157,18 +165,23 @@ const forgetTool = defineTool({
   },
 });
 
-const muteTool = defineTool({
+const muteTool = tool({
   name: "mute",
   label: "Mute",
   description: '安静一段时间：把某个来源从「会叫醒你」降成「下次醒来再看」，消息一条都不丢。target 只能是 "*"（全部环境噪音）或 "chat:<id>"（id 是数字）；dm 不接受——私聊、@你、回复你永远叫醒你。minutes 是 1–10080。why 必填，会写进下次醒来的纸上。返回 {target, until}。',
-  parameters: Type.Object({
-    target: Type.String({
-      description:
-        '要安静的来源："*"（全部环境噪音）或 "chat:<id>"——id 就是「能说话的地方」里那些数字。只有群里的闲话能压；私聊、@、回复永远叫醒你，所以 "dm" 不是合法 target。',
-    }),
-    minutes: Type.Integer({ minimum: 1, maximum: 10080, description: "安静多少分钟。" }),
-    why: Type.String({ description: "为什么。会写进你下次醒来的纸上。" }),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      target: {
+        type: "string",
+        description:
+          '要安静的来源："*"（全部环境噪音）或 "chat:<id>"——id 就是「能说话的地方」里那些数字。只有群里的闲话能压；私聊、@、回复永远叫醒你，所以 "dm" 不是合法 target。',
+      },
+      minutes: { type: "integer", minimum: 1, maximum: 10080, description: "安静多少分钟。" },
+      why: { type: "string", description: "为什么。会写进你下次醒来的纸上。" },
+    },
+    required: ["target", "minutes", "why"],
+  },
   async execute(_toolCallId, params) {
     const target = params.target.trim();
     // The gateway settles dm / mention / reply *before* it looks at mute.json, so those
@@ -195,17 +208,19 @@ const muteTool = defineTool({
   },
 });
 
-const proposeTool = defineTool({
+const proposeTool = tool({
   name: "propose",
   label: "Propose",
   description:
     "申请改自己的运行条件，下次醒来前生效。只认时机和阈值：" +
     '{"cycle":{"defaultWakeMinutes":30}}。runner、容器限额、网络、timeout 不在这张桌子上。',
-  parameters: Type.Object({
-    value: Type.String({
-      description: '要改的东西，JSON 对象，形如 {"cycle":{"defaultWakeMinutes":30}}。',
-    }),
-  }),
+  parameters: {
+    type: "object",
+    properties: {
+      value: { type: "string", description: '要改的东西，JSON 对象，形如 {"cycle":{"defaultWakeMinutes":30}}。' },
+    },
+    required: ["value"],
+  },
   async execute(_toolCallId, params) {
     let parsed: unknown;
     try {
