@@ -68,13 +68,25 @@ RUN set -eux; \
 # No memory extension on purpose: every waking is its own session, so there is nothing
 # to compact and nothing to carry. Its memory is the book, not the context.
 ENV HOME=/home/agent
-COPY --from=packages /home/agent/.pi/agent/npm /home/agent/.pi/agent/npm
-COPY --from=packages /home/agent/.pi/agent/settings.json /home/agent/.pi/agent/settings.json
+# Packages live outside the agent's home so the home can be a tmpfs: the root filesystem
+# is read-only at run time, and the entrypoint copies these in at the start of a waking.
+COPY --from=packages /home/agent/.pi/agent/npm /opt/pi-npm
 RUN mkdir -p /home/agent/.pi/agent/sessions \
-  && chmod -R a+rX /home/agent/.pi \
+  && chmod -R a+rX /home/agent/.pi /opt/pi-npm \
   # pi writes trust.json and its lock next to settings.json, and the container runs as
   # an arbitrary uid: without a writable agent dir it exits on the first waking
   && chmod 0777 /home/agent/.pi/agent /home/agent/.pi/agent/sessions
+
+# The root filesystem is mounted read-only, so the agent's home is a tmpfs and this is
+# what fills it: pi loads packages from `~/.pi/agent/npm`, and a copy per waking is
+# cheaper than a mount that would hide the rest of the home.
+RUN cat > /usr/local/bin/geng-pi <<'SH'
+#!/bin/sh
+# `-n` so a second call in the same container (there is none today) does not copy twice
+[ -d "$HOME/.pi/agent/npm" ] || cp -r /opt/pi-npm "$HOME/.pi/agent/npm"
+exec pi "$@"
+SH
+RUN chmod 0755 /usr/local/bin/geng-pi
 
 # say / mute / web_search are mounted read-only at run time (see internal/command.ts) from
 # image/extensions/, not copied in: a tool that changes during development must not cost a

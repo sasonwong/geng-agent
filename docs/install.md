@@ -565,7 +565,7 @@ data/<instance>/
   book/   它的书：identity.md  open-loops/  journal/  几个没人读的 json
                 mail.read.json（打开过的邮件 id）· 只有 identity.md 挂进容器，可写
   policy.json   它活在什么规矩下——在书外面，容器里看不见也写不着
-  workspace/    挂成 /work（可写，永远不清理）
+  workspace/    挂成 /work（可写，永远不清理）——容器里除了它和 identity.md 只有 tmpfs
   files/        别人发来的图片和文件，一封信一对 F<n>（不进容器，靠 id）
   inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
   mail/         收到的邮件，一封一个文件（不进容器，靠 recall 读）

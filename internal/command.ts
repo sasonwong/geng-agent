@@ -94,6 +94,13 @@ export function buildCommand(
       "ALL",
       "--security-opt",
       "no-new-privileges",
+      // The root filesystem is read-only: what pi and git may write is /work, the agent's
+      // own home (a tmpfs, refilled from the image at start), and /tmp.
+      "--read-only",
+      "--tmpfs",
+      "/tmp:rw,nosuid,size=64m",
+      "--tmpfs",
+      "/home/agent/.pi/agent:rw,size=32m",
       "-e",
       "HOME=/home/agent",
       // every -e needs its own flag; a bare KEY=VALUE lands where the image name goes
@@ -153,7 +160,7 @@ export function buildCommand(
     args.push(
       policy.container.image,
       ...(tail ?? [
-        "pi",
+        "geng-pi",
         "--mode",
         "rpc",
         "--session-id",
