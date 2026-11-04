@@ -75,7 +75,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     return checks;
   }
 
-  const settings = readJson<{ defaultProvider?: string; defaultModel?: string }>(
+  const settings = readJson<{ defaultProvider?: string; defaultModel?: string; packages?: unknown }>(
     join(p.piDir, "settings.json"),
     {},
   );
@@ -87,6 +87,27 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
         ? `${settings.defaultProvider}/${settings.defaultModel}`
         : `${join(p.piDir, "settings.json")} 里没有 defaultProvider/defaultModel：容器连不上模型`,
     warnOnly: policy.runner !== "docker",
+  });
+
+  // The image installs the packages; this file decides which are loaded. They are two
+  // copies of one list, and the copy made at init does not follow the template: a package
+  // declared here but never installed makes pi exit before it can say anything.
+  const template = readJson<{ packages?: unknown }>(join(root, "deploy", "settings.json"), {});
+  const listed = Array.isArray(settings.packages) ? settings.packages.filter((x): x is string => typeof x === "string") : [];
+  const templated = Array.isArray(template.packages)
+    ? template.packages.filter((x): x is string => typeof x === "string")
+    : [];
+  const missing = listed.filter((x) => !templated.includes(x));
+  checks.push({
+    name: "插件列表",
+    ok: missing.length === 0,
+    warnOnly: true,
+    detail:
+      missing.length === 0
+        ? listed.length === 0
+          ? "只装镜像里自带的那几个"
+          : listed.join(", ")
+        : `这份 settings 里写了镜像没装的：${missing.join(", ")}——镜像里没有，醒来会直接退出`,
   });
 
   if (policy.runner === "docker") {
