@@ -92,8 +92,7 @@ const sayTool = defineTool({
 const listenTool = defineTool({
   name: "listen",
   label: "Listen",
-  description:
-    "让某个会话的消息直接叫醒你：平时那些消息只在你下一轮醒来时摆在那儿。到点自动失效，最长四小时。",
+  description: '让某些会话的消息直接叫醒你——平时它们只摆在收件箱里等你醒。chats 是 chat id 数组，写 "*" 表示全部，空数组表示不听了。until 可选，ISO 时刻，不写就是四小时后，最长四小时。why 可选。返回 {chats, until}。',
   parameters: Type.Object({
     chats: Type.Array(Type.String(), {
       // the handler below already turns an empty list into "不听了" and clears
@@ -136,8 +135,7 @@ const listenTool = defineTool({
 const forgetTool = defineTool({
   name: "forget",
   label: "Forget files",
-  description:
-    "删掉 /files 里的文件，为了腾地方。下一轮醒来之前生效——这一轮你还能读到它们。",
+  description: '删掉 /files 里的文件腾地方，下一轮醒来之前生效——这一轮你还读得到它们。files 是路径数组，形如 /files/123456789-1-photo.jpg，一次最多 50 个。返回 {files}：删掉之后还剩的待删清单。',
   parameters: Type.Object({
     files: Type.Array(Type.String(), {
       minItems: 1,
@@ -162,8 +160,7 @@ const forgetTool = defineTool({
 const muteTool = defineTool({
   name: "mute",
   label: "Mute",
-  description:
-    "安静一段时间：把某个来源从「会叫醒你」降成「等你下次醒来再看」。消息一条都不会丢。直接对你说话的人（@你、回复你、私聊你）不受影响。",
+  description: '安静一段时间：把某个来源从「会叫醒你」降成「下次醒来再看」，消息一条都不丢。target 只能是 "*"（全部环境噪音）或 "chat:<id>"（id 是数字）；dm 不接受——私聊、@你、回复你永远叫醒你。minutes 是 1–10080。why 必填，会写进下次醒来的纸上。返回 {target, until}。',
   parameters: Type.Object({
     target: Type.String({
       description:

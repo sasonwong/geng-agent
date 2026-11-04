@@ -38,9 +38,7 @@ function say(r: Reply, ok: string): string {
 const journalTool = defineTool({
   name: "journal",
   label: "Journal",
-  description:
-    "往日记里写。一次调用写几条，每条一个元素；返回它们拿到的 id（形如 J20260303-2），" +
-    "以后可以用 open(id) 读回来。内容格式你定，没人解析它。",
+  description: '往日记里写。texts 是字符串数组（1–20 条，一条一个元素），一次调用写几条。返回 {ids}：每条拿到的 id，形如 J20260302-2，可以用 open(id) 读回来。内容格式你定，没人解析。',
   parameters: Type.Object({
     texts: Type.Array(Type.String({ description: "一条一个元素。" }), {
       minItems: 1,
@@ -61,9 +59,7 @@ const journalTool = defineTool({
 const loopOpenTool = defineTool({
   name: "loop_open",
   label: "Open loop",
-  description:
-    "记一件没闭合的事。返回 id（形如 L12）。它会出现在每张唤醒纸的条数里，" +
-    "直到你用 loop_close 关掉它。写清怎么算做完，下一轮的你才认得出什么时候算完。",
+  description: '记一件没闭合的事。text 写清这件事是什么、怎么算做完——下一轮的你才认得出什么时候算完。返回 {id}，形如 L12。它会出现在每张唤醒纸的条数里，直到 loop_close。',
   parameters: Type.Object({
     text: Type.String({ description: "这件事是什么，以及怎么算闭合。" }),
   }),
@@ -79,9 +75,7 @@ const loopOpenTool = defineTool({
 const loopCloseTool = defineTool({
   name: "loop_close",
   label: "Close loop",
-  description:
-    "关掉一件没闭合的事。id 来自 loop_open 或者唤醒纸上那个数；不删内容，" +
-    "只是把它移到 open-loops/closed/，所以纸上的条数会减一。note 写一句为什么关。",
+  description: '关掉一件没闭合的事。id 来自 loop_open 的返回（形如 L12，不是文件名）。note 可选，写一句为什么算完了，附在文件末尾。不删内容，只是移到 open-loops/closed/，所以纸上的条数减一。返回 {id, closed}。',
   parameters: Type.Object({
     id: Type.String({ description: '要关的那件事，形如 "L12"。' }),
     note: Type.Optional(Type.String({ description: "为什么算完了，一句话。" })),
@@ -98,9 +92,7 @@ const loopCloseTool = defineTool({
 const waitTool = defineTool({
   name: "wait",
   label: "Wait",
-  description:
-    "定下一次什么时候醒。when 写一段时长（\"20m\"、\"2h\"、\"90s\"）或者一个带时区的时刻；why 写一句到时候你还认得出为什么。" +
-    "不调就按默认间隔醒。返回真正生效的时刻（太近的会被抬到最短间隔）。",
+  description: '定下一次什么时候醒。when 写一段时长（"20m"、"2h"、"90s"、"1d"）或者一个带时区的时刻（2026-03-02T09:15:00Z）；why 可选，写一句到时候你还认得出为什么。返回 {at}：真正生效的时刻——比最短间隔更近的会被抬到最短，回复的是抬完的时间。不调就按默认间隔醒。',
   parameters: Type.Object({
     when: Type.String({ description: '还要等多久，形如 "20m"；或者时刻 2026-03-02T09:15:00Z。' }),
     why: Type.Optional(Type.String({ description: "为什么那时候醒，一句话。" })),

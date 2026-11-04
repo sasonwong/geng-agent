@@ -30,9 +30,7 @@ async function call(route: string, body: Record<string, unknown>): Promise<strin
 const recallTool = defineTool({
   name: "recall",
   label: "Recall",
-  description:
-    "翻自己的书：日记、没闭合和已闭合的事、邮件、说过话的人、收件箱、醒过的每一轮。" +
-    "不给 query 就按时间列出最近的；给了 query 就只回出现它的那几行。要看全文用 open(id)。",
+  description: '翻自己的书。query 可选：给了就只回出现它的那几行，不给就按时间列最近的。sources 可选，取值 journal（日记）/ loops（没闭合的事，含已闭合）/ mail（邮件）/ people（和谁说过什么）/ inbox（收到的消息）/ sessions（醒过的每一轮），默认全翻。limit 默认 20，最多 50。每条回 id、来源、时间、一行摘要；要看全文用 open(id)。',
   parameters: Type.Object({
     query: Type.Optional(Type.String({ description: "要找的词。不给就是最近的东西。" })),
     sources: Type.Optional(
@@ -59,9 +57,7 @@ const recallTool = defineTool({
 const openTool = defineTool({
   name: "open",
   label: "Open",
-  description:
-    "读一件东西的全文：日记、没闭合的事、一封邮件、一个人说过的所有话、一条收到的消息、醒过的一轮。" +
-    "id 来自 recall。长的一页读不完，会告诉你用哪个 offset 接着读。打开邮件就算处理过了。",
+  description: '读一件东西的全文。id 的形状：日记 J20260302-2；没闭合的事 L12（已闭合的也打得开）；一个人 chat:-1001（他说过的全部话）；醒过的一轮 S2026-11-04T03-34；一封邮件就是 recall 里那个邮件 id；一条收到的消息是收件箱里的文件名（形如 -1001-77）。offset 可选，接着上次读。返回正文；超过 8000 字会告诉你下一个 offset。打开一封邮件就算处理过了。',
   parameters: Type.Object({
     id: Type.String({ description: "要读的那一件，形如 J20260303-2、L12、chat:-1001、S2026-11-04T03:34。" }),
     offset: Type.Optional(Type.Integer({ minimum: 0, description: "从第几个字开始，接着上次读。" })),
