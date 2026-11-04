@@ -260,7 +260,8 @@ function fileItems(p: Paths): Item[] {
       id: f.id,
       source: "files" as const,
       at,
-      header: `${f.name}（${Math.max(1, Math.round(f.bytes / 1024))} KB）`,
+      // a small file in KB rounds to 1 and reads as bigger than it is
+      header: `${f.name}（${f.bytes < 1024 ? `${f.bytes} 字节` : `${Math.round(f.bytes / 1024)} KB`}）`,
       body: `${f.name}\n${f.bytes} 字节\n用 download("${f.id}", "/work/...") 取到手上，或者 say(files:["${f.id}"]) 直接发出去。`,
     };
   });

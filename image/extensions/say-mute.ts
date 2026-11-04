@@ -36,10 +36,10 @@ const sayTool = defineTool({
   description:
     "对一个人说话。一次调用里的几句一起送到（按顺序），分几次调用就是隔一阵说一句；没人问你的时候也可以说。\n" +
     "to: chat id（纯数字）。只有一个地方能说话时可以省略，两处以上必须写。\n" +
-    "files: 一起发出去的文件，写 /work/… 里的路径。\n" +
+    "files: 一起发出去的文件，两种写法——别人发来的写 id（形如 \"F12\"，不用先 download），自己做的写 /work/… 路径。\n" +
     "replyTo: 引用某一句话，写 {\"chat\": -1001234567890, \"messageId\": 151}；这两个数在" +
     "recall 列出的消息 id（形如 M-1001234567890-151）和人的对话（每句后面的 #…）里。\n" +
-    "返回 {id, count}。发不出去会明说哪一处不对。",
+    "返回 {id, count}：id 是这条排队记录的编号（不是 Telegram 的消息号，那要等发出去之后才有）。发不出去会明说哪一处不对。",
   parameters: Type.Object({
     messages: Type.Array(Type.String(), {
       minItems: 1,
@@ -81,7 +81,7 @@ const sayTool = defineTool({
       content: [
         {
           type: "text",
-          text: `说了 ${String(reply.count)} 句${files.length === 0 ? "" : `，带 ${files.length} 个文件`}。`,
+          text: `说了 ${String(reply.count)} 句${files.length === 0 ? "" : `，带 ${files.length} 个文件`}，排队号 ${String(reply.id)}。`,
         },
       ],
       details: reply,

@@ -544,7 +544,7 @@ deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-egress.ser
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
 
 挂载是逐条论证过的，不是攒出来的：`/state/identity.md`（唯一一个它直接写的文件）、`/work`（干活）、
-`/outbox`（唯一出口）、`/files`（别人发来的文件，只读）、`data/<inst>/pi/settings.json`（只读，它不能换模型）。
+`data/<inst>/pi/settings.json`（只读，它不能换模型）。
 
 书本身**不挂**：`palimpsest/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`，

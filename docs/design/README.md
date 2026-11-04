@@ -321,11 +321,12 @@ Worker 是唯一能读 MIME 的地方，所以解析在那边；**判断全在�
 
 ### 文件的生命周期
 
-`/files` 不会无限长。两条上限（`policy.json` 的 `files`）：总容量（默认 500 MB）和年龄
+`/files` 不会无限长，而且**不挂进容器**：一个文件是一个 id（`F12`），看靠 `recall`，
+取靠 `download(id, to)`，发靠 `say(files:["F12"])`。两条上限（`policy.json` 的 `files`）：总容量（默认 500 MB）和年龄
 （默认 **0 = 不按年龄删**）。清理只发生在**它没在跑的时候**——每轮开始、容器启动之前，
 最老的先删，最新的永远留着（哪怕它自己就超了容量：删掉刚到的那个等于 daemon 替它判断什么值得留）。
 
-它自己也能删：`forget(files)` 写一份 `/state/files.forget.json`，daemon 在**下一轮醒来之前**
+它自己也能删：`forget(files)` 走 socket 写 `files.forget.json`，daemon 在**下一轮醒来之前**
 执行，并且只认 `/files/` 里的裸文件名。文件在容器里是只读挂载，所以它删不掉别人发给它的东西——
 删的渠道是有意的、可数的、会被写进日志和纸上的。
 
@@ -333,7 +334,7 @@ Worker 是唯一能读 MIME 的地方，所以解析在那边；**判断全在�
 
 - 「按你说的删了 2 个文件。」
 - 「地方不够了，清掉 3 个最老的（最老的一个 29 天前）。」
-- 「/files 里 460 MB，上限 500 MB。」（超过 85% 才出现，让它能把"要不要删点东西"当个事实来权衡）
+- 「别人发来的文件占 460 MB，上限 500 MB。」（超过 85% 才出现，让它能把"要不要删点东西"当个事实来权衡）
 
 它想留住的东西归它自己：`cp /files/x.jpg /work/`。这不需要新机制，也不需要告诉它——
 `/work` 是它干活的地方。
@@ -565,7 +566,8 @@ transcript 的**入站**行因此多了一个 `id` 字段（纯增量），出�
 ### 挂载表
 
 容器只看见这些：`/state`（书，读写）、`/work`、`/outbox`、`/inbox`（只读）、`/people`（只读）、
-`/files`（只读）、`/state/identity.md`（唯一可写）、自己的 session 目录、只读的 `settings.json`。
+`/state/identity.md`（唯一可写）、`/work`、自己的 session 目录、只读的 `settings.json`。
+没有 `/files`、`/state`、`/inbox`、`/people`、`/mail`、`/outbox`——它们全是 id 和 socket。
 
 **看不见的**：`daemon.log`（纸上的「上一轮」「24 小时醒了 N 次」已经说过）、`policy.json`
 （它活在什么规矩下不是它要读的书；可协商的那几个值由纸印出来）、`meta/`、`usage/`、`backup/`、
