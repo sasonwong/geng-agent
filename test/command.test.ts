@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildCommand } from "../internal/command.ts";
+import { startBookServer } from "../internal/book.ts";
 import { makePaths } from "../internal/paths.ts";
 import { defaultPolicy } from "../internal/policy.ts";
 
@@ -128,4 +129,27 @@ test("the search socket is mounted only when it exists, and at the same path", (
   assert.match(argv(), new RegExp(`-e GENG_SEARCH_SOCKET=${sock}`), "路径要和挂载点一致");
   // no port anywhere: the whole point is that the network has no special address
   assert.equal(argv().includes("8787"), false, "还在用端口");
+});
+
+test("the book socket is mounted read-only, and only when something is listening", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  const argv = (): string =>
+    buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []).args.join(" ");
+
+  assert.equal(argv().includes("GENG_BOOK_SOCK"), false, "socket 不在的时候还是注入了路径");
+
+  // a plain file at that path is not a channel: mounting it would hand the container a
+  // path that fails to connect, and the failure reads as "the daemon is down"
+  mkdirSync(paths.run, { recursive: true });
+  writeFileSync(join(paths.run, "book.sock"), "");
+  assert.equal(argv().includes("GENG_BOOK_SOCK"), false, "文件名对但没人听的时候也挂了");
+
+  const server = await startBookServer({ paths, log: () => {} });
+  try {
+    assert.match(argv(), new RegExp(`-v ${paths.run}:/run/geng:ro`), "书端点没挂进去");
+    assert.match(argv(), /-e GENG_BOOK_SOCK=\/run\/geng\/book\.sock/, "容器里的路径要和挂载点一致");
+  } finally {
+    server.close();
+  }
 });

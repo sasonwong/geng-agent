@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -26,4 +26,23 @@ test("every tool in image/extensions/ parses", () => {
     return `${where} ${ts.flattenDiagnosticMessageText(d.messageText, " ")}`;
   });
   assert.deepEqual(errors, [], `这些工具解析不了，pi 会带着它们 exit 1:\n${errors.join("\n")}`);
+});
+
+// `-e` loads every top-level file in the mounted directory, and an extension that does not
+// export a default makes pi exit 1 before it can speak — on every waking. A helper belongs
+// in a subdirectory, which `extensionArgs` skips; this is the check that says so out loud.
+test("every loaded file is an extension, and shared code lives one level down", () => {
+  const dir = fileURLToPath(new URL("../image/extensions/", import.meta.url));
+  const top = readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith(".ts"))
+    .map((e) => e.name);
+  assert.ok(top.length > 0);
+  for (const name of top) {
+    const source = readFileSync(join(dir, name), "utf8");
+    assert.match(
+      source,
+      /export default function/,
+      `${name} 被当成扩展加载，但没有 export default：pi 会带着它 exit 1`,
+    );
+  }
 });

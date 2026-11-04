@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSearchEnv, searchQuota, startSearchServer } from "../internal/search.ts";
-import { postJson } from "../image/extensions/uds.ts";
+import { postJson } from "../image/extensions/lib/uds.ts";
 
 // systemd loads secrets/search.env with EnvironmentFile=, so by the time any request
 // arrives `process.env` holds the copy from startup. If the environment won, a rotated

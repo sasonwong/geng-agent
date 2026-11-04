@@ -14,6 +14,12 @@ export interface Paths {
   /** One line per tool call, appended when a round ends: the ledger the page counts from.
    * Rebuildable from `session/` if it is ever lost — an index, not a fact. */
   acts: string;
+  /** The ceiling each id series has reached, so a deleted file cannot give an old entry's
+   * name to a new one. The files are the floor, this is the memory. */
+  ids: string;
+  /** Sockets, mounted into the container at /run/geng. Under `data/` so every runner has
+   * one; a socket is not a file anyone can back up, and it never survives a restart. */
+  run: string;
   inbox: string;
   inboxSeen: string;
   inboxLow: string;
@@ -76,6 +82,8 @@ export function makePaths(root: string, instance: string): Paths {
     usage: join(data, "usage"),
     meta: join(data, "meta"),
     acts: join(data, "meta", "acts.jsonl"),
+    ids: join(data, "meta", "ids.json"),
+    run: join(data, "run"),
     inbox,
     inboxSeen: join(inbox, "seen"),
     inboxLow: join(inbox, "low"),
@@ -125,5 +133,6 @@ export function requiredDirs(p: Paths): string[] {
     p.openLoops,
     p.people,
     p.filesDir,
+    p.run,
   ];
 }

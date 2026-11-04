@@ -4,7 +4,7 @@
  */
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { postJson } from "./uds.ts";
+import { postJson } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_SEARCH_SOCKET ?? "";
 const TOKEN = process.env.GENG_SEARCH_TOKEN ?? "";

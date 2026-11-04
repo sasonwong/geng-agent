@@ -42,6 +42,7 @@ import { parseAttention } from "./attention.ts";
 import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
 import { systemFacts } from "./packet.ts";
+import { startBookServer } from "./book.ts";
 import { actsFor, appendActs, countBookMentions } from "./acts.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
@@ -273,6 +274,18 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   for (const file of listSessionFiles(paths.sessionDir)) {
     const report = repairTail(file, true);
     if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
+  }
+
+  // The book endpoint is up for as long as the daemon is, because a tool call can arrive
+  // at any moment of a round, not only at its start. A daemon that cannot serve it still
+  // runs rounds: the tools report the outage themselves and dying here would take the
+  // instance down over a socket.
+  if (!o.dry) {
+    try {
+      await startBookServer({ paths, log });
+    } catch (err) {
+      log(`book 端点起不来：${(err as Error).message}（这一轮照常，写记忆会报错）`);
+    }
   }
 
   const { ops } = ensureGatewayDirs(paths.root);

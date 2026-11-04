@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import type { Policy } from "./policy.ts";
 import { readSearchEnv } from "./search.ts";
+import { bookSocketExists, BOOK_SOCKET_IN_CONTAINER } from "./book.ts";
 
 export interface Command {
   cmd: string;
@@ -136,6 +137,16 @@ export function buildCommand(
         `GENG_SEARCH_SOCKET=${search.socket}`,
       );
     }
+    // The book endpoint, same shape as search: a unix socket, no port. Read-only on the
+    // mount so the agent cannot unlink the name and cut itself off mid-round.
+    if (bookSocketExists(paths)) {
+      args.push(
+        "-v",
+        `${paths.run}:/run/geng:ro`,
+        "-e",
+        `GENG_BOOK_SOCK=${BOOK_SOCKET_IN_CONTAINER}`,
+      );
+    }
     if (policy.container.network) args.push("--network", policy.container.network);
     // secrets are injected, never mounted
     if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
@@ -169,6 +180,8 @@ export function buildCommand(
     ],
     env: {
       ...localEnv(),
+      // the local runner reaches the same socket by its host path
+      GENG_BOOK_SOCK: join(paths.run, "book.sock"),
       GENG_PLACES: String(places.length),
       GENG_PLACE_IDS: places.map((p) => p.id).join(","),
     },
