@@ -565,9 +565,9 @@ transcript 的**入站**行因此多了一个 `id` 字段（纯增量），出�
 
 ### 挂载表
 
-容器只看见这些：`/state`（书，读写）、`/work`、`/outbox`、`/inbox`（只读）、`/people`（只读）、
-`/state/identity.md`（唯一可写）、`/work`、自己的 session 目录、只读的 `settings.json`。
-没有 `/files`、`/state`、`/inbox`、`/people`、`/mail`、`/outbox`——它们全是 id 和 socket。
+容器只看见这些：`/state/identity.md`（唯一可写）、`/work`、只读的 `settings.json`。
+书本身不挂：`/state`、`/inbox`、`/people`、`/mail`、`/outbox`、`/files` 都不在容器里，
+读写全是 id 加 socket。容器能写的只有 `identity.md` 和 `/work`。
 
 **看不见的**：`daemon.log`（纸上的「上一轮」「24 小时醒了 N 次」已经说过）、`policy.json`
 （它活在什么规矩下不是它要读的书；可协商的那几个值由纸印出来）、`meta/`、`usage/`、`backup/`、

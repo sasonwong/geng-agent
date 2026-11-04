@@ -523,10 +523,10 @@ git fetch origin && git reset --hard origin/main
 ```
 data/<instance>/
   palimpsest/   它的书：identity.md  open-loops/  journal/  几个没人读的 json
-                mail.read.json（它标过已读的邮件 id）· 挂成 /state（可写）
+                mail.read.json（打开过的邮件 id）· 只有 identity.md 挂进容器，可写
   policy.json   它活在什么规矩下——在书外面，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）
-  files/        别人发来的图片和文件，挂成 /files（只读）
+  files/        别人发来的图片和文件，一封信一对 F<n>（不进容器，靠 id）
   inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
   mail/         收到的邮件，一封一个文件（不进容器，靠 recall 读）
   people/       一个地址一份对话记录，只追加，不总结
