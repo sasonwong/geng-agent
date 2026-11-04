@@ -175,6 +175,8 @@ function logLine(
   // messages only: a `[daemon@…]` notice has no file behind it, and saying it is not the
   // same act as handing over something a person wrote
   inj: { total: number; unread: number },
+  /** Model-key fetches: one per model request is normal, more is somebody else asking. */
+  keyFetches: number,
   interventions: string[],
   backup: BackupOutcome | null,
   spent: { tokens: number; cost: number } | null,
@@ -199,6 +201,7 @@ function logLine(
     );
   }
   parts.push(`inbox=${inboxCount}`);
+  if (keyFetches > 0) parts.push(`key=${keyFetches}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
   if (inj.total > 0) {
     parts.push(inj.unread > 0 ? `inj=${inj.total}(unread=${inj.unread})` : `inj=${inj.total}`);
@@ -281,6 +284,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // at any moment of a round, not only at its start. A daemon that cannot serve it still
   // runs rounds: the tools report the outage themselves and dying here would take the
   // instance down over a socket.
+  // Model-key fetches in the current round. The endpoint lives as long as the daemon, so
+  // the counter is reset when a round starts and read when it logs.
+  let keyFetches = 0;
   if (!o.dry) {
     try {
       await startBookServer({
@@ -288,6 +294,12 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         log,
         minWakeMs: policy.cycle.minWakeMinutes * 60_000,
         places: knownPlaces(paths.root, o.instance).map((p) => p.id),
+        // pi asks for the key on every model request, so this should track the number of
+        // calls. A round whose count is higher fetched the key for something else — the
+        // socket is reachable from `bash` too, and this is the only way that shows up.
+        onKeyFetch: () => {
+          keyFetches += 1;
+        },
       });
     } catch (err) {
       log(`book 端点起不来：${(err as Error).message}（这一轮照常，写记忆会报错）`);
@@ -343,6 +355,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
     let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
+    keyFetches = 0;
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
     let pendingWait: WaitSpec | null;
@@ -618,6 +631,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       escalation.level,
       inbox.length,
       inj,
+      keyFetches,
       interventions,
       backup,
       spent,

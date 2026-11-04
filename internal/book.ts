@@ -41,6 +41,12 @@ export interface BookOptions {
   minWakeMs?: number;
   /** Which chats it may speak into or listen to; the daemon already knows, the container does not. */
   places?: number[];
+  /**
+   * Called once per model-key fetch. pi asks for the key on every model request, so the
+   * count should track the number of calls; a round that fetched it more often than it
+   * talked to the model fetched it for something else.
+   */
+  onKeyFetch?: () => void;
 }
 
 export interface HandlerOptions {
@@ -451,6 +457,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
         reply(503, { error: `没有模型密钥：写 ${join("secrets", "model.env")}（OPENCODE_API_KEY=…）` });
         return;
       }
+      o.onKeyFetch?.();
       res.writeHead(200, { "content-type": "text/plain" });
       res.end(found.key);
       return;
