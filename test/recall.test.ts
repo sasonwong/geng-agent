@@ -1,0 +1,78 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { makePaths, requiredDirs } from "../internal/paths.ts";
+import { openText, recallText } from "../internal/recall.ts";
+import { ensureDirs } from "../internal/state.ts";
+
+function fixture() {
+  const root = mkdtempSync(join(tmpdir(), "geng-recall-"));
+  const p = makePaths(root, "alice");
+  ensureDirs(requiredDirs(p));
+  return p;
+}
+
+test("one question over every place, and the ids it answers with are the ones open takes", () => {
+  const p = fixture();
+  mkdirSync(p.journal, { recursive: true });
+  writeFileSync(join(p.journal, "J20260302-1.md"), "今天学会了闭嘴\n");
+  mkdirSync(p.openLoops, { recursive: true });
+  writeFileSync(join(p.openLoops, "L3.md"), "把那封信回掉\n");
+  mkdirSync(join(p.openLoops, "closed"), { recursive: true });
+  writeFileSync(join(p.openLoops, "closed", "L2.md"), "旧的\n[闭合 x] 完了\n");
+  mkdirSync(p.mail, { recursive: true });
+  writeFileSync(join(p.mail, "m1.json"), JSON.stringify({ id: "abc", at: "2026-03-02T07:00:00Z", from: "a@example.invalid", subject: "问候", text: "信里说了闭嘴" }));
+  mkdirSync(p.people, { recursive: true });
+  writeFileSync(join(p.people, "-1001.jsonl"), [JSON.stringify({ at: "2026-03-02T08:00:00Z", dir: "in", text: "在吗", from: "@someone" }), JSON.stringify({ at: "2026-03-02T08:01:00Z", dir: "out", text: "在" })].join("\n") + "\n");
+  mkdirSync(p.inbox, { recursive: true });
+  writeFileSync(join(p.inbox, "-1001-77.json"), JSON.stringify({ id: "-1001-77", at: "2026-03-02T08:00:00Z", from: "telegram:@someone", text: "敲你一下" }));
+
+  const listing = recallText(p, {});
+  // closed loops are still listed: "how did that end" is the same question as "what is left"
+  for (const id of ["J20260302-1", "L3", "L2", "abc", "chat:-1001", "-1001-77"]) {
+    assert.match(listing, new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}  `, "m"), `${id} 应该在列表里`);
+  }
+
+  // and the id from the listing is what open resolves — the two must not disagree
+  for (const id of ["J20260302-1", "L3", "L2", "abc", "chat:-1001", "-1001-77"]) {
+    const r = openText(p, id, 0);
+    assert.equal(r.found, true, `${id} 打不开`);
+    assert.match(r.text, new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}  `));
+  }
+});
+
+test("a query answers with the lines, and an empty answer says so", () => {
+  const p = fixture();
+  mkdirSync(p.journal, { recursive: true });
+  writeFileSync(join(p.journal, "J20260302-1.md"), "第一行\n今天学会了闭嘴\n");
+  assert.match(recallText(p, { query: "闭嘴" }), /J20260302-1[\s\S]*今天学会了闭嘴/);
+  assert.equal(recallText(p, { query: "没出现过的东西" }), "没有哪一处提到「没出现过的东西」。");
+  // sources narrows it: a journal term must not be found when only mail is asked for
+  assert.equal(recallText(p, { query: "闭嘴", sources: ["mail"] }), "没有哪一处提到「闭嘴」。");
+});
+
+test("opening a mail is what makes it no longer new, in the same call", () => {
+  const p = fixture();
+  mkdirSync(p.mail, { recursive: true });
+  for (const [n, id] of [["1", "aaa"], ["2", "bbb"]] as const) {
+    writeFileSync(join(p.mail, `m${n}.json`), JSON.stringify({ id, at: "2026-03-02T07:00:00Z", text: "正文", subject: "s" }));
+  }
+  const first = openText(p, "aaa", 0);
+  assert.match(first.text, /还剩 1 封没打开/);
+  // opening it twice is not two reads of an unread mail
+  assert.match(openText(p, "aaa", 0).text, /还剩 1 封没打开/);
+  assert.match(openText(p, "bbb", 0).text, /还剩 0 封没打开/);
+});
+
+test("a long thing is paged, and says how to carry on", () => {
+  const p = fixture();
+  mkdirSync(p.journal, { recursive: true });
+  writeFileSync(join(p.journal, "J20260302-1.md"), "甲".repeat(9_000));
+  const first = openText(p, "J20260302-1", 0);
+  assert.match(first.text, /还有 1000 字，offset=8000 接着读/);
+  assert.match(openText(p, "J20260302-1", 8_000).text, /甲$/);
+  // an id nothing has is a refusal, not an empty page
+  assert.equal(openText(p, "J00000000-9", 0).found, false);
+});

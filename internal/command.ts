@@ -107,11 +107,10 @@ export function buildCommand(
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
       `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
-      // The book is read-only inside: every write goes through the endpoint, so the
-      // mount is the boundary rather than a promise. The one exception is the file it
-      // rewrites freely, and that is a single-file mount over the read-only directory.
-      "-v",
-      `${paths.palimpsest}:/state:ro`,
+      // The book is not mounted at all. Every read and every write goes through the
+      // endpoint, so a call is the only way in and the ledger sees all of it — a `cat`
+      // used to count as a read neither the daemon nor the page could name. The single
+      // exception is the page it rewrites freely, which is a file, not an action.
       "-v",
       `${paths.identity}:/state/identity.md`,
       // the say extension writes /outbox; the gateway reads data/<inst>/outbox.
@@ -119,20 +118,10 @@ export function buildCommand(
       // mountpoint through the bind, leaving root-owned junk in the agent's own book.
       "-v",
       `${paths.outbox}:/outbox`,
-      // read-only: the page points at these instead of pasting them, so they must be
-      // readable from inside — but it must not be able to delete what a human said
-      "-v",
-      `${paths.inbox}:/inbox:ro`,
-      "-v",
-      `${paths.people}:/people:ro`,
       // what people sent it: read-only, because a file it may not have looked at yet must
       // not be something it can edit
       "-v",
       `${paths.filesDir}:/files:ro`,
-      // every mail ever received, read-only and never moved: "read" is a list in its
-      // own book, so the mailbox is nothing it can delete or rewrite
-      "-v",
-      `${paths.mail}:/mail:ro`,
       // the tools come from the checkout, not from an image layer: read-only, at the same
       // absolute path the image used to copy them to, so `@earendil-works/pi-ai` keeps
       // resolving. Read-only is the point — it must not be able to rewrite how it speaks.

@@ -25,10 +25,12 @@ test("only what the page points at is mounted, and never the rules", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
   const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []).args.join(" ");
-  assert.match(argv, new RegExp(`-v ${paths.inbox}:/inbox:ro`));
-  assert.match(argv, new RegExp(`-v ${paths.people}:/people:ro`));
-  // the mailbox is read-only like the rest: what a human wrote is not the agent's to delete
-  assert.match(argv, new RegExp(`-v ${paths.mail}:/mail:ro`));
+  // The book is not mounted: every read is a call, so the ledger can name all of them.
+  // A `cat` over these used to be a read nothing could count.
+  for (const target of [":/inbox", ":/people", ":/mail", `-v ${paths.palimpsest}:/state`]) {
+    assert.equal(argv.includes(target), false, `${target} 不该挂进容器`);
+  }
+  assert.match(argv, new RegExp(`-v ${paths.identity}:/state/identity.md`));
   // the rules it lives under are not exposed at all: no mount, and the file now lives
   // outside the book, so the /state bind cannot carry it in either
   assert.equal(argv.includes("/daemon.log"), false, "daemon.log 不挂了");

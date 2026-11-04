@@ -119,7 +119,7 @@ test("open loops are counted by file, and pointed at instead of pasted", () => {
   writeText(join(paths.openLoops, "弄清一个问题.md"), "查过两次");
   writeText(join(paths.openLoops, "第二件.md"), "随便什么形状都行");
   const text = buildPacket(input({}));
-  assert.match(text, /未闭合的事：2 件，在 \/state\/open-loops\/。/);
+  assert.match(text, /未闭合的事：2 件。用 recall\(sources:\["loops"\]\) 看是哪几件。/);
   // the title is for the agent to dig out, not for the daemon to summarize
   assert.doesNotMatch(text, /弄清一个问题/);
 });
@@ -250,7 +250,7 @@ test("the page stays bounded without being cut: nothing external is pasted", () 
   for (let n = 0; n < 200; n++) writeText(join(paths.openLoops, `第 ${n} 件事.md`), "x");
   const text = buildPacket(input({ inbox: many, lowPending: 500 }));
   assert.ok(Buffer.byteLength(text, "utf8") < 2500, `page grew to ${Buffer.byteLength(text, "utf8")}`);
-  assert.match(text, /有人在跟你说话：200 条（2 个人），在 \/inbox\/。/);
+  assert.match(text, /有人在跟你说话：200 条（2 个人）。用 recall\(sources:\["inbox"\]\) 看。/);
   assert.match(text, /未闭合的事：200 件/);
 });
 
@@ -409,7 +409,7 @@ test("mail is counted with its senders, and never pretends to have woken it", ()
     }),
   );
   // 3 days before the page's clock, and both senders named once
-  assert.match(text, /邮件：2 封没打开，最早一封 3 天前，来自 someone@example\.org、other@example\.net，在 \/mail\/。/);
+  assert.match(text, /邮件：2 封没打开，最早一封 3 天前，来自 someone@example\.org、other@example\.net。用 recall\(sources:\["mail"\]\) 看。/);
   // mail is pull: it must not be dressed up as a conversation or as somebody waiting
   assert.doesNotMatch(text, /有人在跟你说话/);
   assert.doesNotMatch(text, /还没回的/);
@@ -417,7 +417,7 @@ test("mail is counted with its senders, and never pretends to have woken it", ()
   assert.equal(buildPacket(f.input({})).includes("邮件"), false, "没有邮件时一个字都不提");
 });
 
-test("ambient chatter is counted once, and is not pointed at inbox/", () => {
+test("ambient chatter is counted once, and is pointed at a tool, not a path", () => {
   const { input } = fixture();
   // measured on a real waking: 1 message in inbox/, 27 in inbox/low/, and a page that
   // said "有人在跟你说话：28 条，在 /inbox/" and then "还有 27 条不叫醒你的" — the same
@@ -438,8 +438,8 @@ test("ambient chatter is counted once, and is not pointed at inbox/", () => {
     }),
   );
   // one message, one chat: no phantom second person invented by the ambient half
-  assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
-  assert.match(text, /还有 27 条不叫醒你的在 \/inbox\/low\/（群里的闲话）。/);
+  assert.match(text, /有人在跟你说话：1 条。用 recall\(sources:\["inbox"\]\) 看。/);
+  assert.match(text, /还有 27 条不叫醒你的（群里的闲话），recall\(sources:\["inbox"\]\) 里能翻到。/);
   assert.doesNotMatch(text, /有人在跟你说话：28 条|（2 个人）/);
 });
 
@@ -450,7 +450,7 @@ test("a waking that carried only ambient chatter does not claim anybody is talki
   ];
   const text = buildPacket(input({ reason: "knock", inbox: low, lowInbox: low, lowPending: 1 }));
   assert.doesNotMatch(text, /有人在跟你说话：/);
-  assert.match(text, /还有 1 条不叫醒你的在 \/inbox\/low\/（群里的闲话）。/);
+  assert.match(text, /还有 1 条不叫醒你的（群里的闲话），recall\(sources:\["inbox"\]\) 里能翻到。/);
   // the last line still tells the truth about who is there, ambient included
   assert.match(text, /现在有人在跟你说话/);
 });
@@ -467,8 +467,8 @@ test("an unreadable file in inbox/low hides nothing that did arrive", () => {
       lowPending: 3,
     }),
   );
-  assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
-  assert.match(text, /还有 3 条不叫醒你的在 \/inbox\/low\/（群里的闲话）。/);
+  assert.match(text, /有人在跟你说话：1 条。用 recall\(sources:\["inbox"\]\) 看。/);
+  assert.match(text, /还有 3 条不叫醒你的（群里的闲话），recall\(sources:\["inbox"\]\) 里能翻到。/);
 });
 
 test("a message on disk in both dirs is the knock, not ambient", () => {
@@ -478,27 +478,9 @@ test("a message on disk in both dirs is the knock, not ambient", () => {
   // wins, so the page must not go quiet about a message that did knock.
   const one = { id: "7", file: "7.json", text: "在吗", from: "telegram:@you", chat: 111 };
   const text = buildPacket(input({ reason: "knock", inbox: [one, one], lowInbox: [one], lowPending: 1 }));
-  assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
+  assert.match(text, /有人在跟你说话：1 条。用 recall\(sources:\["inbox"\]\) 看。/);
 });
 
-test("the page says which part of the last round it cannot name yet", () => {
-  const { input } = fixture();
-  const cycle = {
-    at: "2026-03-02T08:00:00Z",
-    wake: "timer" as const,
-    tools: 9,
-    inbox: 0,
-    talkedTo: [],
-    touched: 2,
-    bookTouched: 3,
-  };
-  assert.match(buildPacket(input({ lastCycle: cycle })), /其中 3 个动作碰过 \/state。/);
-  // zero is not printed: a line that is always there stops being read
-  assert.doesNotMatch(
-    buildPacket(input({ lastCycle: { ...cycle, bookTouched: 0 } })),
-    /个动作碰过/,
-  );
-});
 
 test("the oldest unfinished thing carries its age, so the count can be judged", () => {
   const { paths, input } = fixture();
@@ -511,7 +493,7 @@ test("the oldest unfinished thing carries its age, so the count can be judged", 
   utimesSync(stale, old, old);
 
   const text = buildPacket(input({ nowMs }));
-  assert.match(text, /未闭合的事：2 件，最老的一件 41 天前，在 \/state\/open-loops\/。/);
+  assert.match(text, /未闭合的事：2 件，最老的一件 41 天前。用 recall\(sources:\["loops"\]\) 看是哪几件。/);
 });
 
 test("no unfinished things means no age to report", () => {
@@ -531,5 +513,5 @@ test("an unfinished thing from a minute ago gets no age line", () => {
   utimesSync(file, recent, recent);
   // "oldest 2m ago" on every page is noise; below an hour the age costs a sentence and
   // decides nothing
-  assert.match(buildPacket(input({ nowMs })), /未闭合的事：1 件，在 \/state\/open-loops\/。/);
+  assert.match(buildPacket(input({ nowMs })), /未闭合的事：1 件。用 recall\(sources:\["loops"\]\) 看是哪几件。/);
 });

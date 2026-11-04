@@ -51,7 +51,3 @@ export function appendActs(file: string, lines: ActLine[]): void {
  * what it is in its *name*, so the count only has to be big enough to make the point,
  * not exact.
  */
-export function countBookMentions(calls: ToolCall[], bookPath: string): number {
-  if (bookPath === "") return 0;
-  return calls.filter((c) => c.preview.includes(bookPath)).length;
-}

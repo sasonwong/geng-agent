@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { ATTENTION_MAX_MS } from "./attention.ts";
 import { keyCanMute } from "./mute.ts";
+import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
 import { parseAfter } from "./schedule.ts";
 import { readJson, readText, writeJson, writeText } from "./state.ts";
@@ -332,6 +333,20 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       const willApply = keys.filter((k) => k in NEGOTIABLE);
       const ignored = keys.filter((k) => !(k in NEGOTIABLE));
       return { status: 200, body: { willApply, ignored, at: nowIso } };
+    }
+
+    // Reads: the container does not have the book any more, so this is the only way in
+    // and every read leaves the same trace a write does.
+    if (route === "/recall") {
+      return { status: 200, body: { text: recallText(paths, params as Record<string, unknown>), at: nowIso } };
+    }
+
+    if (route === "/open") {
+      const id = text(params, "id");
+      if (id === null) return { status: 400, body: { error: "id 不能是空的：用 recall 看有哪些" } };
+      const offset = integer(params, "offset") ?? 0;
+      const r = openText(paths, id, Math.max(0, offset));
+      return { status: r.found ? 200 : 404, body: r.found ? { text: r.text, at: nowIso } : { error: r.text } };
     }
 
     return { status: 404, body: { error: `没有这个动作：${route}` } };

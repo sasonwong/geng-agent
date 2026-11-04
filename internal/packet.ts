@@ -82,7 +82,6 @@ export interface PacketInput {
     touched: number;
     /** Actions whose arguments mentioned the book this round: memory traffic with no name
      * yet. Written by the daemon, shown so the number can go down when the tools land. */
-    bookTouched?: number;
   } | null;
   /** The last thing said on the address that last spoke, whoever said it. */
   lastWords: { dir: "in" | "out"; text: string; at: string; who: string } | null;
@@ -290,8 +289,6 @@ export function buildPacket(input: PacketInput): string {
     const wrote = Number.isFinite(lastCycle.touched) ? lastCycle.touched : 0;
     // 0 is stated as 0: "wrote 0 files" is a fact, "did nothing" would be a verdict
     out.push(`上一轮：${LAST_WAKE[lastCycle.wake]}${did}，写了 ${wrote} 个文件。`);
-    const touched = Number.isFinite(lastCycle.bookTouched) ? (lastCycle.bookTouched as number) : 0;
-    if (touched > 0) out.push(`其中 ${touched} 个动作碰过 ${statePath}。`);
   }
 
   if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);
@@ -325,7 +322,7 @@ export function buildPacket(input: PacketInput): string {
   out.push(
     "",
     loops > 0
-      ? `未闭合的事：${loops} 件${loopAge}，在 ${statePath}/open-loops/。`
+      ? `未闭合的事：${loops} 件${loopAge}。用 recall(sources:["loops"]) 看是哪几件。`
       : "未闭合的事：（没有未闭合的事）",
   );
 
@@ -349,7 +346,7 @@ export function buildPacket(input: PacketInput): string {
     // waiting, or the page quietly privileges whoever spoke last
     const people = new Set(loud.map((m) => m.chat).filter((c) => typeof c === "number"));
     const who = people.size > 1 ? `（${people.size} 个人）` : "";
-    out.push("", `有人在跟你说话：${loud.length} 条${who}，在 ${inboxPath}/。`);
+    out.push("", `有人在跟你说话：${loud.length} 条${who}。用 recall(sources:["inbox"]) 看。`);
   }
   // Files are counted, never described: what is in them is the agent's business to look at.
   const kinds = new Map<string, number>();
@@ -380,7 +377,7 @@ export function buildPacket(input: PacketInput): string {
   }
 
   if (lowPending > 0) {
-    out.push(`还有 ${lowPending} 条不叫醒你的在 ${inboxPath}/low/（群里的闲话）。`);
+    out.push(`还有 ${lowPending} 条不叫醒你的（群里的闲话），recall(sources:["inbox"]) 里能翻到。`);
   }
   if (mailPending.count > 0) {
     // counted, never summarised: the senders and how long the oldest has waited are the
@@ -392,7 +389,7 @@ export function buildPacket(input: PacketInput): string {
         : `，最早一封 ${waited >= DAY_MS ? `${Math.round(waited / DAY_MS)} 天` : formatDuration(waited)}前`;
     const who =
       mailPending.senders.length === 0 ? "" : `，来自 ${mailPending.senders.join("、")}`;
-    out.push(`邮件：${mailPending.count} 封没打开${first}${who}，在 ${mailPath}/。`);
+    out.push(`邮件：${mailPending.count} 封没打开${first}${who}。用 recall(sources:["mail"]) 看。`);
   }
   const muteLine = renderMutes(mutes, places);
   const attentionLine = renderAttention(attention, places, timezone, nowMs);

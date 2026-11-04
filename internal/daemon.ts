@@ -44,7 +44,7 @@ import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
 import { systemFacts } from "./packet.ts";
 import { startBookServer } from "./book.ts";
-import { actsFor, appendActs, countBookMentions } from "./acts.ts";
+import { actsFor, appendActs } from "./acts.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId, packageVersion } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
@@ -603,7 +603,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
           countTouched(paths.workspace, startedMs) + countTouched(paths.palimpsest, startedMs),
         // how much memory traffic has no name yet; the page states it so the number has
         // somewhere to go down to when the tools exist
-        bookTouched: countBookMentions(result.toolCalls, statePath),
       },
     };
     writeMeta(paths, meta);

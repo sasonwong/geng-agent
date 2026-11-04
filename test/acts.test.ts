@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { actsFor, appendActs, countBookMentions } from "../internal/acts.ts";
+import { actsFor, appendActs } from "../internal/acts.ts";
 import type { ToolCall } from "../internal/rpc.ts";
 
 function call(over: Partial<ToolCall> = {}): ToolCall {
@@ -39,18 +39,3 @@ test("acts append instead of replacing: two rounds are two runs of lines", () =>
   assert.equal(JSON.parse(lines[2] as string).waking, 2);
 });
 
-test("a mention of the book is counted, a mention of anywhere else is not", () => {
-  const calls = [
-    call({ name: "bash", preview: '{"command":"cat > /state/journal/x.md"}' }),
-    call({ name: "write", preview: '{"path":"/state/identity.md"}' }),
-    call({ name: "bash", preview: '{"command":"ls /work"}' }),
-    call({ name: "read", preview: '{"path":"/stateful/thing"}' }),
-  ];
-  // the third must not count; the fourth does, and that is the known cost of matching a
-  // path fragment instead of a parsed argument — a number with a small error bar beats
-  // a number that does not exist
-  assert.equal(countBookMentions(calls, "/state"), 3);
-  assert.equal(countBookMentions(calls, "/work"), 1);
-  // no path configured (a runner that does not expose one) must not count everything
-  assert.equal(countBookMentions(calls, ""), 0);
-});
