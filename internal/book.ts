@@ -36,10 +36,13 @@ export interface BookOptions {
   log?: (line: string) => void;
   /** `policy.cycle.minWakeMinutes`, so an alarm can be told what it really became. */
   minWakeMs?: number;
+  /** Which chats it may speak into or listen to; the daemon already knows, the container does not. */
+  places?: number[];
 }
 
 export interface HandlerOptions {
   minWakeMs?: number;
+  places?: number[];
 }
 
 interface Reply {
@@ -133,6 +136,14 @@ function flatKeys(obj: unknown, prefix = ""): string[] {
   );
 }
 
+function parseReplyTo(raw: unknown): { chat: number; messageId: number } | undefined | null {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object") return null;
+  const o = raw as { chat?: unknown; messageId?: unknown };
+  if (typeof o.chat !== "number" || typeof o.messageId !== "number") return null;
+  return { chat: o.chat, messageId: o.messageId };
+}
+
 /** Append to a file it may not have written yet, keeping whatever is already there. */
 function appendText(file: string, addition: string): void {
   const before = readText(file) ?? "";
@@ -149,6 +160,7 @@ function parseWhen(when: string): number | null {
 
 export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
   const minWakeMs = o.minWakeMs ?? 0;
+  const places = o.places ?? [];
   return async (req: IncomingMessage, body: string): Promise<Reply> => {
     const route = req.url ?? "";
     let params: unknown = {};
@@ -264,6 +276,15 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         }
         chats.push(n);
       }
+      // no places configured is not "no chat may be heard": an instance without a bot
+      // yet would otherwise refuse a listening window it has no reason to refuse.
+      const strangers = places.length === 0 ? [] : chats.filter((c) => c !== "*" && !places.includes(c));
+      if (strangers.length > 0) {
+        return {
+          status: 400,
+          body: { error: `这些 chat 不在你能说话的地方里：${strangers.join("、")}。能听的是 ${places.join("、") || "（没有）"} 或 *` },
+        };
+      }
       if (chats.length === 0) {
         writeJson(paths.attention, {});
         return { status: 200, body: { chats: [], at: nowIso } };
@@ -325,6 +346,38 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       return { status: r.found ? 200 : 404, body: r.found ? { text: r.text, at: nowIso } : { error: r.text } };
     }
 
+    // say: the outbox is a queue the gateway drains with an ack, so the file stays exactly
+    // what it was — only the writer moves to the host, and the container stops writing
+    // anything but the page it calls its own.
+    if (route === "/say") {
+      const messages = list(params, "messages");
+      if (messages === null) return { status: 400, body: { error: "messages 要是非空字符串数组" } };
+      const raw = (params as Record<string, unknown>).to;
+      let chat: number | undefined;
+      if (raw !== undefined && raw !== null) {
+        chat = typeof raw === "number" ? raw : Number(String(raw).trim());
+        if (!Number.isFinite(chat)) return { status: 400, body: { error: `to 要写 chat id（数字），收到的是 ${JSON.stringify(raw)}` } };
+        if (places.length > 0 && !places.includes(chat)) {
+          return { status: 400, body: { error: `那个地方不在你能说话的地方里：${chat}。能发的是 ${places.join("、")}` } };
+        }
+      }
+      const files = list(params, "files") ?? [];
+      const replyTo = parseReplyTo((params as Record<string, unknown>).replyTo);
+      if (replyTo === null) {
+        return { status: 400, body: { error: 'replyTo 要写成 {"chat":-1001234567890,"messageId":151}' } };
+      }
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      mkdirSync(paths.outbox, { recursive: true });
+      writeJson(join(paths.outbox, `${id}.json`), {
+        id,
+        messages,
+        ...(chat === undefined ? {} : { chat }),
+        ...(files.length === 0 ? {} : { files }),
+        ...(replyTo === undefined ? {} : { replyTo }),
+      });
+      return { status: 200, body: { id, count: messages.length, at: nowIso } };
+    }
+
     return { status: 404, body: { error: `没有这个动作：${route}` } };
   };
 }
@@ -336,7 +389,7 @@ export function socketPath(paths: Paths): string {
 export function startBookServer(o: BookOptions): Promise<Server> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const sock = socketPath(o.paths);
-  const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs });
+  const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs, places: o.places });
 
   const server = createServer((req, res) => {
     const reply = (status: number, body: unknown): void => {

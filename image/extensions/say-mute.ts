@@ -9,8 +9,7 @@
  *
  * None of it talks to Telegram. The container has no bot token, and must not have one.
  */
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { postJson } from "./lib/uds.ts";
@@ -19,36 +18,6 @@ const STATE = process.env.GENG_STATE ?? "/state";
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
 // mounted at the top level on purpose: a mount nested under /state makes docker create
 // its mountpoint inside the bind, which lands in the agent's own book as a root-owned dir
-const OUTBOX = process.env.GENG_OUTBOX ?? "/outbox";
-// Where this instance may speak, as chat ids. A count was not enough: a waking that
-// wanted to quote a message had no number to put in `replyTo`, invented one, and the
-// gateway dropped the message while this tool still reported "说了 N 句".
-//
-// The count is still sent and still read, because the image and the daemon are upgraded
-// separately: a daemon older than this file sends only the count (no list, so nothing to
-// check against), and an extension older than this daemon reads only the count and keeps
-// working. Reading the ids alone would make the first case refuse every chat with
-// "能发的是 1" — a speaking channel that goes quiet while the tool says it refused.
-// shortcut: no id check while only the count arrives; drop GENG_PLACES once the image and
-// the daemon are known to ship together.
-const PLACE_IDS = (process.env.GENG_PLACE_IDS ?? "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter((s) => s !== "") // an instance with no places sends the empty string, and
-  .map(Number) // Number("") is 0 — a chat id nobody could ever send from
-  .filter((n) => Number.isFinite(n));
-/** null: a daemon that only knows how many there are, so there is no list to check. */
-const PLACES: number[] | null = PLACE_IDS.length > 0 ? PLACE_IDS : null;
-const COUNT = Number(process.env.GENG_PLACES ?? "0");
-const placeCount = PLACES?.length ?? (Number.isFinite(COUNT) ? COUNT : 0);
-
-function writeAtomic(file: string, text: string): void {
-  mkdirSync(join(file, ".."), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  writeFileSync(tmp, text, "utf8");
-  renameSync(tmp, file);
-}
-
 /** The endpoint's answer as a sentence, or the host's own refusal. */
 async function send(route: string, body: Record<string, unknown>): Promise<{ ok: boolean; reply: Record<string, unknown> }> {
   if (SOCKET === "") return { ok: false, reply: { error: "没有配置记忆端点：GENG_BOOK_SOCK 是空的。" } };
@@ -61,15 +30,16 @@ async function send(route: string, body: Record<string, unknown>): Promise<{ ok:
   }
 }
 
-function nextId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
 const sayTool = defineTool({
   name: "say",
   label: "Say",
   description:
-    "对一个人说话。一次调用里的几句一起送到；分几次调用就是隔一阵说一句。没人问你的时候也可以说。只有一个地方能说话时不用写 to，两处以上必须写。replyTo 写「chat id-消息 id」，形如 -1001234567890-151（id 在 /inbox 的文件名里，也在 /people/<chat>.jsonl 每行的 id 里）。",
+    "对一个人说话。一次调用里的几句一起送到（按顺序），分几次调用就是隔一阵说一句；没人问你的时候也可以说。\n" +
+    "to: chat id（纯数字）。只有一个地方能说话时可以省略，两处以上必须写。\n" +
+    "files: 一起发出去的文件，写 /work/… 里的路径。\n" +
+    "replyTo: 引用某一句话，写 {\"chat\": -1001234567890, \"messageId\": 151}；这两个数在" +
+    "recall 列出的收件箱 id（形如 -1001234567890-151）和人的对话里。\n" +
+    "返回 {id, count}。发不出去会明说哪一处不对。",
   parameters: Type.Object({
     messages: Type.Array(Type.String(), {
       minItems: 1,
@@ -95,75 +65,26 @@ const sayTool = defineTool({
     ),
   }),
   async execute(_toolCallId, params) {
-    const messages = params.messages.filter((m) => m.trim() !== "");
+    const messages = params.messages.map((m) => m.trim()).filter((m) => m !== "");
     if (messages.length === 0) {
-      return { content: [{ type: "text", text: "没说什么。" }], details: undefined };
+      return { content: [{ type: "text", text: "没说要说什么。" }], details: undefined };
     }
-    // shape only: the gateway re-parses this, and it is what drops a quote that does not
-    // belong to the chat being spoken into
-    let quote: { chat: number; messageId: number } | null = null;
-    if (params.replyTo !== undefined) {
-      const cut = params.replyTo.lastIndexOf("-");
-      const c = Number(params.replyTo.slice(0, cut));
-      const m = Number(params.replyTo.slice(cut + 1));
-      if (cut <= 0 || !Number.isSafeInteger(c) || !Number.isSafeInteger(m) || m <= 0) {
-        return {
-          content: [{ type: "text", text: `replyTo 要写收件箱里的那个 id：${params.replyTo} 不是。` }],
-          details: undefined,
-        };
-      }
-      quote = { chat: c, messageId: m };
-    }
-    // quoting one message already says which conversation it belongs to
-    const target = params.to !== undefined ? Number(params.to) : (quote?.chat ?? undefined);
-    if (target === undefined && placeCount >= 2) {
-      throw new Error("有两处以上能说话，to 必填：提示词「能说话的地方」里有各个 chat 的 id。");
-    }
-    const chat = target;
-    if (params.to !== undefined && !Number.isFinite(chat)) {
-      return { content: [{ type: "text", text: `to 要写 chat 的 id：${params.to} 不是。` }], details: undefined };
-    }
-    if (placeCount === 0) {
-      return {
-        content: [
-          { type: "text", text: "现在没有能说话的地方：还没有人跟你的 bot 说过话，发出去也没人收到。" },
-        ],
-        details: undefined,
-      };
-    }
-    // A chat that is not on the list is a message nobody will ever read: the gateway drops
-    // it and acks it, so "说了 N 句" here would be this tool lying to the one asking.
-    if (chat !== undefined && PLACES !== null && !PLACES.includes(chat)) {
-      return {
-        content: [
-          {
-            type: "text",
-            text: `这个 chat 不在你能说话的地方里：${chat} 不是。能发的是 ${PLACES.join("、")}。`,
-          },
-        ],
-        details: undefined,
-      };
-    }
-    const files = (params.files ?? []).filter((f) => f.trim() !== "");
-    const id = nextId();
-    writeAtomic(
-      join(OUTBOX, `${id}.json`),
-      JSON.stringify({
-        id,
-        messages,
-        ...(chat === undefined ? {} : { chat }),
-        ...(files.length === 0 ? {} : { files }),
-        ...(quote === null ? {} : { replyTo: quote }),
-      }) + "\n",
-    );
+    const files = (params.files ?? []).map((f) => f.trim()).filter((f) => f !== "");
+    const { ok, reply } = await send("/say", {
+      messages,
+      to: params.to,
+      files,
+      replyTo: params.replyTo,
+    });
+    if (!ok) return { content: [{ type: "text", text: String(reply.error) }], details: undefined };
     return {
       content: [
         {
           type: "text",
-          text: `说了 ${messages.length} 句${files.length === 0 ? "" : `，带 ${files.length} 个文件`}。`,
+          text: `说了 ${String(reply.count)} 句${files.length === 0 ? "" : `，带 ${files.length} 个文件`}。`,
         },
       ],
-      details: { id, count: messages.length },
+      details: reply,
     };
   },
 });
@@ -201,18 +122,6 @@ const listenTool = defineTool({
         return { content: [{ type: "text", text: `要写 chat 的 id 或 *：${raw.join("、")} 里有的不是。` }], details: undefined };
       }
       chats.push(n);
-    }
-    // a window on a chat that never sends is a window that silently never opens
-    if (PLACES !== null) {
-      const unknown = chats.filter((c) => c !== "*" && !PLACES.includes(c));
-      if (unknown.length > 0) {
-        return {
-          content: [
-            { type: "text", text: `这些 chat 不在你能说话的地方里：${unknown.join("、")}。能听的是 ${PLACES.join("、")} 或 *。` },
-          ],
-          details: undefined,
-        };
-      }
     }
     const { ok, reply } = await send("/attention/set", { chats, until: params.until, why: params.why });
     if (!ok) return { content: [{ type: "text", text: String(reply.error) }], details: undefined };

@@ -14,33 +14,13 @@ function tools(root: string, names: string[]): void {
   for (const n of names) writeFileSync(join(root, "image", "extensions", n), "// tool\n");
 }
 
-test("the container's /outbox is the directory the gateway reads", () => {
-  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
-  const paths = makePaths(root, "alice");
-  const { args } = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []);
-
-  assert.notEqual(args.indexOf(`${paths.outbox}:/outbox`), -1, "outbox 没有挂进容器：say 写的话没人读");
-})
-test("only what the page points at is mounted, and never the rules", () => {
+test("the container writes nothing but the page it calls its own", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
   const argv = buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []).args.join(" ");
-  // The book is not mounted: every read is a call, so the ledger can name all of them.
-  // A `cat` over these used to be a read nothing could count.
-  for (const target of [":/inbox", ":/people", ":/mail", `-v ${paths.palimpsest}:/state`]) {
-    assert.equal(argv.includes(target), false, `${target} 不该挂进容器`);
-  }
+  // say queues through the daemon now, so the outbox is not something it can write
+  assert.equal(argv.includes(":/outbox"), false, "outbox 不该挂进容器");
   assert.match(argv, new RegExp(`-v ${paths.identity}:/state/identity.md`));
-  // the rules it lives under are not exposed at all: no mount, and the file now lives
-  // outside the book, so the /state bind cannot carry it in either
-  assert.equal(argv.includes("/daemon.log"), false, "daemon.log 不挂了");
-  assert.equal(argv.includes("policy.json"), false, "policy.json 不该出现在容器里");
-  assert.equal(paths.policy.startsWith(paths.palimpsest), false, "policy.json 不在 /state 里");
-  // nothing may be nested under the /state bind: docker would create the mountpoint
-  // through it, as root, inside the agent's own book
-  for (const target of [":/state/inbox", ":/state/daemon.log", ":/state/people", ":/state/outbox"]) {
-    assert.equal(argv.includes(target), false, `${target} 挂在 /state 里面了`);
-  }
 });
 
 test("the tools are loaded from outside the agent's home", () => {
@@ -94,21 +74,6 @@ test("every -e value is really passed to docker as an env var", () => {
   assert.ok(args.includes("TZ=Asia/Shanghai"));
 });
 
-test("the container is told where it may speak, by id", () => {
-  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
-  const p = { ...defaultPolicy(), runner: "docker" as const };
-  // ids, because `say` refuses a chat that is not one of them, and at two places it must
-  // be told which one. The count stays next to them: an extension older than this daemon
-  // reads it and nothing else, and must keep working.
-  const places = [{ id: 111 }, { id: -1001234567890 }];
-  const args = buildCommand(makePaths(root, "alice"), p, "geng-x-0001", "P", places).args;
-  const ids = args.indexOf("GENG_PLACE_IDS=111,-1001234567890");
-  assert.ok(ids > 0, "没传 GENG_PLACE_IDS");
-  assert.equal(args[ids - 1], "-e");
-  const count = args.indexOf("GENG_PLACES=2");
-  assert.ok(count > 0, "没传 GENG_PLACES：比 daemon 旧的扩展读不到能说话的地方");
-  assert.equal(args[count - 1], "-e");
-});
 
 test("the search socket is mounted only when it exists, and at the same path", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));

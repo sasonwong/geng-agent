@@ -205,3 +205,28 @@ test("mute, listen, forget and propose are written by the host, in the shape it 
     container: { timeoutSec: 9 },
   });
 });
+
+test("saying something is a queue entry the host writes, and a chat it cannot reach is refused", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const handle = bookHandler(paths, { places: [-1001] });
+
+  const r = await handle(
+    { url: "/say", method: "POST" } as never,
+    JSON.stringify({ messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } }),
+  );
+  assert.equal(r.status, 200);
+  const id = (r.body as { id: string }).id;
+  const written = JSON.parse(readText(join(paths.outbox, `${id}.json`)) ?? "{}");
+  // the file is exactly what the gateway already read: same shape, one fewer writer
+  assert.deepEqual(written, { id, messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } });
+
+  // a chat the daemon does not know is refused before anything is queued
+  const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], to: -999 }));
+  assert.equal(bad.status, 400);
+  assert.equal(readdirSync(paths.outbox).length, 1);
+  // and a quote it cannot parse is a refusal, not a message without one
+  const quote = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], replyTo: "151" }));
+  assert.equal(quote.status, 400);
+});

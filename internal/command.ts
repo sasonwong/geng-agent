@@ -99,10 +99,6 @@ export function buildCommand(
       // every -e needs its own flag; a bare KEY=VALUE lands where the image name goes
       "-e",
       `TZ=${policy.timezone}`,
-      "-e",
-      `GENG_PLACES=${places.length}`,
-      "-e",
-      `GENG_PLACE_IDS=${places.map((p) => p.id).join(",")}`,
       "-v",
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
@@ -113,11 +109,6 @@ export function buildCommand(
       // exception is the page it rewrites freely, which is a file, not an action.
       "-v",
       `${paths.identity}:/state/identity.md`,
-      // the say extension writes /outbox; the gateway reads data/<inst>/outbox.
-      // Top-level on purpose: a mount nested under /state makes docker create its
-      // mountpoint through the bind, leaving root-owned junk in the agent's own book.
-      "-v",
-      `${paths.outbox}:/outbox`,
       // what people sent it: read-only, because a file it may not have looked at yet must
       // not be something it can edit
       "-v",
@@ -191,8 +182,6 @@ export function buildCommand(
       ...localEnv(),
       // the local runner reaches the same socket by its host path
       GENG_BOOK_SOCK: join(paths.run, "book.sock"),
-      GENG_PLACES: String(places.length),
-      GENG_PLACE_IDS: places.map((p) => p.id).join(","),
     },
     cwd: paths.workspace,
   };
