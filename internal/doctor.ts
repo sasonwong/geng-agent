@@ -652,9 +652,10 @@ const PROBE = [
     '(socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &)',
     'sleep 0.3',
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
-    // the tools are a mount now, so "they are not there" is not a quiet degradation:
-    // pi is started with one -e per file, and a missing file makes it exit 1 — the
-    // wake dies instead of waking up with fewer things it can do
+    // the tools are a mount now: pi is started with one -e per file, and a file that is
+    // listed and then missing makes it exit 1, so that shape dies loudly. But if the
+    // directory itself is gone, extensionArgs yields no -e at all, and the wake comes up
+    // with no tools and says nothing — the digest check below is the only net for that one
     'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l) EXT_DIGEST=$( (cd /opt/geng/extensions && LC_ALL=C cksum ./*.ts) 2>/dev/null | sha1sum | cut -c1-40)"',
     // Two sides, because one alone proves nothing: direct egress has to be *broken* and
     // the proxy has to work. A container that can still reach github directly would pass

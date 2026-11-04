@@ -113,8 +113,9 @@ export function slowDownNotice(prev: Escalation, next: Escalation): string | nul
  */
 export function timeoutNotice(prev: Escalation, next: Escalation): string | null {
   if (next.symptom !== "timeout") return null;
-  // advance() only leaves streak at 0 on the fresh state, so an earlier timeout in this run
-  // is exactly "prev.symptom was timeout too" — this one is not the first
+  // Said once per *consecutive* run of cuts: only the previous round is consulted, and
+  // advance() keeps the streak across a different symptom, so a non-timeout failure in
+  // between starts this line over (the streak keeps growing either way, and can still park)
   if (prev.symptom === "timeout") return null;
   return "有一轮跑到时间上限被杀了：做到一半，话可能没说完。不是出错，也不是没事，下一轮会接着看。";
 }
