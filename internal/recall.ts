@@ -124,7 +124,10 @@ function peopleItems(p: Paths): Item[] {
       }
       if (typeof said.text !== "string" || said.text === "") continue;
       const who = said.dir === "out" ? "→" : `← ${typeof said.from === "string" ? said.from : "对方"}`;
-      lines.push(`${typeof said.at === "string" ? said.at.slice(11, 16) : "??:??"} ${who} ${said.text}`);
+      // the id is what `say` quotes with: a transcript without it can only answer the
+      // newest line, and the model would have to invent the number it puts in `replyTo`
+      const ref = typeof said.id === "string" && said.id !== "" ? ` #${said.id}` : "";
+      lines.push(`${typeof said.at === "string" ? said.at.slice(11, 16) : "??:??"} ${who}${ref} ${said.text}`);
     }
     const last = lines[lines.length - 1] ?? "（没说过话）";
     return [
@@ -162,7 +165,7 @@ function inboxItems(p: Paths): Item[] {
         source: "inbox" as const,
         at: typeof raw.at === "string" ? raw.at : when(f),
         header: `${from} · ${firstLine(text)}`,
-        body: `${from} · ${typeof raw.at === "string" ? raw.at : "（没有时间）"}\n\n${text}`,
+        body: `${from} · ${typeof raw.at === "string" ? raw.at : "（没有时间）"} · id=${basename(f, ".json")}\n\n${text}`,
       };
     }),
   );

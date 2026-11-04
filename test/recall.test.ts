@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
+import { bookHandler } from "../internal/book.ts";
 import { openText, recallText } from "../internal/recall.ts";
 import { ensureDirs } from "../internal/state.ts";
 
@@ -75,4 +76,38 @@ test("a long thing is paged, and says how to carry on", () => {
   assert.match(openText(p, "J20260302-1", 8_000).text, /甲$/);
   // an id nothing has is a refusal, not an empty page
   assert.equal(openText(p, "J00000000-9", 0).found, false);
+});
+
+test("every line it can quote carries the id it has to quote with, all the way to the outbox", async () => {
+  const p = fixture();
+  mkdirSync(p.people, { recursive: true });
+  writeFileSync(
+    join(p.people, "-1001.jsonl"),
+    [
+      JSON.stringify({ at: "2026-03-02T08:00:00Z", dir: "in", text: "在吗", from: "@someone", id: "-1001-151" }),
+      JSON.stringify({ at: "2026-03-02T08:01:00Z", dir: "out", text: "在" }),
+    ].join("\n") + "\n",
+  );
+  mkdirSync(p.inbox, { recursive: true });
+  writeFileSync(join(p.inbox, "-1001-152.json"), JSON.stringify({ id: "-1001-152", at: "2026-03-02T08:02:00Z", from: "telegram:@someone", text: "看这个" }));
+
+  // the transcript shows the id next to the line it belongs to, not only on the listing
+  const said = openText(p, "chat:-1001", 0).text;
+  assert.match(said, /← @someone #-1001-151 在吗/);
+  // a line it sent itself has no id to quote with, and printing a fake one would be worse
+  assert.match(said, /→ 在$/m);
+
+  // the inbox body carries its own file name, which is the id `open` and `say` both take
+  const mail = openText(p, "-1001-152", 0).text;
+  assert.match(mail, /id=-1001-152/);
+
+  // and the quote travels: a replyTo built from that id lands in the outbox unchanged
+  const handle = bookHandler(p, { places: [-1001] });
+  const r = await handle(
+    { url: "/say", method: "POST" } as never,
+    JSON.stringify({ messages: ["看到了"], replyTo: { chat: -1001, messageId: 151 } }),
+  );
+  assert.equal(r.status, 200);
+  const queued = JSON.parse(readFileSync(join(p.outbox, `${(r.body as { id: string }).id}.json`), "utf8"));
+  assert.deepEqual(queued.replyTo, { chat: -1001, messageId: 151 });
 });
