@@ -59,7 +59,7 @@ const fetchTool = defineTool({
 });
 
 export default function (pi: ExtensionAPI) {
-  if (URL_BASE === "") return;
+  if (SOCKET === "") return;
   pi.registerTool(searchTool);
   pi.registerTool(fetchTool);
 }
