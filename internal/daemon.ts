@@ -38,7 +38,7 @@ import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
 import { activeSince, lastSaidIn, readSaid, waitingOn } from "./people.ts";
 import { knownPlaces } from "./gateway.ts";
-import { parseAttention } from "./attention.ts";
+import { readAttention } from "./attention.ts";
 import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
 import { systemFacts } from "./packet.ts";
@@ -398,7 +398,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       peoplePath: at("/people", paths.people),
       timezone: policy.timezone,
       places,
-      attention: parseAttention(readJson(join(paths.palimpsest, "attention.json"), null)),
+      attention: readAttention(join(paths.palimpsest, "attention.json"), nowMs),
       filesPath: at("/files", paths.filesDir),
       filesForgotten: forgot,
       filesPruned: pruned.removed,

@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { attentionActive, parseAttention } from "./attention.ts";
+import { attentionActive, readAttention } from "./attention.ts";
 import { Tripwire } from "./tripwire.ts";
 import { quoteFor, quotedOf } from "./quote.ts";
 import { ExpectedError } from "./errors.ts";
@@ -353,7 +353,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
     const listen = cfg.listen ?? "all";
     const mutes = readMutes(join(p.palimpsest, "mute.json"), Date.now());
-    const attention = parseAttention(readJson(join(p.palimpsest, "attention.json"), null));
+    const attention = readAttention(join(p.palimpsest, "attention.json"), Date.now());
     const muted = isMuted(mutes, { chatId: message.chat.id, isDm: message.chat.type === "private" });
 
     const decision = route({
