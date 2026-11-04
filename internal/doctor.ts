@@ -5,6 +5,14 @@ import { execFileSync, spawn } from "node:child_process";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
 import { readJson, readText } from "./state.ts";
+
+function readdirSafe(dir: string): number {
+  try {
+    return readdirSync(dir).length;
+  } catch {
+    return 0;
+  }
+}
 import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { envProblem, mailWiringProblem, searchPairProblem, readEnvFile } from "./secret.ts";
@@ -207,6 +215,19 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     name: "identity.md",
     ok: identity,
     detail: identity ? "在" : "还没写过（第一次出生之后才有意义）",
+    warnOnly: true,
+  });
+
+  // An id is a permanent name: delete the newest entry and the next write must not reuse
+  // it. The files can only raise the ceiling (a restored snapshot has ids the counter has
+  // never seen), never lower it, so losing this file is what lets an old name be handed
+  // out twice — and nothing else would notice.
+  const ids = readJson<{ journalN?: number; loopN?: number } | null>(p.ids, null);
+  const written = (existsSync(p.journal) ? readdirSafe(p.journal) : 0) + (existsSync(p.openLoops) ? readdirSafe(p.openLoops) : 0);
+  checks.push({
+    name: "meta/ids.json",
+    ok: ids !== null || written === 0,
+    detail: ids !== null ? "在" : "不在——书里已有东西却不知道发到几号了，下一个 id 可能和旧的重名",
     warnOnly: true,
   });
 
