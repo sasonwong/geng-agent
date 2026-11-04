@@ -247,12 +247,23 @@ function sessionItems(p: Paths): Item[] {
   );
 }
 
+/** The path a listed file actually has: the index sits between the id and the name. */
+function statOf(p: Paths, id: string, name: string): string {
+  let mtime = 0;
+  for (const entry of readdirSync(p.filesDir)) {
+    if (entry.startsWith(`${id}-`) && entry.endsWith(`-${name}`)) {
+      mtime = statSync(join(p.filesDir, entry)).mtimeMs;
+    }
+  }
+  return new Date(mtime).toISOString();
+}
+
 /** Files carry no text, so what a listing can say is what they are called and how big. */
 function fileItems(p: Paths): Item[] {
   return listFiles(p).map((f) => {
     let at = "";
     try {
-      at = new Date(statSync(join(p.filesDir, `${f.id}-${f.name}`)).mtimeMs).toISOString();
+      at = statOf(p, f.id, f.name);
     } catch {
       at = "";
     }

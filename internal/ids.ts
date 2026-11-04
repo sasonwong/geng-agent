@@ -105,7 +105,9 @@ export function listFiles(paths: Paths): { id: string; name: string; bytes: numb
   }
   return names
     .map((name) => {
-      const m = /^(F\d+)-/.exec(name);
+      // the file name is `<id>-<index>-<original>`; the index exists only because one
+      // mail may carry two files with the same name
+      const m = /^(F\d+)-\d+-(.*)$/.exec(name);
       if (!m) return null;
       let bytes = 0;
       try {
@@ -113,7 +115,7 @@ export function listFiles(paths: Paths): { id: string; name: string; bytes: numb
       } catch {
         return null;
       }
-      return { id: m[1] as string, name: name.slice((m[1] as string).length + 1), bytes };
+      return { id: m[1] as string, name: m[2] as string, bytes };
     })
     .filter((f): f is { id: string; name: string; bytes: number } => f !== null);
 }

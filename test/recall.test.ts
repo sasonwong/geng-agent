@@ -111,3 +111,16 @@ test("every line it can quote carries the id it has to quote with, all the way t
   const queued = JSON.parse(readFileSync(join(p.outbox, `${(r.body as { id: string }).id}.json`), "utf8"));
   assert.deepEqual(queued.replyTo, { chat: -1001, messageId: 151 });
 });
+
+test("a file in the listing keeps its original name, and its size is what it is", () => {
+  const p = fixture();
+  mkdirSync(p.filesDir, { recursive: true });
+  writeFileSync(join(p.filesDir, "F1-0-report.txt"), "hello");
+  writeFileSync(join(p.filesDir, "F2-1-report.txt"), "x".repeat(3000));
+  const listing = recallText(p, { sources: ["files"] });
+  // the index in the file name is an implementation detail of the mail that carried it
+  assert.match(listing, /F1 {2}files .*report\.txt（5 字节）/);
+  assert.match(listing, /F2 {2}files .*report\.txt（3 KB）/);
+  // and the body says how to get it and how to send it, because a file has no text to show
+  assert.match(openText(p, "F1", 0).text, /download\("F1", "\/work\/\.\.\."\)/);
+});
