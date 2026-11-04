@@ -15,6 +15,8 @@
   mute(target, minutes, why)  安静一段时间
   forget(files)            删 /files 里的东西，下一轮苏醒前生效
   propose(value)           申请改自己的运行条件，下次醒来前生效，只认时机和阈值
+  web_search(query)       搜网（这个实例配了搜索才有这两个工具）
+  web_fetch(url)          取一个网页的正文
 
 日记格式你定，没人解析。没闭合的事会出现在每张唤醒纸的条数里，直到关掉。
 
