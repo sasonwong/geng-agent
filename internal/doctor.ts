@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
-import { readJson } from "./state.ts";
+import { readJson, readText } from "./state.ts";
 import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { envProblem, mailWiringProblem, searchPairProblem, readEnvFile } from "./secret.ts";
@@ -200,7 +200,9 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     warnOnly: true,
   });
 
-  const identity = existsSync(p.identity);
+  // An empty file and no file are the same thing to the agent: the mount is created
+  // empty so docker has something to bind, so "在" has to mean "has something in it".
+  const identity = (readText(p.identity) ?? "").trim() !== "";
   checks.push({
     name: "identity.md",
     ok: identity,

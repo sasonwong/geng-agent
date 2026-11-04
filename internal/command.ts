@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import type { Policy } from "./policy.ts";
@@ -45,6 +45,20 @@ function extensionArgs(dir: string): string[] {
   }
 }
 
+/**
+ * A bind mount of a file that does not exist makes docker create a *directory* there, and
+ * the agent would then be writing its identity onto a path a directory sits on. Empty is
+ * what a book with no identity already reads as, so creating it changes nothing it can see.
+ */
+function ensureIdentityMountSource(paths: Paths): void {
+  if (existsSync(paths.identity)) return;
+  try {
+    writeFileSync(paths.identity, "");
+  } catch {
+    // a book it cannot write is a fact for the round to report, not a reason to have none
+  }
+}
+
 export function buildCommand(
   paths: Paths,
   policy: Policy,
@@ -59,6 +73,7 @@ export function buildCommand(
   tail?: string[],
 ): Command {
   if (policy.runner === "docker") {
+    ensureIdentityMountSource(paths);
     const args = [
       "run",
       "--rm",
@@ -92,8 +107,13 @@ export function buildCommand(
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
       `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
+      // The book is read-only inside: every write goes through the endpoint, so the
+      // mount is the boundary rather than a promise. The one exception is the file it
+      // rewrites freely, and that is a single-file mount over the read-only directory.
       "-v",
-      `${paths.palimpsest}:/state`,
+      `${paths.palimpsest}:/state:ro`,
+      "-v",
+      `${paths.identity}:/state/identity.md`,
       // the say extension writes /outbox; the gateway reads data/<inst>/outbox.
       // Top-level on purpose: a mount nested under /state makes docker create its
       // mountpoint through the bind, leaving root-owned junk in the agent's own book.
