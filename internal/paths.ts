@@ -44,6 +44,10 @@ export interface Paths {
   people: string;
   waiting: string;
   mute: string;
+  /** The chats it asked to be woken by, and until when. Read by the daemon and the gateway. */
+  attention: string;
+  /** What it asked to change about its own timing; applied once, before the next waking. */
+  proposal: string;
   waitingConsumed: string;
   intent: string;
   journal: string;
@@ -98,6 +102,8 @@ export function makePaths(root: string, instance: string): Paths {
     openLoops: join(palimpsest, "open-loops"),
     people: join(data, "people"),
     waiting: join(palimpsest, "waiting.json"),
+    attention: join(palimpsest, "attention.json"),
+    proposal: join(palimpsest, "policy.proposal.json"),
     mute: join(palimpsest, "mute.json"),
     waitingConsumed: join(palimpsest, "waiting.consumed.json"),
     intent: join(palimpsest, "intent.json"),

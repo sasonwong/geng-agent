@@ -9,7 +9,7 @@ import { readJson } from "./state.ts";
  * Runner, container limits, network and the cycle timeout are not on the table:
  * those are the frame, not the settings.
  */
-const NEGOTIABLE: Record<string, { min: number; max: number; integer: boolean }> = {
+export const NEGOTIABLE: Record<string, { min: number; max: number; integer: boolean }> = {
   "cycle.defaultWakeMinutes": { min: 1, max: 720, integer: true },
   "cycle.minWakeMinutes": { min: 1, max: 120, integer: true },
   "cycle.repeatThreshold": { min: 2, max: 20, integer: true },
@@ -47,7 +47,7 @@ function setPath(obj: Record<string, unknown>, path: string, value: unknown): vo
  * and reported, not silently obeyed.
  */
 export function applyProposal(paths: Paths): ProposalResult | null {
-  const file = join(paths.palimpsest, "policy.proposal.json");
+  const file = paths.proposal;
   if (!existsSync(file)) return null;
   const proposal = readJson<Record<string, unknown> | null>(file, null);
 

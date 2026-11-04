@@ -1,22 +1,25 @@
 /**
- * say / mute — the two things the agent can do to a person instead of to a file.
+ * say / mute / listen / forget / propose — the things the agent can do to the world
+ * outside its own writing.
  *
- * Both write into /state, which the gateway reads. They never talk to Telegram
- * themselves: the container has no bot token, and must not have one.
+ * `say` writes /outbox, which the gateway drains; everything else changes a file in
+ * /state that the gateway or the daemon reads, and /state is a mount this container may
+ * not write. Those go through the book endpoint instead: the host builds the file from
+ * these words, so the shape of the book stays a fact of the host.
+ *
+ * None of it talks to Telegram. The container has no bot token, and must not have one.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { postJson } from "./lib/uds.ts";
 
 const STATE = process.env.GENG_STATE ?? "/state";
+const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
 // mounted at the top level on purpose: a mount nested under /state makes docker create
 // its mountpoint inside the bind, which lands in the agent's own book as a root-owned dir
 const OUTBOX = process.env.GENG_OUTBOX ?? "/outbox";
-const MUTE = join(STATE, "mute.json");
-const ATTENTION = join(STATE, "attention.json");
-// four hours is the most it may ask for: longer than that is not attention, it is a rule
-const ATTENTION_MAX_MS = 4 * 3_600_000;
 // Where this instance may speak, as chat ids. A count was not enough: a waking that
 // wanted to quote a message had no number to put in `replyTo`, invented one, and the
 // gateway dropped the message while this tool still reported "说了 N 句".
@@ -38,13 +41,24 @@ const PLACE_IDS = (process.env.GENG_PLACE_IDS ?? "")
 const PLACES: number[] | null = PLACE_IDS.length > 0 ? PLACE_IDS : null;
 const COUNT = Number(process.env.GENG_PLACES ?? "0");
 const placeCount = PLACES?.length ?? (Number.isFinite(COUNT) ? COUNT : 0);
-const FORGET = join(STATE, "files.forget.json");
 
 function writeAtomic(file: string, text: string): void {
   mkdirSync(join(file, ".."), { recursive: true });
   const tmp = `${file}.tmp-${process.pid}`;
   writeFileSync(tmp, text, "utf8");
   renameSync(tmp, file);
+}
+
+/** The endpoint's answer as a sentence, or the host's own refusal. */
+async function send(route: string, body: Record<string, unknown>): Promise<{ ok: boolean; reply: Record<string, unknown> }> {
+  if (SOCKET === "") return { ok: false, reply: { error: "没有配置记忆端点：GENG_BOOK_SOCK 是空的。" } };
+  try {
+    const r = await postJson(SOCKET, route, body);
+    const reply = JSON.parse(r.body) as Record<string, unknown>;
+    return { ok: typeof reply.error !== "string", reply };
+  } catch (err) {
+    return { ok: false, reply: { error: (err as Error).message } };
+  }
 }
 
 function nextId(): string {
@@ -176,16 +190,17 @@ const listenTool = defineTool({
   }),
   async execute(_toolCallId, params) {
     const raw = params.chats.map((c) => c.trim()).filter((c) => c !== "");
-    if (raw.length === 0) {
-      writeAtomic(ATTENTION, "{}\n");
-      return { content: [{ type: "text", text: "不听了。" }], details: undefined };
-    }
-    const chats = raw.map((c) => (c === "*" ? "*" : Number(c)));
-    if (chats.some((c) => c !== "*" && !Number.isFinite(c))) {
-      return {
-        content: [{ type: "text", text: `要写 chat 的 id 或 *：${raw.join("、")} 里有的不是。` }],
-        details: undefined,
-      };
+    const chats: (number | "*")[] = [];
+    for (const c of raw) {
+      if (c === "*") {
+        chats.push("*");
+        continue;
+      }
+      const n = Number(c);
+      if (!Number.isFinite(n)) {
+        return { content: [{ type: "text", text: `要写 chat 的 id 或 *：${raw.join("、")} 里有的不是。` }], details: undefined };
+      }
+      chats.push(n);
     }
     // a window on a chat that never sends is a window that silently never opens
     if (PLACES !== null) {
@@ -199,24 +214,12 @@ const listenTool = defineTool({
         };
       }
     }
-    const now = Date.now();
-    const wanted = params.until ? Date.parse(params.until) : NaN;
-    const until = Math.min(Number.isNaN(wanted) ? now + ATTENTION_MAX_MS : wanted, now + ATTENTION_MAX_MS);
-    if (until <= now) {
-      return { content: [{ type: "text", text: `那个时间已经过去了：${params.until}` }], details: undefined };
-    }
-    writeAtomic(
-      ATTENTION,
-      JSON.stringify({ chats, until: new Date(until).toISOString(), why: params.why ?? "", at: new Date(now).toISOString() }, null, 2) + "\n",
-    );
+    const { ok, reply } = await send("/attention/set", { chats, until: params.until, why: params.why });
+    if (!ok) return { content: [{ type: "text", text: String(reply.error) }], details: undefined };
+    if (chats.length === 0) return { content: [{ type: "text", text: "不听了。" }], details: undefined };
     return {
-      content: [
-        {
-          type: "text",
-          text: `听着了：${chats.join("、")}，到 ${new Date(until).toISOString()} 为止（那时之后又按原样）。`,
-        },
-      ],
-      details: { chats, until: new Date(until).toISOString() },
+      content: [{ type: "text", text: `听着了：${chats.join("、")}，到 ${String(reply.until)} 为止（那时之后又按原样）。` }],
+      details: reply,
     };
   },
 });
@@ -238,17 +241,11 @@ const forgetTool = defineTool({
     if (files.length === 0) {
       return { content: [{ type: "text", text: "没说要删什么。" }], details: undefined };
     }
-    let current: { files?: string[] } = {};
-    try {
-      current = JSON.parse(readFileSync(FORGET, "utf8")) as { files?: string[] };
-    } catch {
-      current = {};
-    }
-    const all = [...new Set([...(current.files ?? []), ...files])];
-    writeAtomic(FORGET, JSON.stringify({ files: all, at: new Date().toISOString() }, null, 2) + "\n");
+    const { ok, reply } = await send("/files/forget", { files });
+    if (!ok) return { content: [{ type: "text", text: String(reply.error) }], details: undefined };
     return {
       content: [{ type: "text", text: `下一轮醒来前删掉 ${files.length} 个。` }],
-      details: { files },
+      details: reply,
     };
   },
 });
@@ -270,8 +267,8 @@ const muteTool = defineTool({
     const target = params.target.trim();
     // The gateway settles dm / mention / reply *before* it looks at mute.json, so those
     // keys are silence in name only. Refusing beats writing a line that will never do
-    // anything and reporting “安静到 …”. Same rule as keyCanMute() in internal/mute.ts
-    // (this file ships in the image and cannot import from the daemon).
+    // anything and reporting "安静到 …". The host refuses this too (keyCanMute); saying
+    // it here as well costs a sentence and saves a round trip.
     if (target === "dm") {
       return {
         content: [
@@ -283,27 +280,46 @@ const muteTool = defineTool({
         details: undefined,
       };
     }
-    if (target !== "*" && !/^chat:-?\d+$/.test(target)) {
+    const { ok, reply } = await send("/mute/set", { target, minutes: params.minutes, why: params.why });
+    if (!ok) return { content: [{ type: "text", text: String(reply.error) }], details: undefined };
+    return {
+      content: [{ type: "text", text: `安静到 ${String(reply.until)}。` }],
+      details: reply,
+    };
+  },
+});
+
+const proposeTool = defineTool({
+  name: "propose",
+  label: "Propose",
+  description:
+    "申请改自己的运行条件，下次醒来前生效。只认时机和阈值：" +
+    '{"cycle":{"defaultWakeMinutes":30}}。runner、容器限额、网络、timeout 不在这张桌子上。',
+  parameters: Type.Object({
+    value: Type.String({
+      description: '要改的东西，JSON 对象，形如 {"cycle":{"defaultWakeMinutes":30}}。',
+    }),
+  }),
+  async execute(_toolCallId, params) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(params.value);
+    } catch {
+      return { content: [{ type: "text", text: `不是 JSON：${params.value}` }], details: undefined };
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return {
-        content: [
-          { type: "text", text: `不认识的 target：${params.target}。只能是 "*"（全部环境噪音）或 "chat:<id>"（id 是数字）。` },
-        ],
+        content: [{ type: "text", text: '要是一个对象，形如 {"cycle":{"defaultWakeMinutes":30}}。' }],
         details: undefined,
       };
     }
-    const until = new Date(Date.now() + params.minutes * 60_000).toISOString();
-    let current: Record<string, unknown> = {};
-    try {
-      current = JSON.parse(readFileSync(MUTE, "utf8")) as Record<string, unknown>;
-    } catch {
-      current = {};
-    }
-    current[target] = { until, why: params.why };
-    writeAtomic(MUTE, JSON.stringify(current, null, 2) + "\n");
-    return {
-      content: [{ type: "text", text: `安静到 ${until}。` }],
-      details: { target, until },
-    };
+    const { ok, reply } = await send("/proposal", { value: parsed });
+    if (!ok) return { content: [{ type: "text", text: String(reply.error) }], details: undefined };
+    const will = Array.isArray(reply.willApply) ? (reply.willApply as string[]) : [];
+    const ignored = Array.isArray(reply.ignored) ? (reply.ignored as string[]) : [];
+    const lines = [will.length === 0 ? "记下了，但里面没有一处是能改的。" : `下次醒来前生效：${will.join("、")}。`];
+    if (ignored.length > 0) lines.push(`这些不在可谈的范围里，不会生效：${ignored.join("、")}。`);
+    return { content: [{ type: "text", text: lines.join("\n") }], details: reply };
   },
 });
 
@@ -313,4 +329,5 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(listenTool);
   pi.registerTool(forgetTool);
   pi.registerTool(muteTool);
+  pi.registerTool(proposeTool);
 }

@@ -180,3 +180,46 @@ test("opening a mail is what makes it no longer new, and the host keeps the list
   const bad = await f.call("/mail/read", { ids: [] });
   assert.equal(bad.status, 400);
 });
+
+test("mute, listen, forget and propose are written by the host, in the shape it reads", async () => {
+  const f = fixture();
+  const mute = await f.call("/mute/set", { target: "chat:-1001234567890", minutes: 30, why: "群里的闲话" });
+  assert.equal(mute.status, 200);
+  const muted = JSON.parse(readText(f.paths.mute) ?? "{}") as Record<string, { until: string; why: string }>;
+  assert.equal(muted["chat:-1001234567890"]?.why, "群里的闲话");
+  assert.ok(Date.parse(muted["chat:-1001234567890"]?.until ?? "") > Date.now());
+  // a key the gateway never consults would be a silence in name only
+  assert.equal((await f.call("/mute/set", { target: "dm", minutes: 5, why: "x" })).status, 400);
+
+  const listening = await f.call("/attention/set", { chats: ["*"], why: "等人回话" });
+  assert.equal(listening.status, 200);
+  const attention = JSON.parse(readText(f.paths.attention) ?? "{}") as { chats: unknown[]; until: string };
+  assert.deepEqual(attention.chats, ["*"]);
+  // four hours is the cap, and the file says the capped time rather than the asked one
+  assert.ok(Date.parse(attention.until) <= Date.now() + 4 * 3_600_000 + 1_000);
+  const capped = await f.call("/attention/set", { chats: [12345], until: new Date(Date.now() + 9 * 3_600_000).toISOString() });
+  assert.ok(
+    Date.parse((capped.body as { until: string }).until) <= Date.now() + 4 * 3_600_000 + 1_000,
+    "asked for nine hours, and four is the most attention can be",
+  );
+  assert.equal((capped.body as { until: string }).until, (JSON.parse(readText(f.paths.attention) ?? "{}") as { until: string }).until);
+  // an empty list is not "listen to nothing", it is "stop"
+  await f.call("/attention/set", { chats: [] });
+  assert.deepEqual(JSON.parse(readText(f.paths.attention) ?? "null"), {});
+
+  await f.call("/files/forget", { files: ["/files/a.jpg"] });
+  await f.call("/files/forget", { files: ["/files/b.jpg", "/files/a.jpg"] });
+  const forget = JSON.parse(readText(f.paths.filesForget) ?? "{}") as { files: string[] };
+  assert.deepEqual(forget.files, ["/files/a.jpg", "/files/b.jpg"]);
+
+  const proposal = await f.call("/proposal", { value: { cycle: { defaultWakeMinutes: 45 }, container: { timeoutSec: 9 } } });
+  assert.equal(proposal.status, 200);
+  const body = proposal.body as { willApply: string[]; ignored: string[] };
+  // named before the next waking tells it, so a proposal for the frame does not look obeyed
+  assert.deepEqual(body.willApply, ["cycle.defaultWakeMinutes"]);
+  assert.deepEqual(body.ignored, ["container.timeoutSec"]);
+  assert.deepEqual(JSON.parse(readText(f.paths.proposal) ?? "{}"), {
+    cycle: { defaultWakeMinutes: 45 },
+    container: { timeoutSec: 9 },
+  });
+});

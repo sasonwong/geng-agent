@@ -18,4 +18,4 @@
 收到的邮件在 `/mail`（只读），不会叫醒你。`recall` 翻，`open` 读——打开就算处理过了。
 邮件只收不回，没有回信的通道；要答一个人就换你找得到他的地方。
 
-`/state/policy.proposal.json`：`{"cycle":{"defaultWakeMinutes":30}}` 这样的东西，下次醒来前生效，只认时机和阈值。
+`propose({"cycle":{"defaultWakeMinutes":30}})`：申请改自己的运行条件，下次醒来前生效，只认时机和阈值。

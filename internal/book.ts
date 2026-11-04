@@ -2,6 +2,9 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, stat
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
+import { ATTENTION_MAX_MS } from "./attention.ts";
+import { keyCanMute } from "./mute.ts";
+import { NEGOTIABLE } from "./proposal.ts";
 import { parseAfter } from "./schedule.ts";
 import { readJson, readText, writeJson, writeText } from "./state.ts";
 
@@ -106,6 +109,27 @@ function list(body: unknown, key: string): string[] | null {
   if (!Array.isArray(value)) return null;
   const out = value.filter((v): v is string => typeof v === "string" && v.trim() !== "");
   return out.length === 0 ? null : out;
+}
+
+function integer(body: unknown, key: string): number | null {
+  if (typeof body !== "object" || body === null) return null;
+  const value = (body as Record<string, unknown>)[key];
+  return typeof value === "number" && Number.isInteger(value) ? value : null;
+}
+
+function array(body: unknown, key: string): unknown[] | null {
+  if (typeof body !== "object" || body === null) return null;
+  const value = (body as Record<string, unknown>)[key];
+  return Array.isArray(value) ? value : null;
+}
+
+function flatKeys(obj: unknown, prefix = ""): string[] {
+  if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return [];
+  return Object.entries(obj as Record<string, unknown>).flatMap(([k, v]) =>
+    v !== null && typeof v === "object" && !Array.isArray(v)
+      ? flatKeys(v, `${prefix}${k}.`)
+      : [`${prefix}${k}`],
+  );
 }
 
 /** Append to a file it may not have written yet, keeping whatever is already there. */
@@ -226,6 +250,88 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       writeJson(paths.mailRead, [...before]);
       const total = mailCount(paths.mail);
       return { status: 200, body: { ids, left: Math.max(0, total - before.size), at: nowIso } };
+    }
+
+    // The rest of what the container used to write into /state: three files the gateway
+    // reads, and the one about timing. Each takes the words the tool was given and builds
+    // the file here — the book's shape is a fact of the host, so a container that may not
+    // write the mount must not be the one deciding what goes into it either.
+    if (route === "/mute/set") {
+      const target = text(params, "target")?.trim();
+      if (target === undefined || !keyCanMute(target)) {
+        return { status: 400, body: { error: `不认识的 target：只能是 "*" 或 "chat:<id>"（id 是数字）` } };
+      }
+      const minutes = integer(params, "minutes");
+      if (minutes === null || minutes < 1 || minutes > 10080) {
+        return { status: 400, body: { error: "minutes 要是 1 到 10080 之间的整数" } };
+      }
+      const until = new Date(Date.now() + minutes * 60_000).toISOString();
+      const why = text(params, "why") ?? "";
+      const current = readJson<Record<string, unknown>>(paths.mute, {});
+      writeJson(paths.mute, { ...current, [target]: { until, why } });
+      return { status: 200, body: { target, until, why } };
+    }
+
+    if (route === "/attention/set") {
+      const raw = array(params, "chats");
+      if (raw === null) return { status: 400, body: { error: "chats 要是数组；空数组表示不听了" } };
+      const chats: (number | "*")[] = [];
+      for (const c of raw) {
+        if (c === "*") {
+          chats.push("*");
+          continue;
+        }
+        const n = typeof c === "number" ? c : Number(String(c).trim());
+        if (!Number.isFinite(n)) {
+          return { status: 400, body: { error: `要写 chat 的 id 或 *，收到的是 ${JSON.stringify(c)}` } };
+        }
+        chats.push(n);
+      }
+      if (chats.length === 0) {
+        writeJson(paths.attention, {});
+        return { status: 200, body: { chats: [], at: nowIso } };
+      }
+      // four hours is the most it may ask for: longer is not attention, it is a rule
+      const untilParam = (params as Record<string, unknown>).until;
+      const asked = untilParam === undefined ? null : Date.parse(String(untilParam));
+      const wanted = asked === null || Number.isNaN(asked) ? Date.now() + ATTENTION_MAX_MS : asked;
+      const untilMs = Math.min(wanted, Date.now() + ATTENTION_MAX_MS);
+      if (untilMs <= Date.now()) {
+        return { status: 400, body: { error: `那个时间已经过去了：${String(untilParam)}` } };
+      }
+      const until = new Date(untilMs).toISOString();
+      const why = text(params, "why") ?? "";
+      writeJson(paths.attention, { chats, until, why, at: nowIso });
+      return { status: 200, body: { chats, until, why } };
+    }
+
+    if (route === "/files/forget") {
+      const wanted = list(params, "files");
+      if (wanted === null) return { status: 400, body: { error: "files 要是非空字符串数组" } };
+      const before = readJson<{ files?: unknown }>(paths.filesForget, {});
+      const had = Array.isArray(before.files)
+        ? before.files.filter((f): f is string => typeof f === "string")
+        : [];
+      const all = [...new Set([...had, ...wanted.map((f) => f.trim())])];
+      writeJson(paths.filesForget, { files: all, at: nowIso });
+      return { status: 200, body: { files: all, pending: wanted.length, at: nowIso } };
+    }
+
+    if (route === "/proposal") {
+      const value = (params as Record<string, unknown>).value;
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        return {
+          status: 400,
+          body: { error: 'value 要是一个对象，形如 {"cycle":{"defaultWakeMinutes":30}}' },
+        };
+      }
+      writeJson(paths.proposal, value);
+      const keys = flatKeys(value);
+      // said now rather than found out next waking: a proposal for a value that is not on
+      // the table is dropped when it is applied, and the reply can read the same list
+      const willApply = keys.filter((k) => k in NEGOTIABLE);
+      const ignored = keys.filter((k) => !(k in NEGOTIABLE));
+      return { status: 200, body: { willApply, ignored, at: nowIso } };
     }
 
     return { status: 404, body: { error: `没有这个动作：${route}` } };

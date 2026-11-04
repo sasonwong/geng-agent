@@ -412,7 +412,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       peoplePath: at("/people", paths.people),
       timezone: policy.timezone,
       places,
-      attention: parseAttention(readJson(join(paths.palimpsest, "attention.json"), null)),
+      attention: parseAttention(readJson(paths.attention, null)),
       filesPath: at("/files", paths.filesDir),
       filesForgotten: forgot,
       filesPruned: pruned.removed,

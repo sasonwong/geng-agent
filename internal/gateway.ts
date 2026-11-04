@@ -353,7 +353,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
     const listen = cfg.listen ?? "all";
     const mutes = readMutes(join(p.palimpsest, "mute.json"), Date.now());
-    const attention = parseAttention(readJson(join(p.palimpsest, "attention.json"), null));
+    const attention = parseAttention(readJson(p.attention, null));
     const muted = isMuted(mutes, { chatId: message.chat.id, isDm: message.chat.type === "private" });
 
     const decision = route({
