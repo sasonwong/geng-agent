@@ -121,7 +121,7 @@ daemon 在宿主上跑，容器只装 pi 和它的工具链。
 `recall.ts`（`recall`/`open`）、`files.ts`（`download`）、`say-mute.ts`（`say`/`listen`/`forget`/`mute`/`propose`）、
 `websearch.ts`（`web_search`/`web_fetch`）。运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是
 这个目录**顶层**的每一个 `.ts`（`lib/` 里的共用代码不是扩展，也不会被加载）。所以改一个工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
-「环境变了」也不会响（那一行只说镜像变了）。
+「环境变了」也不会响（那一行只在镜像换了、或搜索从有到无/从无到有的时候才响）。
 
 容器里改不了、删不了这些文件——工具必须不可变，否则它就能改自己和人对谈的方式。
 **实例也不能写自己的扩展**：扩展跑在 pi 进程里，而任何一个扩展加载失败都会让 pi 直接退出——
@@ -574,6 +574,7 @@ deploy/update.sh      # git pull --ff-only + 重建镜像 + 重启已装的 unit
 | `internal/`、`cmd/` | `git pull` + 重启 unit | 直接经历到（不同的纸、不同的行为） |
 | `image/extensions/` | 存盘（`build.sh` 对它没有作用） | 下一轮醒来工具就是新的 |
 | `Dockerfile` | 重建镜像 | 下一张纸开头多一行 `环境变了。` |
+| `<inst>.env` 的 `GENG_SEARCH_URL`（从有到无，或反过来） | 改完重启 unit | 下一张纸开头多一行 `环境变了。` |
 | `deploy/policy.json`（模板） | **没有用**，老实例的 policy 是生成时的副本；要手改 `data/<inst>/policy.json` | — |
 
 最后一行是最容易漏的：模板只是 `init` 的输入。所以升级之后值得跑一次
