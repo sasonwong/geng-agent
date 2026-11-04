@@ -345,3 +345,33 @@ test("git's credential question is answered by the host, or not at all", async (
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+
+test("the model key answers on the socket, and only from the host's own file", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  mkdirSync(join(root, "secrets"), { recursive: true });
+  const server = await startBookServer({ paths, log: () => {} });
+  const ask = (): Promise<{ status: number; body: string }> =>
+    new Promise((resolve, reject) => {
+      const req = request({ socketPath: socketPath(paths), path: "/model/key", method: "GET" }, (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  try {
+    // nothing configured is a refusal that names the file, so the round says why
+    const none = await ask();
+    assert.equal(none.status, 503);
+    assert.match(none.body, /model\.env/);
+    // and the answer is the key itself, byte for byte: pi puts it in a header
+    writeFileSync(join(root, "secrets", "model.env"), "OPENCODE_API_KEY=sk-test-123\n");
+    assert.deepEqual(await ask(), { status: 200, body: "sk-test-123" });
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});

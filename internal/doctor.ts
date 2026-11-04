@@ -18,6 +18,7 @@ import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { envProblem, mailWiringProblem, searchPairProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
+import { modelKeyFile, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -109,6 +110,24 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
           ? "只装镜像里自带的那几个"
           : listed.join(", ")
         : `这份 settings 里写了镜像没装的：${missing.join(", ")}——镜像里没有，醒来会直接退出`,
+  });
+
+  // The key must not be in the env file: that file is `--env-file` into the container,
+  // and a round that runs `env` would read it. This is the migration check, not a nicety.
+  const key = readModelKey(p);
+  const envVars = readEnvFile(p.secrets);
+  const leakedKey = ["OPENCODE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GENG_MODEL_KEY"].filter(
+    (name) => (envVars[name] ?? "") !== "",
+  );
+  checks.push({
+    name: "模型密钥",
+    ok: key !== null && leakedKey.length === 0,
+    detail:
+      key === null
+        ? `没有 ${modelKeyFile(p)}：第一轮就会没有模型可用`
+        : leakedKey.length > 0
+          ? `${leakedKey.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/model.env`
+          : `${key.name}（只在宿主上，容器靠 /model/key 取）`,
   });
 
   // Three states, because "not configured" and "configured but wrong" look identical from

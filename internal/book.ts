@@ -5,6 +5,7 @@ import type { Paths } from "./paths.ts";
 import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
+import { readModelKey } from "./model.ts";
 import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -439,6 +440,19 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       } catch (err) {
         reply(500, { error: `读不出来：${(err as Error).message}` });
       }
+      return;
+    }
+    // The model key, for the same reason the GitHub token is here: the container must not
+    // have it. `models.json` runs this as `!curl …` at request time, so what leaves is the
+    // key itself and nothing that can be replayed after the waking ends.
+    if (req.method === "GET" && url === "/model/key") {
+      const found = readModelKey(o.paths);
+      if (found === null) {
+        reply(503, { error: `没有模型密钥：写 ${join("secrets", "model.env")}（OPENCODE_API_KEY=…）` });
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end(found.key);
       return;
     }
     // Plain text, not JSON, because the reader is `git`, not an agent: a credential helper

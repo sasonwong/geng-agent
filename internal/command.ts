@@ -103,6 +103,10 @@ export function buildCommand(
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
       `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
+      // The model key is fetched from the book socket at request time (`apiKey: "!curl …"`),
+      // so no provider credential is in this container's environment at all.
+      "-v",
+      `${join(paths.root, "deploy", "models.json")}:/home/agent/.pi/agent/models.json:ro`,
       // The book is not mounted at all. Every read and every write goes through the
       // endpoint, so a call is the only way in and the ledger sees all of it — a `cat`
       // used to count as a read neither the daemon nor the page could name. The single

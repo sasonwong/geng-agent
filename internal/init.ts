@@ -3,12 +3,20 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "n
 import { dirname, join } from "node:path";
 import { makePaths, requiredDirs } from "./paths.ts";
 
-const SECRETS_TEMPLATE = `# geng: credentials for this instance.
+// Everything in this file is `--env-file` into the container, so nothing secret goes here.
+// It holds only tokens whose damage is bounded: a search token that can search, a chat id.
+const SECRETS_TEMPLATE = `# geng: things the container is allowed to see.
 # Injected with \`docker run --env-file\` — never mounted, never in data/, never in backups.
-# Pick the variable your pi provider reads, e.g.:
-#   OPENAI_API_KEY=...
-#   ANTHROPIC_API_KEY=...
-#   DEEPSEEK_API_KEY=...
+# The model key does NOT belong here: it goes in secrets/model.env, which the container
+# never reads (pi fetches it from the book socket at request time).
+GENG_SEARCH_TOKEN=
+`;
+
+// Not injected anywhere: the daemon reads it and answers /model/key with it, so the
+// container can use the key without being able to read it.
+const MODEL_KEY_TEMPLATE = `# geng: the provider key for this instance's model.
+# The container never sees this file. pi asks the daemon over the book socket.
+OPENCODE_API_KEY=
 `;
 
 export function initInstance(root: string, instance: string): void {
@@ -36,6 +44,10 @@ export function initInstance(root: string, instance: string): void {
     writeFileSync(p.secrets, SECRETS_TEMPLATE, { mode: 0o600 });
   }
   chmodSync(p.secrets, 0o600);
+
+  const modelEnv = join(root, "secrets", "model.env");
+  if (!existsSync(modelEnv)) writeFileSync(modelEnv, MODEL_KEY_TEMPLATE, { mode: 0o600 });
+  chmodSync(modelEnv, 0o600);
 
   const rusticEnv = join(root, "secrets", "rustic.env");
   mkdirSync(join(root, "backup"), { recursive: true });

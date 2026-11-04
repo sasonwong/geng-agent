@@ -129,30 +129,41 @@ node cmd/geng/index.ts init alice
 
 ### 3.2 填凭据
 
+**两个文件，区别是容器看不看得见。**
+
+`secrets/model.env`（600）——模型密钥，**容器永远读不到**：
+
+```
+OPENCODE_API_KEY=...          # 变量名跟着 provider 换（OPENAI_API_KEY / ANTHROPIC_API_KEY …）
+```
+
+`deploy/models.json` 里那行 `apiKey: "!curl -fsS --unix-socket /run/geng/book.sock http://localhost/model/key"`
+让 pi 在**每次请求时**去 daemon 取一次；daemon 从模型密钥文件里读，明文回在 socket 上。
+所以密钥只在三处存在：宿主上的文件、socket 上的一瞬、pi 发出去的那个请求头里。**`env` 里没有它。**
+
+`secrets/alice.env`（600）——`--env-file` 注入，容器里 `env` 能读到，**所以只放代价有上限的值**
+（搜索 token、chat id）：
+
 ```bash
-echo '<你的 key>' | node cmd/geng/index.ts secrets set alice OPENCODE_API_KEY
-```
-
-值**从 stdin 读**（argv 会在 `ps` 里露出去），写进 `secrets/alice.env`（600），同名行原地替换、
-注释和别的行一个字不动。也可以照旧手写这个文件：
-
-```
-OPENCODE_API_KEY=...          # 或者你用的 provider 对应的变量名
-# GENG_SEARCH_SOCKET 不用写：daemon 在 docker run 时注入（第 5 节）
+echo '<search token>' | node cmd/geng/index.ts secrets set alice GENG_SEARCH_TOKEN
 GENG_SEARCH_TOKEN=...
 ```
+
+值**从 stdin 读**（argv 会在 `ps` 里露出去），同名行原地替换、注释和别的行一个字不动。
 
 **变量名由 provider 决定，不是靠猜。** 名字写错的表现是第一次醒来就报 "No API key found"，
 看起来像 key 坏了。验证的方式是拿它去打一次真端点看状态码（401 = 能连上但没认出来，200 = 对了），
 不要靠打印它、看长度、看前缀。
 
-`--env-file` 注入，**永不挂载**。容器里 `env` 就能读到它，所以它必须是最小权限、只对一个用途。
+`doctor` 的「模型密钥」会在两件事上说话：文件不存在（第一轮就没有模型可用）、
+或者 `OPENCODE_API_KEY` 之类还留在 `alice.env` 里（那个文件会进容器）。
 
 ### 全部凭据一览
 
 | 文件 | 谁写的 | 谁读它 | 缺了会怎样 |
 |---|---|---|---|
-| `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 第一轮就 `No API key found`；变量名写错也是这个症状 |
+| `secrets/model.env` | 你（`init` 只放空模板） | daemon，答 `/model/key` | 第一轮就 `Failed to resolve API key … from shell command` |
+| `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 只该放代价有上限的值；模型密钥写在这儿会进容器，`doctor` 会说 |
 | `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search` |
 | `<inst>.env` 的 `GENG_SEARCH_TOKEN` | 你（或 `secrets init`） | 容器里的扩展 | 容器里的 `web_search` 要它；和 `secrets/search.env` 里那串不一致 = 每次 401 |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
