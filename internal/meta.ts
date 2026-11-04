@@ -34,6 +34,8 @@ export interface Meta {
     talkedTo: string[];
     /** Files written during that cycle, in /work and /state together. */
     touched: number;
+    /** Actions whose arguments mentioned the book: memory traffic with no name yet. */
+    bookTouched?: number;
   };
   env?: Env;
   /** Messages already delivered once; they may not knock again before this time. */

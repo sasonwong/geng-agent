@@ -11,6 +11,9 @@ export interface Paths {
   workspace: string;
   usage: string;
   meta: string;
+  /** One line per tool call, appended when a round ends: the ledger the page counts from.
+   * Rebuildable from `session/` if it is ever lost — an index, not a fact. */
+  acts: string;
   inbox: string;
   inboxSeen: string;
   inboxLow: string;
@@ -72,6 +75,7 @@ export function makePaths(root: string, instance: string): Paths {
     workspace: join(data, "workspace"),
     usage: join(data, "usage"),
     meta: join(data, "meta"),
+    acts: join(data, "meta", "acts.jsonl"),
     inbox,
     inboxSeen: join(inbox, "seen"),
     inboxLow: join(inbox, "low"),

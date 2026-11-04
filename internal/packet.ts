@@ -1,14 +1,17 @@
 import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import type { CutRecord } from "./meta.ts";
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
-import { excerpt, readJson, readText } from "./state.ts";
+import { excerpt, mtimeMs, readJson, readText } from "./state.ts";
 import { KIND_WORD } from "./attach.ts";
 import { localClock } from "./time.ts";
 import { formatDuration } from "./schedule.ts";
 import { keyCanMute } from "./mute.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** An unfinished thing younger than this is not news; see the loop line below. */
+const LOOP_AGE_FLOOR_MS = 60 * 60 * 1000;
 
 export type WakeReason = "timer" | "knock" | "nudge";
 
@@ -77,6 +80,9 @@ export interface PacketInput {
     inbox: number;
     talkedTo: string[];
     touched: number;
+    /** Actions whose arguments mentioned the book this round: memory traffic with no name
+     * yet. Written by the daemon, shown so the number can go down when the tools land. */
+    bookTouched?: number;
   } | null;
   /** The last thing said on the address that last spoke, whoever said it. */
   lastWords: { dir: "in" | "out"; text: string; at: string; who: string } | null;
@@ -104,6 +110,26 @@ export function countLoops(paths: Paths): number {
     ).length;
   } catch {
     return 0;
+  }
+}
+
+/**
+ * When the oldest unfinished thing was last touched, or null when there is none.
+ *
+ * Without this the count only ever grows, and a number that only grows stops being a
+ * signal: eight months of stale items and eight of this morning's look identical.
+ */
+export function oldestLoopMs(paths: Paths): number | null {
+  try {
+    let oldest: number | null = null;
+    for (const e of readdirSync(paths.openLoops, { withFileTypes: true })) {
+      if (!e.isFile() || e.name.startsWith(".")) continue;
+      const at = mtimeMs(join(paths.openLoops, e.name));
+      if (at !== null && (oldest === null || at < oldest)) oldest = at;
+    }
+    return oldest;
+  } catch {
+    return null;
   }
 }
 
@@ -264,6 +290,8 @@ export function buildPacket(input: PacketInput): string {
     const wrote = Number.isFinite(lastCycle.touched) ? lastCycle.touched : 0;
     // 0 is stated as 0: "wrote 0 files" is a fact, "did nothing" would be a verdict
     out.push(`上一轮：${LAST_WAKE[lastCycle.wake]}${did}，写了 ${wrote} 个文件。`);
+    const touched = Number.isFinite(lastCycle.bookTouched) ? (lastCycle.bookTouched as number) : 0;
+    if (touched > 0) out.push(`其中 ${touched} 个动作碰过 ${statePath}。`);
   }
 
   if (waitWhy) out.push("", `你上次说在等：${excerpt(waitWhy, 300)}`);
@@ -286,10 +314,18 @@ export function buildPacket(input: PacketInput): string {
   }
 
   const loops = countLoops(paths);
+  const oldestLoop = loops > 0 ? oldestLoopMs(paths) : null;
+  // Below an hour there is nothing to judge: a list written this waking would read
+  // "oldest 0s ago" on every page, and a line that is always there stops being read.
+  const age = oldestLoop === null ? 0 : nowMs - oldestLoop;
+  const loopAge =
+    age < LOOP_AGE_FLOOR_MS
+      ? ""
+      : `，最老的一件 ${age >= DAY_MS ? `${Math.round(age / DAY_MS)} 天` : formatDuration(age)}前`;
   out.push(
     "",
     loops > 0
-      ? `未闭合的事：${loops} 件，在 ${statePath}/open-loops/。`
+      ? `未闭合的事：${loops} 件${loopAge}，在 ${statePath}/open-loops/。`
       : "未闭合的事：（没有未闭合的事）",
   );
 

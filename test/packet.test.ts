@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { buildPacket, type PacketInput } from "../internal/packet.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -479,4 +479,57 @@ test("a message on disk in both dirs is the knock, not ambient", () => {
   const one = { id: "7", file: "7.json", text: "在吗", from: "telegram:@you", chat: 111 };
   const text = buildPacket(input({ reason: "knock", inbox: [one, one], lowInbox: [one], lowPending: 1 }));
   assert.match(text, /有人在跟你说话：1 条，在 \/inbox\/。/);
+});
+
+test("the page says which part of the last round it cannot name yet", () => {
+  const { input } = fixture();
+  const cycle = {
+    at: "2026-03-02T08:00:00Z",
+    wake: "timer" as const,
+    tools: 9,
+    inbox: 0,
+    talkedTo: [],
+    touched: 2,
+    bookTouched: 3,
+  };
+  assert.match(buildPacket(input({ lastCycle: cycle })), /其中 3 个动作碰过 \/state。/);
+  // zero is not printed: a line that is always there stops being read
+  assert.doesNotMatch(
+    buildPacket(input({ lastCycle: { ...cycle, bookTouched: 0 } })),
+    /个动作碰过/,
+  );
+});
+
+test("the oldest unfinished thing carries its age, so the count can be judged", () => {
+  const { paths, input } = fixture();
+  mkdirSync(paths.openLoops, { recursive: true });
+  const nowMs = Date.parse("2026-03-02T09:00:00Z");
+  const stale = join(paths.openLoops, "L1.md");
+  writeText(stale, "等一个回信");
+  writeText(join(paths.openLoops, "L2.md"), "昨天才写的");
+  const old = new Date(nowMs - 41 * 24 * 3_600_000);
+  utimesSync(stale, old, old);
+
+  const text = buildPacket(input({ nowMs }));
+  assert.match(text, /未闭合的事：2 件，最老的一件 41 天前，在 \/state\/open-loops\/。/);
+});
+
+test("no unfinished things means no age to report", () => {
+  const { input } = fixture();
+  const text = buildPacket(input({}));
+  assert.match(text, /未闭合的事：（没有未闭合的事）/);
+  assert.doesNotMatch(text, /天前，在 \/state/);
+});
+
+test("an unfinished thing from a minute ago gets no age line", () => {
+  const { paths, input } = fixture();
+  mkdirSync(paths.openLoops, { recursive: true });
+  const nowMs = Date.parse("2026-03-02T09:00:00Z");
+  const file = join(paths.openLoops, "L1.md");
+  writeText(file, "刚写下");
+  const recent = new Date(nowMs - 2 * 60_000);
+  utimesSync(file, recent, recent);
+  // "oldest 2m ago" on every page is noise; below an hour the age costs a sentence and
+  // decides nothing
+  assert.match(buildPacket(input({ nowMs })), /未闭合的事：1 件，在 \/state\/open-loops\/。/);
 });
