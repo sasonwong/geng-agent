@@ -13,3 +13,6 @@ node_modules
 /deploy/mail-worker/.wrangler/
 /deploy/mail-worker/.dev.vars
 *.log
+
+# linked worktrees: the directory is a checkout of the repo, never part of it
+/.worktrees/
