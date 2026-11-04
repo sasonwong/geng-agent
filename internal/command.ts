@@ -109,10 +109,6 @@ export function buildCommand(
       // exception is the page it rewrites freely, which is a file, not an action.
       "-v",
       `${paths.identity}:/state/identity.md`,
-      // what people sent it: read-only, because a file it may not have looked at yet must
-      // not be something it can edit
-      "-v",
-      `${paths.filesDir}:/files:ro`,
       // the tools come from the checkout, not from an image layer: read-only, at the same
       // absolute path the image used to copy them to, so `@earendil-works/pi-ai` keeps
       // resolving. Read-only is the point — it must not be able to rewrite how it speaks.

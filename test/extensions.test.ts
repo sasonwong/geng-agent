@@ -80,3 +80,15 @@ test("no extension refers to a name that only exists in a previous version", () 
     });
   assert.deepEqual(undefined_, [], `这些名字不存在，pi 会在加载扩展时 exit 1:\n${undefined_.join("\n")}`);
 });
+
+// The one safety check on the download tool, exercised without pi: a path the model
+// chose must not become a way to write outside the directory it was given.
+test("a download lands where the model said, or nowhere", async () => {
+  const { resolveUnder } = await import("../image/extensions/lib/under.ts");
+  assert.equal(resolveUnder("/work", "/work/in/a.png"), "/work/in/a.png");
+  assert.equal(resolveUnder("/work", "in/a.png"), "/work/in/a.png");
+  assert.equal(resolveUnder("/work", "/work/../state/identity.md"), null);
+  assert.equal(resolveUnder("/work", "/etc/passwd"), null);
+  // the directory itself is inside itself; a file cannot be written *as* the directory
+  assert.equal(resolveUnder("/work", "/work"), "/work");
+});

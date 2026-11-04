@@ -1,8 +1,9 @@
-import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { chmodSync, createReadStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { ATTENTION_MAX_MS } from "./attention.ts";
+import { allocate, fileById } from "./ids.ts";
 import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -70,35 +71,6 @@ function highest(dirs: string[], pattern: RegExp): number {
     }
   }
   return max;
-}
-
-interface Ids {
-  journalDay?: string;
-  journalN?: number;
-  loopN?: number;
-}
-
-/**
- * The next id of a series: one past the highest number *ever handed out*.
- *
- * Looking only at the files is not enough: delete the newest entry and the next write
- * reuses its name, silently renaming an old entry. Ids are permanent names here, so the
- * ceiling is remembered in `meta/ids.json` and the files are only the floor — they can
- * raise it (a restored snapshot has ids the counter has not seen) but not lower it.
- */
-function allocate(paths: Paths, kind: "journal" | "loop"): { id: string; n: number; day: string } {
-  const ids = readJson<Ids>(paths.ids, {});
-  const day = today(Date.now());
-  if (kind === "loop") {
-    const floor = highest([paths.openLoops, join(paths.openLoops, "closed")], /^L(\d+)\.md$/);
-    const n = Math.max(ids.loopN ?? 0, floor) + 1;
-    writeJson(paths.ids, { ...ids, loopN: n });
-    return { id: `L${n}`, n, day };
-  }
-  const floor = highest([paths.journal], new RegExp(`^J${day}-(\\d+)\\.md$`));
-  const n = Math.max(ids.journalDay === day ? (ids.journalN ?? 0) : 0, floor) + 1;
-  writeJson(paths.ids, { ...ids, journalDay: day, journalN: n });
-  return { id: `J${day}-${n}`, n, day };
 }
 
 function text(body: unknown, key: string): string | null {
@@ -306,11 +278,16 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
     if (route === "/files/forget") {
       const wanted = list(params, "files");
       if (wanted === null) return { status: 400, body: { error: "files 要是非空字符串数组" } };
+      // an id is what it has; the list keeps the `/files/...` form the pruner already reads
+      const names = wanted.map((f) => {
+        const hit = fileById(paths, f);
+        return hit === null ? f : `/files/${hit.name}`;
+      });
       const before = readJson<{ files?: unknown }>(paths.filesForget, {});
       const had = Array.isArray(before.files)
         ? before.files.filter((f): f is string => typeof f === "string")
         : [];
-      const all = [...new Set([...had, ...wanted.map((f) => f.trim())])];
+      const all = [...new Set([...had, ...names])];
       writeJson(paths.filesForget, { files: all, at: nowIso });
       return { status: 200, body: { files: all, pending: wanted.length, at: nowIso } };
     }
@@ -362,6 +339,20 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         }
       }
       const files = list(params, "files") ?? [];
+      // `F12` is an original the host already has; `/work/...` is something it made.
+      // Two shapes, one field: the outbox keeps them apart so the gateway never has to
+      // guess whether a string is a container path or a path on the host.
+      const made: string[] = [];
+      const originals: { id: string; path: string; name: string }[] = [];
+      for (const f of files) {
+        if (f.startsWith("/")) {
+          made.push(f);
+          continue;
+        }
+        const hit = fileById(paths, f);
+        if (hit === null) return { status: 404, body: { error: `没有这个文件：${f}` } };
+        originals.push({ id: f, path: hit.path, name: hit.name });
+      }
       const replyTo = parseReplyTo((params as Record<string, unknown>).replyTo);
       if (replyTo === null) {
         return { status: 400, body: { error: 'replyTo 要写成 {"chat":-1001234567890,"messageId":151}' } };
@@ -372,7 +363,8 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         id,
         messages,
         ...(chat === undefined ? {} : { chat }),
-        ...(files.length === 0 ? {} : { files }),
+        ...(made.length === 0 ? {} : { files: made }),
+        ...(originals.length === 0 ? {} : { attachments: originals }),
         ...(replyTo === undefined ? {} : { replyTo }),
       });
       return { status: 200, body: { id, count: messages.length, at: nowIso } };
@@ -403,6 +395,27 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       log(`book ${req.url ?? "?"} 出错：${why}`);
       reply(500, { error: `宿主那边出错了：${why}` });
     };
+    // The one route that is not JSON: bytes go out as bytes. It is the only way a file
+    // leaves the book, so `download` names a file by id and chooses where it lands.
+    const url = req.url ?? "";
+    if (req.method === "GET" && url.startsWith("/files/")) {
+      const wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      const hit = fileById(o.paths, wanted);
+      if (hit === null) {
+        reply(404, { error: `没有这个文件：${wanted}` });
+        return;
+      }
+      try {
+        res.writeHead(200, {
+          "content-type": "application/octet-stream",
+          "content-length": String(statSync(hit.path).size),
+        });
+        createReadStream(hit.path).pipe(res);
+      } catch (err) {
+        reply(500, { error: `读不出来：${(err as Error).message}` });
+      }
+      return;
+    }
     if (req.method !== "POST") {
       reply(405, { error: "只接受 POST" });
       return;

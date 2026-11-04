@@ -3,6 +3,7 @@ import { readdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { makePaths, type Paths } from "./paths.ts";
+import { allocate } from "./ids.ts";
 import { readEnvFile } from "./secret.ts";
 import { mtimeMs, readJson, writeJson } from "./state.ts";
 
@@ -171,6 +172,27 @@ function fileName(id: string, index: number, name: string): string {
 }
 
 /**
+ * The id a mail keeps. The file name carries the message hash so a replay lands on the
+ * same file, and the id is read back out of it rather than allocated twice — an id that
+ * changed on a redelivery would leave the read list pointing at nothing.
+ */
+function mailNumber(paths: ReturnType<typeof makePaths>, hash: string): { id: string; file: string } {
+  let names: string[] = [];
+  try {
+    names = readdirSync(paths.mail);
+  } catch {
+    names = [];
+  }
+  const existing = names.find((n) => n.endsWith(`-${hash}.json`));
+  if (existing !== undefined) {
+    const id = /^E\d+/.exec(existing)?.[0];
+    if (id !== undefined) return { id, file: join(paths.mail, existing) };
+  }
+  const { id } = allocate(paths, "mail");
+  return { id, file: join(paths.mail, `${id}-${hash}.json`) };
+}
+
+/**
  * Decide, then write. A mail that is not wanted must not touch the disk at all: the count
  * on the wake paper is a directory listing, so a dropped mail that left a file behind
  * would be a knock that never goes away.
@@ -207,13 +229,14 @@ export function accept(
   const body = mail.text.trim() !== "" ? mail.text : htmlToText(mail.html);
   const subject = mail.subject.trim() === "" ? "（无主题）" : mail.subject.trim();
   const text = `${subject}\n\n${body.trim() === "" ? "（没有正文）" : body.trim()}`.slice(0, BODY_LIMIT);
-  const id = mailId(mail.messageId, `${mail.from}|${mail.date ?? ""}|${subject}`);
+  const hash = mailId(mail.messageId, `${mail.from}|${mail.date ?? ""}|${subject}`);
+  const { id, file: mailFile } = mailNumber(paths, hash);
   const at = mail.date ?? new Date(nowMs).toISOString();
 
-  const attachments: { kind: string; path?: string; note?: string; bytes?: number }[] = [];
+  const attachments: { kind: string; id?: string; name?: string; note?: string; bytes?: number }[] = [];
   let budget = ATTACHMENT_TOTAL;
   for (const [index, a] of mail.attachments.entries()) {
-    const name = fileName(id, index, a.name ?? "file");
+    const original = a.name ?? "file";
     const stored = a.content === undefined ? null : Buffer.from(a.content, "base64");
     const bytes = stored === null ? undefined : stored.byteLength;
     if (stored === null || bytes === undefined) {
@@ -225,15 +248,17 @@ export function accept(
       continue;
     }
     try {
-      writeFileSync(join(paths.filesDir, name), stored);
+      const { id: fileId } = allocate(paths, "file");
+      writeFileSync(join(paths.filesDir, fileName(fileId, index, original)), stored);
       budget -= bytes;
-      attachments.push({ kind: "document", path: `/files/${name}`, bytes });
+      // the id, not a path: nothing is mounted, and `download`/`say` take the id
+      attachments.push({ kind: "document", id: fileId, name: original, bytes });
     } catch (err) {
       attachments.push({ kind: "document", note: `没存下（${(err as Error).message}）`, bytes });
     }
   }
 
-  writeJson(join(paths.mail, `${id}.json`), {
+  writeJson(mailFile, {
     id,
     text,
     from: mail.from,

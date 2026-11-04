@@ -3,6 +3,13 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+/** The file a mail with this id lives in: the name carries the message hash too. */
+function mailFile(dir: string, id: string): string {
+  const name = readdirSync(dir).find((n) => n.startsWith(`${id}-`));
+  if (name === undefined) throw new Error(`没有 ${id} 这封信`);
+  return join(dir, name);
+}
 import { makePaths } from "../internal/paths.ts";
 import {
   accept,
@@ -111,7 +118,7 @@ test("an allowed mail becomes one file that the inbox parser can read", () => {
   );
   assert.equal(result.ok, true);
   const id = (result as { id: string }).id;
-  const written = JSON.parse(readFileSync(join(f.paths.mail, `${id}.json`), "utf8"));
+  const written = JSON.parse(readFileSync(mailFile(f.paths.mail, id), "utf8"));
   assert.equal(written.id, id);
   assert.equal(written.from, FROM);
   assert.equal(written.subject, "接口文档");
@@ -144,11 +151,12 @@ test("attachments land in /files and oversized ones are named, not fetched", () 
   const files = readdirSync(f.paths.filesDir);
   assert.equal(files.length, 1, "只有那一个能取");
   // basename first, so a name that walked up the tree cannot name the file
-  assert.equal(files[0], `${id}-0-passwd`);
-  const written = JSON.parse(readFileSync(join(f.paths.mail, `${id}.json`), "utf8"));
+  // the file is named by its own id, and the name that walked up the tree is gone
+  assert.match(files[0] as string, /^F\d+-0-passwd$/);
+  const written = JSON.parse(readFileSync(mailFile(f.paths.mail, id), "utf8"));
   assert.deepEqual(
-    written.attachments.map((a: { path?: string; note?: string }) => a.path ?? a.note),
-    [`/files/${id}-0-passwd`, "太大没取"],
+    written.attachments.map((a: { id?: string; note?: string }) => a.id ?? a.note),
+    [`F1`, "太大没取"],
   );
 });
 
@@ -161,7 +169,7 @@ test("a mail with no subject and no body still says something", () => {
     () => {},
   );
   const written = JSON.parse(
-    readFileSync(join(f.paths.mail, `${(result as { id: string }).id}.json`), "utf8"),
+    readFileSync(mailFile(f.paths.mail, (result as { id: string }).id), "utf8"),
   );
   assert.equal(written.text, "（无主题）\n\n（没有正文）");
 });
@@ -197,7 +205,8 @@ test("waiting time is when the mail arrived, not what its Date header claims", (
     `oldest 用的是 date 头：${new Date(pending.oldestMs ?? 0).toISOString()}`,
   );
   // marked read, it stops counting
-  writeJson(f.paths.mailRead, [readdirSync(f.paths.mail)[0]!.replace(/\.json$/, "")]);
+  const only = JSON.parse(readFileSync(join(f.paths.mail, readdirSync(f.paths.mail)[0] as string), "utf8"));
+  writeJson(f.paths.mailRead, [only.id]);
   assert.equal(pendingMail(f.paths).count, 0);
 });
 

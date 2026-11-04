@@ -251,6 +251,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     want?: number,
     files: string[] = [],
     replyTo?: { chat: number; messageId: number },
+    attachments: { path: string; name: string }[] = [],
   ): Promise<boolean> => {
     const cfg = bots[key];
     if (!cfg) return false;
@@ -291,6 +292,11 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         continue;
       }
       await sendFile(cfg.token, chat, host);
+    }
+    // the daemon resolved these from ids it handed out, so they are already host paths;
+    // nothing here can be talked into reading somewhere else
+    for (const a of attachments) {
+      await sendFile(cfg.token, chat, a.path);
     }
     if (p) {
       for (const [i, text] of texts.entries()) {
@@ -636,7 +642,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
             continue;
           }
           try {
-            if (await deliver(key, item.messages, item.chat, item.files, item.replyTo)) {
+            if (await deliver(key, item.messages, item.chat, item.files, item.replyTo, item.attachments)) {
               ackOutbox(dir, item.file);
             }
           } catch (err) {

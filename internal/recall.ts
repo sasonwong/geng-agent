@@ -1,4 +1,5 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
+import { listFiles } from "./ids.ts";
 import { basename, join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -11,8 +12,8 @@ import { readJson, writeJson } from "./state.ts";
  * is a call and every call is a line in the ledger. A `cat` can no longer count as a
  * read of something the daemon cannot name.
  */
-export type Source = "journal" | "loops" | "mail" | "people" | "inbox" | "sessions";
-export const SOURCES: Source[] = ["journal", "loops", "mail", "people", "inbox", "sessions"];
+export type Source = "journal" | "loops" | "mail" | "people" | "inbox" | "sessions" | "files";
+export const SOURCES: Source[] = ["journal", "loops", "mail", "people", "inbox", "sessions", "files"];
 
 const PAGE = 8_000;
 const LINE = 160;
@@ -84,7 +85,14 @@ function loopItems(p: Paths): Item[] {
 
 function mailItems(p: Paths): Item[] {
   return files(p.mail, ".json").flatMap((f) => {
-    const raw = readJson<{ id?: unknown; at?: unknown; from?: unknown; subject?: unknown; text?: unknown } | null>(f, null);
+    const raw = readJson<{
+    id?: unknown;
+    at?: unknown;
+    from?: unknown;
+    subject?: unknown;
+    text?: unknown;
+    attachments?: unknown;
+  } | null>(f, null);
     if (!raw || typeof raw.id !== "string") return [];
     const from = typeof raw.from === "string" ? raw.from : "（没有发件人）";
     const subject = typeof raw.subject === "string" ? raw.subject : "（无主题）";
@@ -94,7 +102,16 @@ function mailItems(p: Paths): Item[] {
         source: "mail" as const,
         at: typeof raw.at === "string" ? raw.at : when(f),
         header: `${from} · ${subject}`,
-        body: typeof raw.text === "string" ? raw.text : "",
+        body: [
+          typeof raw.text === "string" ? raw.text : "",
+          ...(Array.isArray(raw.attachments)
+            ? (raw.attachments as { id?: unknown; name?: unknown; note?: unknown }[]).map((a) =>
+                typeof a.id === "string" ? `附件 ${a.id}：${typeof a.name === "string" ? a.name : "文件"}` : `附件：${String(a.note ?? "没取")}`,
+              )
+            : []),
+        ]
+          .filter((l) => l !== "")
+          .join("\n"),
       },
     ];
   });
@@ -230,12 +247,32 @@ function sessionItems(p: Paths): Item[] {
   );
 }
 
+/** Files carry no text, so what a listing can say is what they are called and how big. */
+function fileItems(p: Paths): Item[] {
+  return listFiles(p).map((f) => {
+    let at = "";
+    try {
+      at = new Date(statSync(join(p.filesDir, `${f.id}-${f.name}`)).mtimeMs).toISOString();
+    } catch {
+      at = "";
+    }
+    return {
+      id: f.id,
+      source: "files" as const,
+      at,
+      header: `${f.name}（${Math.max(1, Math.round(f.bytes / 1024))} KB）`,
+      body: `${f.name}\n${f.bytes} 字节\n用 download("${f.id}", "/work/...") 取到手上，或者 say(files:["${f.id}"]) 直接发出去。`,
+    };
+  });
+}
+
 function collect(p: Paths, source: Source): Item[] {
   if (source === "journal") return journalItems(p);
   if (source === "loops") return loopItems(p);
   if (source === "mail") return mailItems(p);
   if (source === "people") return peopleItems(p);
   if (source === "inbox") return inboxItems(p);
+  if (source === "files") return fileItems(p);
   return sessionItems(p);
 }
 
@@ -313,6 +350,7 @@ const PREFIX: Record<string, Source> = {
   P: "people",
   M: "inbox",
   E: "mail",
+  F: "files",
   R: "sessions",
 };
 

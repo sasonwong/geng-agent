@@ -54,6 +54,8 @@ export interface OutboxItem {
   chat?: number;
   /** Container paths under /work that go out with the words. */
   files?: string[];
+  /** Files the daemon resolved from an id of its own, already absolute on the host. */
+  attachments?: { id: string; path: string; name: string }[];
   /** Answer one particular message, so the other side sees which line it is about. */
   replyTo?: { chat: number; messageId: number };
   file: string;
@@ -89,6 +91,7 @@ export function readOutbox(dir: string): OutboxItem[] {
       text?: unknown;
       chat?: unknown;
       files?: unknown;
+      attachments?: unknown;
       replyTo?: unknown;
     }>(join(dir, f), {});
     const messages = Array.isArray(raw.messages)
@@ -100,6 +103,14 @@ export function readOutbox(dir: string): OutboxItem[] {
       file: join(dir, f),
       id: raw.id ?? f.replace(/\.json$/, ""),
       files: Array.isArray(raw.files) ? raw.files.filter((x): x is string => typeof x === "string") : [],
+      attachments: Array.isArray(raw.attachments)
+        ? (raw.attachments as unknown[])
+            .filter((x): x is { path: string; name: string } => {
+              const o = x as { path?: unknown; name?: unknown } | null;
+              return typeof o?.path === "string" && typeof o?.name === "string";
+            })
+            .map((x) => ({ ...x, id: "" }))
+        : [],
       messages,
       chat: typeof raw.chat === "number" ? raw.chat : undefined,
       replyTo: parseReplyTo(raw.replyTo),

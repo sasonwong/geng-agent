@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bookHandler, startBookServer } from "../internal/book.ts";
+import { bookHandler, socketPath, startBookServer } from "../internal/book.ts";
 import { countLoops } from "../internal/packet.ts";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { readWaiting } from "../internal/schedule.ts";
 import { ensureDirs, readText } from "../internal/state.ts";
-import { postJson } from "../image/extensions/lib/uds.ts";
+import { getToFile, postJson } from "../image/extensions/lib/uds.ts";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "geng-book-"));
@@ -229,4 +229,49 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   // and a quote it cannot parse is a refusal, not a message without one
   const quote = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], replyTo: "151" }));
   assert.equal(quote.status, 400);
+});
+
+test("a file leaves the book as bytes over the same socket, and only by id", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  mkdirSync(paths.filesDir, { recursive: true });
+  writeFileSync(join(paths.filesDir, "F1-0-report.pdf"), Buffer.from([0, 1, 2, 255]));
+  const server = await startBookServer({ paths, log: () => {} });
+  try {
+    const sock = socketPath(paths);
+    const dest = join(root, "out.bin");
+    // the bytes arrive unchanged: this is the one route that is not JSON
+    await getToFile(sock, "/files/F1", dest);
+    assert.deepEqual([...readFileSync(dest)], [0, 1, 2, 255]);
+    // an id nothing has is a refusal, not an empty file
+    await assert.rejects(() => getToFile(sock, "/files/F9", join(root, "nope.bin")), /没有这个文件/);
+    // and the id cannot be a path: `F1-0-report.pdf` is a file, `../alice/palimpsest` is not
+    await assert.rejects(() => getToFile(sock, "/files/..%2Fpalimpsest%2Fidentity.md", join(root, "x")), /没有这个文件/);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
+test("saying a file by id hands the gateway the original, not a copy", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  mkdirSync(paths.filesDir, { recursive: true });
+  const original = join(paths.filesDir, "F1-0-report.pdf");
+  writeFileSync(original, "hello");
+  const handle = bookHandler(paths, { places: [-1001] });
+
+  const r = await handle(
+    { url: "/say", method: "POST" } as never,
+    JSON.stringify({ messages: ["给你"], to: -1001, files: ["F1", "/work/in/made.txt"] }),
+  );
+  assert.equal(r.status, 200);
+  const queued = JSON.parse(readText(join(paths.outbox, `${(r.body as { id: string }).id}.json`)) ?? "{}");
+  // two shapes, kept apart: one is a path inside the container, the other is on the host
+  assert.deepEqual(queued.files, ["/work/in/made.txt"]);
+  assert.deepEqual(queued.attachments, [{ id: "F1", path: original, name: "F1-0-report.pdf" }]);
+  // an id nothing has is refused before anything is queued
+  const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], files: ["F9"] }));
+  assert.equal(bad.status, 404);
 });

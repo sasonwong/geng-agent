@@ -8,6 +8,7 @@
  * The socket is mounted read-only into the container, so a tool cannot replace it, and
  * a host-side process is the only thing on the other end.
  */
+import { createWriteStream } from "node:fs";
 import { request } from "node:http";
 
 export interface UdsReply {
@@ -55,6 +56,37 @@ export function postJson(
       reject(new Error(why));
     });
     req.write(payload);
+    req.end();
+  });
+}
+
+/**
+ * GET a path over the socket and stream the body into a file. Bytes do not survive a
+ * JSON round trip, and the tool that fetches a file has to end with the file on disk
+ * anyway, so it is written as it arrives rather than held in memory.
+ */
+export function getToFile(
+  socketPath: string,
+  path: string,
+  dest: string,
+): Promise<{ status: number; bytes: number }> {
+  return new Promise((resolve, reject) => {
+    const req = request({ socketPath, path, method: "GET" }, (res) => {
+      if (res.statusCode !== 200) {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => {
+          body += c;
+        });
+        res.on("end", () => reject(new Error(`取不到：${body.slice(0, 300)}`)));
+        return;
+      }
+      const out = createWriteStream(dest);
+      res.pipe(out);
+      out.on("finish", () => resolve({ status: 200, bytes: out.bytesWritten }));
+      out.on("error", reject);
+    });
+    req.on("error", reject);
     req.end();
   });
 }
