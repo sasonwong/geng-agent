@@ -132,7 +132,7 @@ function peopleItems(p: Paths): Item[] {
     const last = lines[lines.length - 1] ?? "（没说过话）";
     return [
       {
-        id: `chat:${chat}`,
+        id: `P${chat}`,
         source: "people" as const,
         at: when(f),
         header: last.slice(0, LINE),
@@ -161,7 +161,7 @@ function inboxItems(p: Paths): Item[] {
       const text = typeof raw.text === "string" ? raw.text : "";
       const from = typeof raw.from === "string" ? raw.from : "（不知道谁）";
       return {
-        id: basename(f, ".json"),
+        id: `M${basename(f, ".json")}`,
         source: "inbox" as const,
         at: typeof raw.at === "string" ? raw.at : when(f),
         header: `${from} · ${firstLine(text)}`,
@@ -215,7 +215,12 @@ function sessionItems(p: Paths): Item[] {
     files(join(p.sessionDir, project), ".jsonl").map((f) => {
       const body = render(read(f).split("\n"));
       return {
-        id: `S${basename(f, ".jsonl").slice(0, 19)}`,
+        id: (() => {
+          const counter = /-(\d+)\.jsonl$/.exec(basename(f));
+          // the daemon numbers its wakings; a session made some other way has no number
+          // to align with, so it keeps its timestamp but stays under the same letter
+          return counter ? `R${Number(counter[1])}` : `R${basename(f, ".jsonl").slice(0, 19)}`;
+        })(),
         source: "sessions" as const,
         at: when(f),
         header: `${body.split("\n").length} 段`,
@@ -297,16 +302,22 @@ export function recallText(p: Paths, q: RecallQuery): string {
  * `open` guesses the source from the id's shape. A mail id is opaque, so it is tried
  * last for the prefixes and first for everything else; `chat:<n>` is a person.
  */
+/**
+ * One letter decides where an id lives: J journal, L loop, P person, M message,
+ * E email, R round, F file. Nothing has to guess by trying four places first, and
+ * the letter is visible in every listing so the model can read it off.
+ */
+const PREFIX: Record<string, Source> = {
+  J: "journal",
+  L: "loops",
+  P: "people",
+  M: "inbox",
+  E: "mail",
+  R: "sessions",
+};
+
 function find(p: Paths, id: string): Item | null {
-  const first: Source = id.startsWith("J")
-    ? "journal"
-    : id.startsWith("L")
-      ? "loops"
-      : id.startsWith("S")
-        ? "sessions"
-        : id.startsWith("chat:")
-          ? "people"
-          : "mail";
+  const first: Source = PREFIX[id.slice(0, 1)] ?? "mail";
   const order: Source[] = [first, ...SOURCES.filter((s) => s !== first)];
   for (const source of order) {
     const hit = collect(p, source).find((i) => i.id === id);

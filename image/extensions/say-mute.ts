@@ -38,7 +38,7 @@ const sayTool = defineTool({
     "to: chat id（纯数字）。只有一个地方能说话时可以省略，两处以上必须写。\n" +
     "files: 一起发出去的文件，写 /work/… 里的路径。\n" +
     "replyTo: 引用某一句话，写 {\"chat\": -1001234567890, \"messageId\": 151}；这两个数在" +
-    "recall 列出的收件箱 id（形如 -1001234567890-151）和人的对话里。\n" +
+    "recall 列出的消息 id（形如 M-1001234567890-151）和人的对话（每句后面的 #…）里。\n" +
     "返回 {id, count}。发不出去会明说哪一处不对。",
   parameters: Type.Object({
     messages: Type.Array(Type.String(), {

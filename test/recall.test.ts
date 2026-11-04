@@ -28,16 +28,16 @@ test("one question over every place, and the ids it answers with are the ones op
   mkdirSync(p.people, { recursive: true });
   writeFileSync(join(p.people, "-1001.jsonl"), [JSON.stringify({ at: "2026-03-02T08:00:00Z", dir: "in", text: "在吗", from: "@someone" }), JSON.stringify({ at: "2026-03-02T08:01:00Z", dir: "out", text: "在" })].join("\n") + "\n");
   mkdirSync(p.inbox, { recursive: true });
-  writeFileSync(join(p.inbox, "-1001-77.json"), JSON.stringify({ id: "-1001-77", at: "2026-03-02T08:00:00Z", from: "telegram:@someone", text: "敲你一下" }));
+  writeFileSync(join(p.inbox, "-1001-77.json"), JSON.stringify({ id: "M-1001-77", at: "2026-03-02T08:00:00Z", from: "telegram:@someone", text: "敲你一下" }));
 
   const listing = recallText(p, {});
   // closed loops are still listed: "how did that end" is the same question as "what is left"
-  for (const id of ["J20260302-1", "L3", "L2", "abc", "chat:-1001", "-1001-77"]) {
+  for (const id of ["J20260302-1", "L3", "L2", "abc", "P-1001", "M-1001-77"]) {
     assert.match(listing, new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}  `, "m"), `${id} 应该在列表里`);
   }
 
   // and the id from the listing is what open resolves — the two must not disagree
-  for (const id of ["J20260302-1", "L3", "L2", "abc", "chat:-1001", "-1001-77"]) {
+  for (const id of ["J20260302-1", "L3", "L2", "abc", "P-1001", "M-1001-77"]) {
     const r = openText(p, id, 0);
     assert.equal(r.found, true, `${id} 打不开`);
     assert.match(r.text, new RegExp(`^${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}  `));
@@ -92,13 +92,13 @@ test("every line it can quote carries the id it has to quote with, all the way t
   writeFileSync(join(p.inbox, "-1001-152.json"), JSON.stringify({ id: "-1001-152", at: "2026-03-02T08:02:00Z", from: "telegram:@someone", text: "看这个" }));
 
   // the transcript shows the id next to the line it belongs to, not only on the listing
-  const said = openText(p, "chat:-1001", 0).text;
+  const said = openText(p, "P-1001", 0).text;
   assert.match(said, /← @someone #-1001-151 在吗/);
   // a line it sent itself has no id to quote with, and printing a fake one would be worse
   assert.match(said, /→ 在$/m);
 
   // the inbox body carries its own file name, which is the id `open` and `say` both take
-  const mail = openText(p, "-1001-152", 0).text;
+  const mail = openText(p, "M-1001-152", 0).text;
   assert.match(mail, /id=-1001-152/);
 
   // and the quote travels: a replyTo built from that id lands in the outbox unchanged

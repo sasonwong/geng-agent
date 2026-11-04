@@ -57,9 +57,9 @@ const recallTool = defineTool({
 const openTool = defineTool({
   name: "open",
   label: "Open",
-  description: '读一件东西的全文。id 的形状：日记 J20260302-2；没闭合的事 L12（已闭合的也打得开）；一个人 chat:-1001（他说过的全部话）；醒过的一轮 S2026-11-04T03-34；一封邮件就是 recall 里那个邮件 id；一条收到的消息是收件箱里的文件名（形如 -1001-77）。offset 可选，接着上次读。返回正文；超过 8000 字会告诉你下一个 offset。打开一封邮件就算处理过了。',
+  description: '读一件东西的全文。id 的形状：日记 J20260302-2；没闭合的事 L12（已闭合的也打得开）；一个人 P-1001（他说过的全部话）；醒过的一轮 R5；一封邮件 E12；一条收到的消息 M-1001-77。offset 可选，接着上次读。返回正文；超过 8000 字会告诉你下一个 offset。打开一封邮件就算处理过了。',
   parameters: Type.Object({
-    id: Type.String({ description: "要读的那一件，形如 J20260303-2、L12、chat:-1001、S2026-11-04T03:34。" }),
+    id: Type.String({ description: "要读的那一件，形如 J20260303-2、L12、P-1001、R5、E12、M-1001-77；字母决定是哪一类。" }),
     offset: Type.Optional(Type.Integer({ minimum: 0, description: "从第几个字开始，接着上次读。" })),
   }),
   async execute(_toolCallId, params) {
