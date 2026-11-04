@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import type { Policy } from "./policy.ts";
+import { readSearchEnv } from "./search.ts";
 
 export interface Command {
   cmd: string;
@@ -121,6 +122,20 @@ export function buildCommand(
       "-w",
       "/work",
     ];
+    // The search endpoint is a unix socket, not a port on the bridge: nothing on the
+    // network can reach it, which is why the egress rules no longer need an exception.
+    // Mounted only when the file is there — docker materialises a missing host path as a
+    // directory, and a directory at that path fails at connect time with a shape nobody
+    // recognises.
+    const search = readSearchEnv(paths.root);
+    if (search !== null && existsSync(search.socket)) {
+      args.push(
+        "-v",
+        `${search.socket}:${search.socket}:ro`,
+        "-e",
+        `GENG_SEARCH_SOCKET=${search.socket}`,
+      );
+    }
     if (policy.container.network) args.push("--network", policy.container.network);
     // secrets are injected, never mounted
     if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);

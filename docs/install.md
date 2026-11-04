@@ -45,17 +45,14 @@ systemctl is-enabled geng-egress               # enabled = 下次开机会重写
 `sudo systemctl reload geng-egress` 重跑一次（改过 `egress.sh` 之后用它）；全部撤掉用
 `sudo systemctl disable --now geng-egress` 加 `sudo iptables -F DOCKER-USER`。
 
-脚本在网络在、但网桥还没有地址时以 1 退出，unit 随之变红：那一刻搜索端点那条例外写不出来，
-只剩 DROP 的话容器能上网、搜不了，而且没有任何报错。
-
 它做三件事，顺序有意义：**先**封云元数据地址和私网段（`10/8`、`172.16/12`、`192.168/16`），
 **再**放行 80/443/53，**最后**一条兜底 DROP。顺序反了（比如用 `-I` 逐条插到最前面），兜底会先命中，
 容器就完全没有 TCP 了。
 
 - 规则**只作用于 `-i br-<agent-net 的 id>`**，所以同机跑别的服务不受影响
 - 重跑是安全的：它先删掉提到这个网桥的规则再按顺序重加，不会叠
-- 如果容器里的 agent 需要够到宿主机上的**一个**服务（比如搜索端点），那是脚本里单独一条
-  按端口的例外，写在 DROP 之前。**不要**为了省事把整段私网放开
+- 私网是**整段封死**的，没有例外。容器够到宿主靠的不是网络：搜索端点是 unix socket，
+  daemon 把那个文件挂进容器（见 5.2）。**不要**为了省事把整段私网放开，也不要再加按端口的例外
 
 验证（两条都要，缺一条就说明规则位置错了）：
 
@@ -141,7 +138,7 @@ echo '<你的 key>' | node cmd/geng/index.ts secrets set alice OPENCODE_API_KEY
 
 ```
 OPENCODE_API_KEY=...          # 或者你用的 provider 对应的变量名
-GENG_SEARCH_URL=...           # 可选：装上搜索端点之后再加（第 5 节）
+# GENG_SEARCH_SOCKET 不用写：daemon 在 docker run 时注入（第 5 节）
 GENG_SEARCH_TOKEN=...
 ```
 
@@ -157,7 +154,7 @@ GENG_SEARCH_TOKEN=...
 |---|---|---|---|
 | `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 第一轮就 `No API key found`；变量名写错也是这个症状 |
 | `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search` |
-| `<inst>.env` 的 `GENG_SEARCH_URL`/`_TOKEN` | 你 | 容器里的扩展 | 同上。纸上看不到「今天还能搜 N 次」就是它 |
+| `<inst>.env` 的 `GENG_SEARCH_TOKEN` | 你（或 `secrets init`） | 容器里的扩展 | 容器里的 `web_search` 要它；和 `secrets/search.env` 里那串不一致 = 每次 401 |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `/mail`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
@@ -362,28 +359,29 @@ node cmd/geng/index.ts secrets init alice     # 生成 search / mail 两对 toke
 ```bash
 # secrets/search.env   chmod 600
 DEEPSEEK_API_KEY=sk-...                      # 搜索是单独计费的端点，chat 的 key 不一定能用
-GENG_SEARCH_BIND=0.0.0.0:8787                # 或直接绑 agent-net 的网关地址
+GENG_SEARCH_SOCKET=/run/geng/search.sock     # 默认值就是这个，不写也行
 GENG_SEARCH_DAILY=200                        # 改了不用重启，下一次请求就是新额度
 
 node cmd/geng/index.ts search                # 前台；常驻用 deploy/geng-search.service
 ```
 
-然后把它加进**实例的** env 文件（`--env-file` 注入，不用重建镜像、不用重启）：
+**端点是 unix socket，不是端口。** 容器能连它是因为 daemon 把 socket 文件按同一个路径挂进去，
+不是因为网络上有一个地址能打——所以出口规则里不再有私网例外，`ss -ltnp` 上也看不到任何东西。
+`GENG_SEARCH_SOCKET` 由 daemon 在 `docker run` 时注入，**不要写进 `secrets/<实例>.env`**：
+写进去的值和宿主上的不一致时，容器里会有一个连不上的路径。
 
-```
-GENG_SEARCH_URL=http://<agent-net 的网关>:8787
-GENG_SEARCH_TOKEN=和上面那串一样
-```
-
-网关地址别写死，换台机器就变：
+验证三点：
 
 ```bash
-docker network inspect agent-net -f '{{(index .IPAM.Config 0).Gateway}}'
+node cmd/geng/index.ts doctor alice        # 「搜索接线」：没配是 warn，配了但 socket 不在是 FAIL
+ss -ltn | grep 8787                        # 必须空：它已经不占端口了
 ```
 
-验证两点：不带 token 打 `/search` 应该 **401**，带上应该 **200** 且返回真结果；容器里能不能
-够到，看它纸上有没有「今天还能搜 N 次」——**没有这一行就说明 `GENG_SEARCH_URL` 没进去**，
-因为扩展在没有这个变量时**根本不注册**（工具不存在，而不是存在但拒绝工作）。
+第三点要进容器看：纸上有没有「今天还能搜 N 次」。**没有这一行就说明扩展没注册**——宿主上的
+socket 不存在时，daemon 干脆不挂它（docker 会把缺失的宿主路径建成一个目录，之后连接报的形状
+没人认得出来）。所以"没配"和"配了但服务没起来"在纸上长得一样，区别在 doctor 里。
+
+限额在宿主这边执行，容器改不了；用完时工具返回的是人话「今天的搜索用完了」，不是错误码。
 
 限额在宿主这边执行，容器改不了；用完时工具返回的是人话「今天的搜索用完了」，不是错误码。
 
@@ -510,7 +508,7 @@ git fetch origin && git reset --hard origin/main
 | 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（缺变量时它**不注册**自己） |
 | 它不回复，但进程正常 | `docker ps`、`daemon.log` 最后一行的用时 | 一轮还在跑（一轮可以跑 30 分钟）；或者它**选择了不说**——只有 `say` 会送出去，正文不会 |
 | 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数，不叫醒 |
-| 搜不到东西 | 纸上有「今天还能搜 N 次」吗 | 没有那一行 = `GENG_SEARCH_URL` 没进容器 |
+| 搜不到东西 | `doctor` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |
 | 备份说 ok 但 `--list` 是空的 | `geng backup <inst> --list` | rustic 版本不同，成功信息在 stderr、JSON 形状也不同。看落下来的快照，不看成功那行 |
 | 某个 bot 突然不回消息，unit 还 active | `journalctl --user -u geng-gateway`（找「轮询断了」）、`ls data/_ops/outbox` | 401（token 被吊销）/ 409（有 webhook，或同一个 token 有第二个消费者）不会自愈：gateway 杀掉那个 poller，没有别的 bot 就退出、十秒后重试，还有别的 bot 就**要 `reload` 一次才回来**。429 / 5xx / 断网会原地重试。409 先 `deleteWebhook` |
 

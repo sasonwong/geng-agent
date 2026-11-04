@@ -239,7 +239,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const currentEnv = {
     imageId: await imageId(policy),
     version: packageVersion(paths.root),
-    search: searchConfigured(paths.secrets),
+    search: searchConfigured(paths.root, paths.secrets),
   };
   const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);
 

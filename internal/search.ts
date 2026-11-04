@@ -1,20 +1,28 @@
 import { createServer, type Server } from "node:http";
+import { chmodSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
 import { readJson, readText, writeJson } from "./state.ts";
 
 /**
- * The search key must not live in the container, so the container only gets a URL
- * and a token that can do nothing but search. Quota is enforced here, where the
+ * The search key must not live in the container, so the container only gets a socket
+ * path and a token that can do nothing but search. Quota is enforced here, where the
  * agent can't edit the counter.
+ *
+ * A unix socket rather than a port on the bridge: a port is reachable by anything on
+ * the network, which is why it needed both a token and an exception in the egress rules.
+ * The socket needs neither — the filesystem already says who may connect.
  */
 export interface SearchEnv {
   token: string;
   apiKey: string;
-  bind: { host: string; port: number };
+  socket: string;
   dailyLimit: number;
 }
+
+/** Where the socket lives when nobody says otherwise: `RuntimeDirectory=geng` owns it. */
+export const DEFAULT_SEARCH_SOCKET = "/run/geng/search.sock";
 
 /**
  * A line like `GENG_SEARCH_DAILY=` carries no number, and `Number("")` is 0 — which the
@@ -24,7 +32,7 @@ export interface SearchEnv {
  * A trailing note goes too: `docs/install.md` itself writes `GENG_SEARCH_DAILY=200   # 改
  * 了不用重启`, and `EnvironmentFile=` hands that whole line over as the value. A number
  * that stops being a number falls back *silently*, so this is the one reading worth being
- * tolerant about; a mangled `GENG_SEARCH_BIND` fails loudly at listen time instead.
+ * tolerant about; a mangled GENG_SEARCH_SOCKET fails loudly at listen time instead.
  */
 function limitOf(file: Record<string, string>, key: string, fallback: number): number {
   for (const raw of [file[key], process.env[key]]) {
@@ -50,12 +58,11 @@ export function readSearchEnv(root: string): SearchEnv | null {
   const token = file.GENG_SEARCH_TOKEN ?? process.env.GENG_SEARCH_TOKEN ?? "";
   const apiKey = file.DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? "";
   if (token === "" || apiKey === "") return null;
-  const bind = file.GENG_SEARCH_BIND ?? process.env.GENG_SEARCH_BIND ?? "0.0.0.0:8787";
-  const [host, port] = bind.split(":");
+  const bind = file.GENG_SEARCH_SOCKET ?? process.env.GENG_SEARCH_SOCKET ?? DEFAULT_SEARCH_SOCKET;
   return {
     token,
     apiKey,
-    bind: { host: host || "0.0.0.0", port: Number(port ?? 8787) },
+    socket: bind,
     dailyLimit: limitOf(file, "GENG_SEARCH_DAILY", 200),
   };
 }
@@ -74,16 +81,28 @@ interface Quota {
 const UPSTREAM = "https://api.deepseek.com/v1/tools";
 
 /**
- * Whether *this container* has the tool: the extension only registers when the
- * instance env carries a URL. The host having a search.env means nothing to it.
+ * The endpoint this instance may use, or null.
+ *
+ * Three halves have to be true together: the host endpoint is configured, its socket
+ * exists, and the instance env carries the token. Any one missing and the tool is simply
+ * not there — and the page must not promise a quota it cannot spend.
  */
-export function searchConfigured(instanceEnvFile: string): boolean {
-  return (readEnvFile(instanceEnvFile).GENG_SEARCH_URL ?? "") !== "";
+export function searchReady(root: string, instanceEnvFile: string): SearchEnv | null {
+  const host = readSearchEnv(root);
+  if (host === null || !existsSync(host.socket)) return null;
+  if ((readEnvFile(instanceEnvFile).GENG_SEARCH_TOKEN ?? "") === "") return null;
+  return host;
+}
+
+/** Whether *this container* has the tool. One predicate, so the page and the daemon
+ * cannot disagree about it. */
+export function searchConfigured(root: string, instanceEnvFile: string): boolean {
+  return searchReady(root, instanceEnvFile) !== null;
 }
 
 /** How much searching is left today — the agent has to know to weigh it. */
 export function searchQuota(root: string, instanceEnvFile: string): { limit: number; left: number } | null {
-  if (!searchConfigured(instanceEnvFile)) return null;
+  if (searchReady(root, instanceEnvFile) === null) return null;
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
   const limit = q.limit ?? limitOf(file, "GENG_SEARCH_DAILY", 200);
@@ -111,21 +130,21 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
   // on every one: a quota or token change then needs no restart. Only bind is fixed, at
   // listen time, and saying so is cheaper than pretending it reloaded.
   let env = o.env;
-  let bindWarned = false;
+  let socketWarned = false;
   const refresh = (): void => {
     const next = readSearchEnv(o.root);
     if (next === null) return; // half a config is a typo: keep serving with the old one
-    if (next.bind.host !== env.bind.host || next.bind.port !== env.bind.port) {
-      if (!bindWarned) {
-        log(`search.env 的 bind 变了，要重启才换；继续听 ${env.bind.host}:${env.bind.port}`);
-        bindWarned = true;
+    if (next.socket !== env.socket) {
+      if (!socketWarned) {
+        log(`search.env 的 socket 变了，要重启才换；继续听 ${env.socket}`);
+        socketWarned = true;
       }
     } else {
-      bindWarned = false;
+      socketWarned = false;
     }
     const changed =
       next.token !== env.token || next.apiKey !== env.apiKey || next.dailyLimit !== env.dailyLimit;
-    env = { ...next, bind: env.bind };
+    env = { ...next, socket: env.socket };
     if (!changed) return;
     const q = readJson<Quota>(quotaFile, {});
     if (q.limit !== env.dailyLimit) writeJson(quotaFile, { ...q, limit: env.dailyLimit });
@@ -214,8 +233,18 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
 
   return new Promise((resolve, reject) => {
     server.on("error", reject);
-    server.listen(o.env.bind.port, o.env.bind.host, () => {
-      log(`search 端点 ${env.bind.host}:${env.bind.port}（每天 ${env.dailyLimit} 次）`);
+    // A socket left by an earlier run is a corpse that refuses connections, and the
+    // error looks exactly like "the service is down" — remove it before binding.
+    rmSync(env.socket, { force: true });
+    server.listen(env.socket, () => {
+      // 0600: the directory is what keeps other users out, but an instance runs as the
+      // same uid as this service, so the mode is not the boundary — it is the reminder.
+      try {
+        chmodSync(env.socket, 0o600);
+      } catch {
+        // a filesystem that does not support it is not a reason to stop serving
+      }
+      log(`search 端点 ${env.socket}（每天 ${env.dailyLimit} 次）`);
       resolve(server);
     });
   });

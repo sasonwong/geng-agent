@@ -106,3 +106,26 @@ test("the container is told where it may speak, by id", () => {
   assert.ok(count > 0, "没传 GENG_PLACES：比 daemon 旧的扩展读不到能说话的地方");
   assert.equal(args[count - 1], "-e");
 });
+
+test("the search socket is mounted only when it exists, and at the same path", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  const sock = join(root, "run", "search.sock");
+  mkdirSync(join(root, "secrets"), { recursive: true });
+  const env = (p: string) => `GENG_SEARCH_TOKEN=t\nDEEPSEEK_API_KEY=sk-x\nGENG_SEARCH_SOCKET=${p}\n`;
+  const argv = (): string =>
+    buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []).args.join(" ");
+
+  writeFileSync(join(root, "secrets", "search.env"), env(sock));
+  // nothing listens yet: docker would materialise the missing host path as a directory,
+  // and the container would then fail to connect with a shape nobody recognises
+  assert.equal(argv().includes("GENG_SEARCH_SOCKET"), false, "socket 不在的时候还是注入了路径");
+  assert.equal(argv().includes(sock), false, "socket 不在的时候还是挂了它");
+
+  mkdirSync(join(root, "run"), { recursive: true });
+  writeFileSync(sock, "");
+  assert.match(argv(), new RegExp(`-v ${sock}:${sock}:ro`), "socket 在的时候要挂进来");
+  assert.match(argv(), new RegExp(`-e GENG_SEARCH_SOCKET=${sock}`), "路径要和挂载点一致");
+  // no port anywhere: the whole point is that the network has no special address
+  assert.equal(argv().includes("8787"), false, "还在用端口");
+});

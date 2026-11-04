@@ -6,6 +6,11 @@ After=network-online.target
 Type=simple
 WorkingDirectory=@ROOT@
 EnvironmentFile=-@ROOT@/secrets/search.env
+# The endpoint listens on a unix socket under /run/geng. systemd creates the directory,
+# gives it to this unit's user, and removes it on stop — which also removes a stale
+# socket, the failure that looks exactly like "the service is down".
+RuntimeDirectory=geng
+RuntimeDirectoryMode=0700
 ExecStart=@NODE@ @ROOT@/cmd/geng/index.ts search
 Restart=always
 RestartSec=10

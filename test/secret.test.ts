@@ -43,16 +43,16 @@ test("reading an env file ignores comments, blank lines and lines with no equals
 test("a token that has to exist in two files is the same string or it is a bug", () => {
   assert.equal(searchPairProblem({}, {}), null, "nothing configured is not a problem");
   assert.equal(
-    searchPairProblem({ GENG_SEARCH_URL: "http://x:1", GENG_SEARCH_TOKEN: "t" }, { GENG_SEARCH_TOKEN: "t" }),
+    searchPairProblem({ GENG_SEARCH_TOKEN: "t" }, { GENG_SEARCH_TOKEN: "t" }),
     null,
   );
-  // the container-side copy without the endpoint does nothing at all
-  assert.match(searchPairProblem({ GENG_SEARCH_TOKEN: "t" }, {}) ?? "", /却没有/);
   // the endpoint without a token is a 401 that looks like a dead network
-  assert.match(searchPairProblem({ GENG_SEARCH_URL: "http://x:1" }, {}) ?? "", /却没有/);
+  assert.match(searchPairProblem({}, { GENG_SEARCH_TOKEN: "t" }) ?? "", /实例的 env 里没有/);
+  // the container-side copy without the endpoint does nothing at all
+  assert.match(searchPairProblem({ GENG_SEARCH_TOKEN: "t" }, {}) ?? "", /search\.env 里没有/);
   // both sides present but different: the quiet one
   assert.match(
-    searchPairProblem({ GENG_SEARCH_URL: "http://x:1", GENG_SEARCH_TOKEN: "a" }, { GENG_SEARCH_TOKEN: "b" }) ?? "",
+    searchPairProblem({ GENG_SEARCH_TOKEN: "a" }, { GENG_SEARCH_TOKEN: "b" }) ?? "",
     /不一致/,
   );
 });
@@ -68,7 +68,7 @@ test("a mailbox with only half of its wiring is reported, because neither half c
 
 test("an instance with no model key is named as the reason its first waking will fail", () => {
   assert.match(envProblem({}) ?? "", /API_KEY/);
-  assert.match(envProblem({ GENG_SEARCH_URL: "http://x" }) ?? "", /API_KEY/);
+  assert.match(envProblem({ GENG_SEARCH_TOKEN: "t" }) ?? "", /API_KEY/);
   assert.equal(envProblem({ OPENCODE_API_KEY: "k" }), null);
   assert.equal(envProblem({ DEEPSEEK_API_KEY: "k" }), null, "any provider's name is fine");
 });

@@ -356,8 +356,10 @@ async function main(): Promise<number> {
               "  wrangler secret put GENG_MAIL_TOKEN < <(sed -n 's/^GENG_MAIL_TOKEN=//p' secrets/mail.env)",
           );
         }
-        if ((readEnvFile(files.inst).GENG_SEARCH_URL ?? "") === "") {
-          console.log(`还差 secrets/${instance}.env 里的 GENG_SEARCH_URL（搜索端点地址，见 docs/install.md）。`);
+        if ((readEnvFile(files.inst).GENG_SEARCH_TOKEN ?? "") === "") {
+          console.log(
+            `还差 secrets/${instance}.env 里的 GENG_SEARCH_TOKEN（跑 \`geng secrets init ${instance}\` 会生成，见 docs/install.md）。`,
+          );
         }
         return 0;
       }
@@ -432,7 +434,7 @@ async function main(): Promise<number> {
       const env = readSearchEnv(args.root);
       if (!env) {
         console.error(
-          "没有搜索凭据：写 secrets/search.env（GENG_SEARCH_TOKEN、DEEPSEEK_API_KEY，可选 GENG_SEARCH_BIND、GENG_SEARCH_DAILY）",
+          "没有搜索凭据：写 secrets/search.env（GENG_SEARCH_TOKEN、DEEPSEEK_API_KEY，可选 GENG_SEARCH_SOCKET、GENG_SEARCH_DAILY）",
         );
         return 2;
       }

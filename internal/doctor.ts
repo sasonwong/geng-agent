@@ -8,7 +8,7 @@ import { readJson } from "./state.ts";
 import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { envProblem, mailWiringProblem, searchPairProblem, readEnvFile } from "./secret.ts";
-import { searchConfigured, searchQuota } from "./search.ts";
+import { readSearchEnv, searchQuota } from "./search.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -134,15 +134,27 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       ? { name, ok: problem === null, detail: problem ?? fine }
       : { name, ok: false, warnOnly: true, detail: unset };
 
-  const searchOn = searchConfigured(p.secrets);
+  const searchHost = readSearchEnv(root);
   const pair = searchPairProblem(instEnv, readEnvFile(join(root, "secrets", "search.env")));
+  // Three states, not two: no search.env is "not configured" and quiet; a search.env
+  // whose socket is missing is a FAIL, because that is a service that was set up and is
+  // not running — and the symptom otherwise is "the tool is missing", which reads as
+  // "never configured".
+  const socketMissing =
+    searchHost !== null && !existsSync(searchHost.socket)
+      ? `${searchHost.socket} 不存在：geng-search 服务没在跑`
+      : null;
+  // "Configured" is the operator having done anything at all. Whether it is *right* is
+  // the problem string's job: half a wiring must not read as "never set up", because
+  // that is the one state nobody goes looking for.
+  const anySearch = searchHost !== null || (instEnv.GENG_SEARCH_TOKEN ?? "") !== "";
   checks.push(
     optional(
       "搜索接线",
-      searchOn,
-      pair,
+      anySearch,
+      pair ?? socketMissing,
       "没配：容器里没有 web_search",
-      `两处 token 一致，今天还剩 ${searchQuota(root, p.secrets)?.left ?? "?"} 次`,
+      `socket 在 ${searchHost?.socket ?? "?"}，今天还剩 ${searchQuota(root, p.secrets)?.left ?? "?"} 次`,
     ),
   );
 

@@ -31,20 +31,10 @@ add() {
   iptables -A DOCKER-USER -i "$BR" "$@"
 }
 
-# The one private address the container may reach: the search endpoint on this
-# bridge's own gateway. It only accepts a query plus a token, and without it the
-# agent cannot search at all — which would leave the agent guessing URLs.
-SEARCH_PORT="${SEARCH_PORT:-8787}"
-GW=$(ip -4 -o addr show "$BR" | awk '{print $4}' | cut -d/ -f1 | head -1)
-# Without the gateway there is no exception to write, and the DROPs below would take
-# the search endpoint away with them — silently, since the rules still apply. Refuse
-# to half-apply instead: the unit is then visible as failed.
-if [ -z "$GW" ]; then
-  echo "没有 $BR 的地址：$BRIDGE 的网桥还没建好，规则没有装" >&2
-  exit 1
-fi
-add -d "$GW" -p tcp --dport "$SEARCH_PORT" -j RETURN
-
+# Every private destination is dropped. The search endpoint used to be the one exception —
+# a port on this bridge's own gateway, plus a token and a rule to keep it — because the
+# container had to reach a host process over the network. It is a unix socket now, so
+# nothing on this network is allowed to be special.
 # the cloud metadata service is the classic credential-theft path
 add -d 169.254.0.0/16 -j DROP
 for cidr in 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
@@ -57,6 +47,6 @@ add -p tcp --dport 53 -j RETURN
 add -p udp --dport 53 -j RETURN
 add -p tcp -j DROP
 
-echo "applied egress rules on $BR (gateway ${GW:-?}, search port $SEARCH_PORT)"
+echo "applied egress rules on $BR"
 echo "verify from inside a container: 169.254.169.254 and 10.0.0.1 must time out,"
 echo "https://opencode.ai must still answer."
