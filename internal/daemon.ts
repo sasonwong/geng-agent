@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
+import { modelFailures } from "./session.ts";
 import { markSeen, peekInbox, quarantine } from "./inbox.ts";
 import { clockArmed, clockNotice, freshForSteer, handedOver, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
 import { buildPacket, type WakeReason } from "./packet.ts";
@@ -536,6 +537,16 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         lastSaid: result.finalText.trim() === "" ? (meta.lastSaid ?? null) : result.finalText,
       };
       writeMeta(paths, meta);
+    }
+
+    // The RPC stream says nothing about a failed model request — pi retries it, records
+    // an empty assistant message, and settles as if the round were finished. The session
+    // file is the only place that failure was written down, so count it there.
+    const sessionFile = listSessionFiles(paths.sessionDir).find((f) => f.endsWith(`${sessionId}.jsonl`));
+    if (sessionFile !== undefined) {
+      const failures = modelFailures(sessionFile);
+      result.modelErrors = failures.count;
+      result.endedOnModelError = failures.last;
     }
 
     const symptom = classify(result);

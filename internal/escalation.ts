@@ -109,6 +109,7 @@ function describe(symptom: Symptom, result?: { repeat?: { name: string; count: n
   }
   if (symptom === "timeout") return "超时被杀掉";
   if (symptom === "empty") return "没有动作，也没有话";
+  if (symptom === "model-error") return "最后一次模型请求报错回来（网络或额度），这一轮就此停下";
   return SYMPTOM_LABEL[symptom];
 }
 

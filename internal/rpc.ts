@@ -47,6 +47,11 @@ export interface RpcResult {
   injections: { text: string; read: boolean }[];
   stderrTail: string;
   durationMs: number;
+  /** Filled in by the daemon from the session file: the stream carries no such event,
+   * so a result built anywhere else simply does not know. */
+  modelErrors?: number;
+  /** True when the round's last model request came back as an error. */
+  endedOnModelError?: boolean;
 }
 
 export interface RpcOptions {
