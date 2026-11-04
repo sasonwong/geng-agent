@@ -10,7 +10,7 @@ import { postJson } from "../image/extensions/lib/uds.ts";
 // arrives `process.env` holds the copy from startup. If the environment won, a rotated
 // token never took effect and the old one kept being accepted — a stale credential, not
 // just a stale quota.
-const FROZEN = { GENG_SEARCH_TOKEN: "old", GENG_SEARCH_DAILY: "111" };
+const FROZEN = { GENG_SEARCH_DAILY: "111" };
 
 function fixture(): { root: string; sock: string; restore: () => void } {
   const root = mkdtempSync(join(tmpdir(), "geng-search-"));
@@ -36,12 +36,8 @@ function fixture(): { root: string; sock: string; restore: () => void } {
   };
 }
 
-function envText(sock: string, extra = ""): string {
-  const lines = [
-    "GENG_SEARCH_TOKEN=new",
-    "DEEPSEEK_API_KEY=sk-test",
-    `GENG_SEARCH_SOCKET=${sock}`,
-  ];
+function envText(sock: string, extra = "", apiKey = "DEEPSEEK_API_KEY=sk-test"): string {
+  const lines = [apiKey, `GENG_SEARCH_SOCKET=${sock}`];
   if (extra !== "") lines.push(extra);
   return lines.join("\n") + "\n";
 }
@@ -50,7 +46,6 @@ test("the file beats the environment systemd froze at startup", () => {
   const f = fixture();
   try {
     const env = readSearchEnv(f.root);
-    assert.equal(env?.token, "new");
     assert.equal(env?.dailyLimit, 222);
     assert.equal(env?.socket, f.sock);
   } finally {
@@ -92,8 +87,7 @@ test("a trailing note on the quota line is the note's problem, not the quota's",
 test("the quota the agent is shown uses the same reading of an empty line", () => {
   const f = fixture();
   const instance = join(f.root, "instance.env");
-  writeFileSync(instance, "GENG_SEARCH_TOKEN=new\n");
-  try {
+    try {
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY="));
     assert.equal(searchQuota(f.root, instance)?.limit, 111);
     assert.equal(searchQuota(f.root, instance)?.left, 111);
@@ -110,35 +104,29 @@ test("no socket, no quota: the page must not promise what the container cannot s
   // over a container that has no web_search at all.
   const f = fixture();
   const instance = join(f.root, "instance.env");
-  writeFileSync(instance, "GENG_SEARCH_TOKEN=new\n");
   try {
     assert.notEqual(searchQuota(f.root, instance), null);
     // a socket path nothing created: the endpoint is configured, the service is not up
     writeFileSync(join(f.root, "secrets", "search.env"), envText(join(f.root, "gone.sock")));
     assert.equal(searchQuota(f.root, instance), null);
-    // and an instance without the token gets nothing either
-    writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock));
-    writeFileSync(instance, "DEEPSEEK_API_KEY=sk-test\n");
+    // and without the provider key there is nothing to spend either
+    writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "", "DEEPSEEK_API_KEY="));
     assert.equal(searchQuota(f.root, instance), null);
   } finally {
     f.restore();
   }
 });
 
-test("a token rotated in the file is the one the endpoint accepts", async () => {
+test("reaching the socket is the whole authorization", async () => {
   const f = fixture();
   let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
   try {
     const env = readSearchEnv(f.root);
     assert.ok(env);
     server = await startSearchServer({ root: f.root, env, log: () => {} });
-    // an unknown path: 401 means the token was rejected, 404 means it got past the check
-    const status = async (token: string): Promise<number> => {
-      const reply = await postJson(f.sock, "/nope", {}, { "x-geng-token": token });
-      return reply.status;
-    };
-    assert.equal(await status("old"), 401);
-    assert.equal(await status("new"), 404);
+    // No header, no token: the socket is the boundary. A token in the container's env was
+    // a second copy of a secret that protected nothing the socket did not already.
+    assert.equal((await postJson(f.sock, "/nope", {})).status, 404);
   } finally {
     server?.close();
     f.restore();
@@ -158,8 +146,7 @@ test("a quota file left at zero by an earlier run is not a permanent verdict", a
     mkdirSync(join(f.root, "data", "_ops", "usage"), { recursive: true });
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY="));
     delete process.env.GENG_SEARCH_DAILY;
-    writeFileSync(instance, "GENG_SEARCH_TOKEN=new\n");
-    writeFileSync(usage, JSON.stringify({ day, count: 0, limit: 0 }));
+        writeFileSync(usage, JSON.stringify({ day, count: 0, limit: 0 }));
     assert.equal(searchQuota(f.root, instance)?.left, 0); // before: the old zero wins
     const env = readSearchEnv(f.root);
     assert.ok(env);

@@ -61,30 +61,6 @@ export interface SecretInput {
 }
 
 /** An instance without a model key fails its first waking; nothing else here matters then. */
-export function envProblem(instEnv: Record<string, string>): string | null {
-  const has = Object.keys(instEnv).some((k) => k.endsWith("_API_KEY") && instEnv[k] !== "");
-  return has ? null : "没有任何 *_API_KEY（init 只放空模板，这一项要你填）";
-}
-
-/**
- * The search endpoint and the container each hold a token. They are the same string or
- * the container's `web_search` returns 401 forever, and the page still says it exists.
- */
-export function searchPairProblem(
-  instEnv: Record<string, string>,
-  searchEnv: Record<string, string>,
-): string | null {
-  // The container is told where the socket is at run time (it is derived from the host's
-  // layout), so the only thing left to pair is the token — and the token is the only
-  // thing that has to be identical in two files.
-  const mine = instEnv.GENG_SEARCH_TOKEN ?? "";
-  const theirs = searchEnv.GENG_SEARCH_TOKEN ?? "";
-  if (mine === "" && theirs === "") return null;
-  if (mine === "") return "secrets/search.env 里有 token，实例的 env 里没有";
-  if (theirs === "") return "实例里有 token，secrets/search.env 里没有";
-  return mine === theirs ? null : "两处 GENG_SEARCH_TOKEN 不一致";
-}
-
 /** A mailbox needs both halves, and each one alone fails silently. */
 export function mailWiringProblem(
   instance: string,

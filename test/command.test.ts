@@ -80,7 +80,7 @@ test("the search socket is mounted only when it exists, and at the same path", (
   const paths = makePaths(root, "alice");
   const sock = join(root, "run", "search.sock");
   mkdirSync(join(root, "secrets"), { recursive: true });
-  const env = (p: string) => `GENG_SEARCH_TOKEN=t\nDEEPSEEK_API_KEY=sk-x\nGENG_SEARCH_SOCKET=${p}\n`;
+  const env = (p: string) => `DEEPSEEK_API_KEY=sk-x\nGENG_SEARCH_SOCKET=${p}\n`;
   const argv = (): string =>
     buildCommand(paths, { ...defaultPolicy(), runner: "docker" }, "geng-alice", "你是…", []).args.join(" ");
 

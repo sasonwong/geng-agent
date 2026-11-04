@@ -331,19 +331,12 @@ async function main(): Promise<number> {
         const rotate = args.rest.includes("--rotate");
         const files = secretFiles(args.root, instance);
         const written: string[] = [];
-        // 同一个值要出现在两处时，只生成一次、写两处，永不手抄。
-        if (rotate || (readEnvFile(files.search).GENG_SEARCH_TOKEN ?? "") === "") {
-          const token = newToken();
-          writeEnvValue(files.search, "GENG_SEARCH_TOKEN", token);
-          writeEnvValue(files.inst, "GENG_SEARCH_TOKEN", token);
-          written.push(`search token（secrets/search.env 与 secrets/${instance}.env 两处一致）`);
-        }
         if (rotate || (readEnvFile(files.mail).GENG_MAIL_TOKEN ?? "") === "") {
           writeEnvValue(files.mail, "GENG_MAIL_TOKEN", newToken());
           written.push("mail token（secrets/mail.env）");
         }
         if (written.length === 0) {
-          console.log("两对 token 都已经有了，没有动（要换加 --rotate）。");
+          console.log("没有要生成的（要换加 --rotate）。");
         } else {
           for (const w of written) console.log(`写了 ${w}`);
         }
@@ -354,11 +347,6 @@ async function main(): Promise<number> {
           console.log(
             "Cloudflare Worker 那边要同一个值，别抄，直接管道：\n" +
               "  wrangler secret put GENG_MAIL_TOKEN < <(sed -n 's/^GENG_MAIL_TOKEN=//p' secrets/mail.env)",
-          );
-        }
-        if ((readEnvFile(files.inst).GENG_SEARCH_TOKEN ?? "") === "") {
-          console.log(
-            `还差 secrets/${instance}.env 里的 GENG_SEARCH_TOKEN（跑 \`geng secrets init ${instance}\` 会生成，见 docs/install.md）。`,
           );
         }
         return 0;
@@ -434,7 +422,7 @@ async function main(): Promise<number> {
       const env = readSearchEnv(args.root);
       if (!env) {
         console.error(
-          "没有搜索凭据：写 secrets/search.env（GENG_SEARCH_TOKEN、DEEPSEEK_API_KEY，可选 GENG_SEARCH_SOCKET、GENG_SEARCH_DAILY）",
+          "没有搜索凭据：写 secrets/search.env（DEEPSEEK_API_KEY，可选 GENG_SEARCH_SOCKET、GENG_SEARCH_DAILY）",
         );
         return 2;
       }

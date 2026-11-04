@@ -7,15 +7,14 @@ import { readJson, readText, writeJson } from "./fs.ts";
 
 /**
  * The search key must not live in the container, so the container only gets a socket
- * path and a token that can do nothing but search. Quota is enforced here, where the
- * agent can't edit the counter.
+ * path. Quota is enforced here, where the agent can't edit the counter.
  *
  * A unix socket rather than a port on the bridge: a port is reachable by anything on
- * the network, which is why it needed both a token and an exception in the egress rules.
- * The socket needs neither — the filesystem already says who may connect.
+ * the network, and needed an exception in the egress rules to be usable at all. The
+ * socket needs neither an exception nor a token — the filesystem already says who may
+ * connect, and a second copy of a secret in the container's environment protects nothing.
  */
 export interface SearchEnv {
-  token: string;
   apiKey: string;
   socket: string;
   dailyLimit: number;
@@ -49,18 +48,20 @@ function limitOf(file: Record<string, string>, key: string, fallback: number): n
  * The file first, the environment second.
  *
  * `geng-search.service` loads the same file with `EnvironmentFile=`, which freezes its
- * contents at start: reading `process.env` first made a token rotation invisible (the old
- * token stayed valid forever) and a quota edit a no-op. The environment is only the
- * fallback for a value the file does not carry.
+ * contents at start: reading `process.env` first made a quota edit a no-op. The
+ * environment is only the fallback for a value the file does not carry.
+ *
+ * There is no longer a token here. Authorization was never the token's job: the socket is
+ * the boundary (`0600`, and the directory above it), and a copy of a secret in the
+ * container's environment was just something else to leak — the same reason the model key
+ * and the GitHub token moved out.
  */
 export function readSearchEnv(root: string): SearchEnv | null {
   const file = readEnvFile(join(root, "secrets", "search.env"));
-  const token = file.GENG_SEARCH_TOKEN ?? process.env.GENG_SEARCH_TOKEN ?? "";
   const apiKey = file.DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? "";
-  if (token === "" || apiKey === "") return null;
+  if (apiKey === "") return null;
   const bind = file.GENG_SEARCH_SOCKET ?? process.env.GENG_SEARCH_SOCKET ?? DEFAULT_SEARCH_SOCKET;
   return {
-    token,
     apiKey,
     socket: bind,
     dailyLimit: limitOf(file, "GENG_SEARCH_DAILY", 200),
@@ -83,14 +84,13 @@ const UPSTREAM = "https://api.deepseek.com/v1/tools";
 /**
  * The endpoint this instance may use, or null.
  *
- * Three halves have to be true together: the host endpoint is configured, its socket
- * exists, and the instance env carries the token. Any one missing and the tool is simply
- * not there — and the page must not promise a quota it cannot spend.
+ * Two things have to be true together: the host endpoint is configured and its socket
+ * exists. If either is missing the tool is simply not there — and the page must not
+ * promise a quota it cannot spend.
  */
 export function searchReady(root: string, instanceEnvFile: string): SearchEnv | null {
   const host = readSearchEnv(root);
   if (host === null || !existsSync(host.socket)) return null;
-  if ((readEnvFile(instanceEnvFile).GENG_SEARCH_TOKEN ?? "") === "") return null;
   return host;
 }
 
@@ -127,7 +127,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
   writeJson(quotaFile, { ...readJson<Quota>(quotaFile, {}), limit: o.env.dailyLimit });
 
   // The env is the operator's knob and nothing here outlives a request, so it is re-read
-  // on every one: a quota or token change then needs no restart. Only bind is fixed, at
+  // on every one: a quota change then needs no restart. Only bind is fixed, at
   // listen time, and saying so is cheaper than pretending it reloaded.
   let env = o.env;
   let socketWarned = false;
@@ -142,8 +142,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
     } else {
       socketWarned = false;
     }
-    const changed =
-      next.token !== env.token || next.apiKey !== env.apiKey || next.dailyLimit !== env.dailyLimit;
+    const changed = next.apiKey !== env.apiKey || next.dailyLimit !== env.dailyLimit;
     env = { ...next, socket: env.socket };
     if (!changed) return;
     const q = readJson<Quota>(quotaFile, {});
@@ -173,7 +172,8 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
 
     refresh();
     if (req.method !== "POST") return send(405, { error: "POST only" });
-    if (req.headers["x-geng-token"] !== env.token) return send(401, { error: "bad token" });
+    // Reachable is authorized: the socket is the boundary, and asking for a token as well
+    // would only add a second place for the same secret to live.
 
     const operation = req.url === "/fetch" ? "fetch" : req.url === "/search" ? "search" : null;
     if (operation === null) return send(404, { error: "unknown path" });

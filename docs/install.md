@@ -141,12 +141,12 @@ OPENCODE_API_KEY=...          # 变量名跟着 provider 换（OPENAI_API_KEY / 
 让 pi 在**每次请求时**去 daemon 取一次；daemon 从模型密钥文件里读，明文回在 socket 上。
 所以密钥只在三处存在：宿主上的文件、socket 上的一瞬、pi 发出去的那个请求头里。**`env` 里没有它。**
 
-`secrets/alice.env`（600）——`--env-file` 注入，容器里 `env` 能读到，**所以只放代价有上限的值**
-（搜索 token、chat id）：
+`secrets/alice.env`（600）——`--env-file` 注入，容器里 `env` 能读到。**现在它不需要放任何凭据**：
+搜索走 socket（能不能连上就是授权），模型和 GitHub 的凭据都在宿主上。
+真要放点什么都行，只是记住它会进容器。
 
 ```bash
-echo '<search token>' | node cmd/geng/index.ts secrets set alice GENG_SEARCH_TOKEN
-GENG_SEARCH_TOKEN=...
+echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 ```
 
 值**从 stdin 读**（argv 会在 `ps` 里露出去），同名行原地替换、注释和别的行一个字不动。
@@ -164,18 +164,16 @@ GENG_SEARCH_TOKEN=...
 |---|---|---|---|
 | `secrets/model.env` | 你（`init` 只放空模板） | daemon，答 `/model/key` | 第一轮就 `Failed to resolve API key … from shell command` |
 | `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 只该放代价有上限的值；模型密钥写在这儿会进容器，`doctor` 会说 |
-| `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search` |
-| `<inst>.env` 的 `GENG_SEARCH_TOKEN` | 你（或 `secrets init`） | 容器里的扩展 | 容器里的 `web_search` 要它；和 `secrets/search.env` 里那串不一致 = 每次 401 |
+| `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search`（里面只要 `DEEPSEEK_API_KEY` 和 socket 路径） |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
 | `secrets/gh-app.pem` + `<inst>.env` 里的两个 id | 你 | daemon 换 installation token | `git push` 要求密码；**别的都不受影响**（见 5.3） |
 
-三处是**同一个值要在两个地方逐字相同**，也是抄错率最高的三处：
+两处是**同一个值要在两个地方逐字相同**，也是抄错率最高的两处：
 
-1. `search.env` 里的 `GENG_SEARCH_TOKEN` = `<inst>.env` 里的 `GENG_SEARCH_TOKEN`
-2. `mail.env` 里的 `GENG_MAIL_TOKEN` = Cloudflare Worker 里的同名 secret
-3. 每个 bot 的 token = `bots.json` 里那串（它只出现在一个地方，但错一个字符就是 401）
+1. `mail.env` 里的 `GENG_MAIL_TOKEN` = Cloudflare Worker 里的同名 secret
+2. 每个 bot 的 token = `bots.json` 里那串（它只出现在一个地方，但错一个字符就是 401）
 
 抄错的后果都是**同一种**：那边看起来正常，这边安静地什么都不发生。所以拿不到可靠信号时，
 判据永远是**拿它去打一次真端点看状态码**（401 = 能连上但没认出来，200 = 对了），
@@ -359,14 +357,13 @@ ls data/<inst>/inbox/low/     # 空 = 第 2 步还有开关没开（privacy 或 
 搜索的 key 不在容器里。宿主上跑一个只认搜索的端点：
 
 ```bash
-node cmd/geng/index.ts secrets init alice     # 生成 search / mail 两对 token，写进该写的每一处
+node cmd/geng/index.ts secrets init alice     # 生成 mail token，写进该写的地方
 ```
 
-它做的事就是**同一个值不让你抄两遍**：`GENG_SEARCH_TOKEN` 一次生成，同时写进
-`secrets/search.env`（端点那侧）和 `secrets/alice.env`（容器那侧）。已经有的不动，要换加
-`--rotate`。
+它生成的是 `GENG_MAIL_TOKEN`（搜索那对 token 已经取消了：socket 就是授权）。已经有的不动，
+要换加 `--rotate`。
 
-剩下两项它生成不出来，手写：
+端点需要的东西它生成不出来，手写：
 
 ```bash
 # secrets/search.env   chmod 600

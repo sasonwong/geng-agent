@@ -1,19 +1,18 @@
 /**
- * web_search / web_fetch — the container has no search credential. It has a socket
- * path and a token that can only search, plus whatever quota the host endpoint allows.
+ * web_search / web_fetch — the container has no search credential, not even a search-only
+ * one: it has a socket path, and the endpoint on the other side enforces the quota.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tool } from "./lib/tool.ts";
 import { postJson } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_SEARCH_SOCKET ?? "";
-const TOKEN = process.env.GENG_SEARCH_TOKEN ?? "";
 
 async function call(path: string, body: Record<string, unknown>): Promise<string> {
   if (SOCKET === "") {
     throw new Error("没有配置搜索端点：GENG_SEARCH_SOCKET 是空的。");
   }
-  const reply = await postJson(SOCKET, path, body, { "x-geng-token": TOKEN });
+  const reply = await postJson(SOCKET, path, body);
   let payload: { data?: unknown; error?: string; remaining?: number };
   try {
     payload = JSON.parse(reply.body) as typeof payload;

@@ -4,11 +4,9 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  envProblem,
   mailWiringProblem,
   newToken,
   readEnvFile,
-  searchPairProblem,
   writeEnvValue,
 } from "../internal/secret.ts";
 
@@ -40,22 +38,6 @@ test("reading an env file ignores comments, blank lines and lines with no equals
   assert.deepEqual(readEnvFile(join(d, "missing.env")), {});
 });
 
-test("a token that has to exist in two files is the same string or it is a bug", () => {
-  assert.equal(searchPairProblem({}, {}), null, "nothing configured is not a problem");
-  assert.equal(
-    searchPairProblem({ GENG_SEARCH_TOKEN: "t" }, { GENG_SEARCH_TOKEN: "t" }),
-    null,
-  );
-  // the endpoint without a token is a 401 that looks like a dead network
-  assert.match(searchPairProblem({}, { GENG_SEARCH_TOKEN: "t" }) ?? "", /实例的 env 里没有/);
-  // the container-side copy without the endpoint does nothing at all
-  assert.match(searchPairProblem({ GENG_SEARCH_TOKEN: "t" }, {}) ?? "", /search\.env 里没有/);
-  // both sides present but different: the quiet one
-  assert.match(
-    searchPairProblem({ GENG_SEARCH_TOKEN: "a" }, { GENG_SEARCH_TOKEN: "b" }) ?? "",
-    /不一致/,
-  );
-});
 
 test("a mailbox with only half of its wiring is reported, because neither half complains", () => {
   const mail = { "a@example.com": { instance: "alice", allow: ["you@example.org"] } };
@@ -66,12 +48,6 @@ test("a mailbox with only half of its wiring is reported, because neither half c
   assert.match(mailWiringProblem("bob", mail, env) ?? "", /没有地址指向/);
 });
 
-test("an instance with no model key is named as the reason its first waking will fail", () => {
-  assert.match(envProblem({}) ?? "", /API_KEY/);
-  assert.match(envProblem({ GENG_SEARCH_TOKEN: "t" }) ?? "", /API_KEY/);
-  assert.equal(envProblem({ OPENCODE_API_KEY: "k" }), null);
-  assert.equal(envProblem({ DEEPSEEK_API_KEY: "k" }), null, "any provider's name is fine");
-});
 
 test("generated tokens are long enough to not be guessable and differ each time", () => {
   const a = newToken();

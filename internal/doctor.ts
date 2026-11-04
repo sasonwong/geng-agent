@@ -15,7 +15,7 @@ function readdirSafe(dir: string): number {
 }
 import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
-import { envProblem, mailWiringProblem, searchPairProblem, readEnvFile } from "./secret.ts";
+import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
 import { modelKeyFile, readModelKey } from "./model.ts";
@@ -191,12 +191,6 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 
   // 一个填错或漏填的值不会报错，只会让某件事安静地不发生。这几条是它唯一的出口。
   const instEnv = readEnvFile(p.secrets);
-  const missingKey = envProblem(instEnv);
-  checks.push({
-    name: "模型凭据",
-    ok: missingKey === null,
-    detail: missingKey ?? "有 *_API_KEY",
-  });
 
   // 可选能力的三态：配好且对 = ok，配了但不对 = FAIL，没配 = warn。
   // 只有区分这三态，"漏配"才看得见——否则"没配"和"配好且安静"长得一样。
@@ -212,7 +206,6 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       : { name, ok: false, warnOnly: true, detail: unset };
 
   const searchHost = readSearchEnv(root);
-  const pair = searchPairProblem(instEnv, readEnvFile(join(root, "secrets", "search.env")));
   // Three states, not two: no search.env is "not configured" and quiet; a search.env
   // whose socket is missing is a FAIL, because that is a service that was set up and is
   // not running — and the symptom otherwise is "the tool is missing", which reads as
@@ -224,12 +217,11 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   // "Configured" is the operator having done anything at all. Whether it is *right* is
   // the problem string's job: half a wiring must not read as "never set up", because
   // that is the one state nobody goes looking for.
-  const anySearch = searchHost !== null || (instEnv.GENG_SEARCH_TOKEN ?? "") !== "";
   checks.push(
     optional(
       "搜索接线",
-      anySearch,
-      pair ?? socketMissing,
+      searchHost !== null,
+      socketMissing,
       "没配：容器里没有 web_search",
       `socket 在 ${searchHost?.socket ?? "?"}，今天还剩 ${searchQuota(root, p.secrets)?.left ?? "?"} 次`,
     ),
