@@ -13,7 +13,7 @@ interface RawWaiting {
 
 const UNIT_MS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
-function parseAfter(v: string | number): number | null {
+export function parseAfter(v: string | number): number | null {
   if (typeof v === "number") return v * 60_000;
   const m = /^(\d+(?:\.\d+)?)\s*([smhd])$/.exec(v.trim());
   if (!m) return null;

@@ -282,7 +282,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // instance down over a socket.
   if (!o.dry) {
     try {
-      await startBookServer({ paths, log });
+      await startBookServer({ paths, log, minWakeMs: policy.cycle.minWakeMinutes * 60_000 });
     } catch (err) {
       log(`book 端点起不来：${(err as Error).message}（这一轮照常，写记忆会报错）`);
     }

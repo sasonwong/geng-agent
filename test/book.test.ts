@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { bookHandler, startBookServer } from "../internal/book.ts";
 import { countLoops } from "../internal/packet.ts";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
+import { readWaiting } from "../internal/schedule.ts";
 import { ensureDirs, readText } from "../internal/state.ts";
 import { postJson } from "../image/extensions/lib/uds.ts";
 
@@ -107,4 +108,56 @@ test("a second start removes the corpse of the first", async () => {
   } finally {
     server.close();
   }
+});
+
+test("an alarm is written as an absolute moment, and is the one that fires", async () => {
+  const f = fixture();
+  const before = Date.now();
+  const r = await f.call("/wait", { when: "20m", why: "等回信" });
+  assert.equal(r.status, 200);
+  const at = Date.parse((r.body as { at: string }).at);
+  assert.ok(at >= before + 19 * 60_000 && at <= Date.now() + 20 * 60_000);
+  // the file is the alarm: what it said is exactly what `readWaiting` will act on, so a
+  // daemon restart between the write and the sleep cannot postpone it
+  const spec = readWaiting(f.paths.waiting);
+  assert.equal(spec?.dueAtMs, at);
+  assert.equal(spec?.why, "等回信");
+});
+
+test("an absolute moment is left alone, and one already gone is refused", async () => {
+  const f = fixture();
+  const at = new Date(Date.now() + 3 * 3_600_000).toISOString();
+  const r = await f.call("/wait", { when: at });
+  assert.equal(r.status, 200);
+  assert.equal((r.body as { at: string }).at, at);
+
+  // a timezone mistake, not an instruction: waking every minute until it notices costs a night
+  const past = await f.call("/wait", { when: "2020-01-01T00:00:00Z" });
+  assert.equal(past.status, 400);
+  assert.match(String((past.body as { error: string }).error), /已经过去/);
+  // and it did not overwrite the alarm that was already set
+  assert.equal(readWaiting(f.paths.waiting)?.dueAtMs, Date.parse(at));
+});
+
+test("a duration it cannot read is refused with the forms it does read", async () => {
+  const f = fixture();
+  for (const when of ["", "soon", "20", "20 minutes from now"]) {
+    const r = await f.call("/wait", { when });
+    assert.equal(r.status, 400, `should have refused ${JSON.stringify(when)}`);
+  }
+  assert.equal(readWaiting(f.paths.waiting), null);
+});
+
+test("an alarm nearer than the shortest allowed wait is raised, and says so", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const handle = bookHandler(paths, { minWakeMs: 5 * 60_000 });
+  const r = await handle({ url: "/wait", method: "POST" } as never, JSON.stringify({ when: "10s" }));
+  assert.equal(r.status, 200);
+  // the answer is what will happen, not what was asked for: a tool that reports the
+  // request would be a page that lies about the next time it wakes
+  const at = Date.parse((r.body as { at: string }).at);
+  assert.ok(at >= Date.now() + 4 * 60_000);
+  assert.equal(readWaiting(paths.waiting)?.dueAtMs, at);
 });

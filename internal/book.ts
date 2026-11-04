@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, stat
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
+import { parseAfter } from "./schedule.ts";
 import { readJson, readText, writeJson, writeText } from "./state.ts";
 
 /**
@@ -29,6 +30,12 @@ const MAX_BODY = 32 * 1024;
 export interface BookOptions {
   paths: Paths;
   log?: (line: string) => void;
+  /** `policy.cycle.minWakeMinutes`, so an alarm can be told what it really became. */
+  minWakeMs?: number;
+}
+
+export interface HandlerOptions {
+  minWakeMs?: number;
 }
 
 interface Reply {
@@ -108,7 +115,15 @@ function appendText(file: string, addition: string): void {
   writeText(file, `${before}${glue}${addition}\n`);
 }
 
-export function bookHandler(paths: Paths) {
+function parseWhen(when: string): number | null {
+  const delta = parseAfter(when);
+  if (delta !== null) return Date.now() + delta;
+  const at = Date.parse(when);
+  return Number.isNaN(at) ? null : at;
+}
+
+export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
+  const minWakeMs = o.minWakeMs ?? 0;
   return async (req: IncomingMessage, body: string): Promise<Reply> => {
     const route = req.url ?? "";
     let params: unknown = {};
@@ -166,6 +181,30 @@ export function bookHandler(paths: Paths) {
       return { status: 200, body: { id: id.trim(), closed: true, at: nowIso } };
     }
 
+    // wait: the alarm, and the last writable file in /state once the mount is read-only.
+    // Everything is normalised to an absolute moment on the way in — a relative one is
+    // anchored to *now* here rather than to the file's mtime, so there is one reader of
+    // "when" and the round that writes it is the round that says it.
+    if (route === "/wait") {
+      const when = text(params, "when");
+      if (when === null) {
+        return { status: 400, body: { error: 'when 不能是空的：写 "20m" 这样的一段时间，或者 2026-03-02T09:15:00Z 这样的时刻' } };
+      }
+      const atMs = parseWhen(when);
+      if (atMs === null) {
+        return { status: 400, body: { error: `看不懂 ${when}：写 "20m"、"2h"、"90s"，或者带时区的时刻` } };
+      }
+      // A past moment is a mistake with a timezone, not an instruction: waking in one
+      // minute every round until it notices is a cheap way to burn a night.
+      if (atMs < Date.now() - 60_000) {
+        return { status: 400, body: { error: `那个时刻已经过去了：现在是 ${nowIso}` } };
+      }
+      const dueAtMs = Math.max(atMs, Date.now() + minWakeMs);
+      const why = text(params, "why");
+      writeJson(paths.waiting, { wake: { at: new Date(dueAtMs).toISOString() }, why });
+      return { status: 200, body: { at: new Date(dueAtMs).toISOString(), why } };
+    }
+
     return { status: 404, body: { error: `没有这个动作：${route}` } };
   };
 }
@@ -177,7 +216,7 @@ export function socketPath(paths: Paths): string {
 export function startBookServer(o: BookOptions): Promise<Server> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const sock = socketPath(o.paths);
-  const handle = bookHandler(o.paths);
+  const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs });
 
   const server = createServer((req, res) => {
     const reply = (status: number, body: unknown): void => {

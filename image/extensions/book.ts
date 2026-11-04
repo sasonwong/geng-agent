@@ -1,5 +1,5 @@
 /**
- * journal / loop_open / loop_close — the only way into the book.
+ * journal / loop_open / loop_close / wait — the only way into the book.
  *
  * One verb per object on purpose: a single `remember(kind, …)` would carry four different
  * write semantics behind one name, and calling it wrong would put a diary entry where an
@@ -95,8 +95,28 @@ const loopCloseTool = defineTool({
   },
 });
 
+const waitTool = defineTool({
+  name: "wait",
+  label: "Wait",
+  description:
+    "定下一次什么时候醒。when 写一段时长（\"20m\"、\"2h\"、\"90s\"）或者一个带时区的时刻；why 写一句到时候你还认得出为什么。" +
+    "不调就按默认间隔醒。返回真正生效的时刻（太近的会被抬到最短间隔）。",
+  parameters: Type.Object({
+    when: Type.String({ description: '还要等多久，形如 "20m"；或者时刻 2026-03-02T09:15:00Z。' }),
+    why: Type.Optional(Type.String({ description: "为什么那时候醒，一句话。" })),
+  }),
+  async execute(_id, params) {
+    const r = await call("/wait", { when: params.when, why: params.why });
+    return {
+      content: [{ type: "text", text: say(r, `下次醒来：${String(r.at ?? "?")}`) }],
+      details: r,
+    };
+  },
+});
+
 export default function (pi: ExtensionAPI): void {
   pi.registerTool(journalTool);
   pi.registerTool(loopOpenTool);
   pi.registerTool(loopCloseTool);
+  pi.registerTool(waitTool);
 }
