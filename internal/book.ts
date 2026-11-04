@@ -161,6 +161,30 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       return { status: 200, body: { ids: out, at: nowIso } };
     }
 
+    if (route === "/discard") {
+      const id = text(params, "id");
+      if (id === null) return { status: 400, body: { error: "id 不能是空的" } };
+      if (!/^J\d+-\d+$/.test(id.trim())) {
+        return { status: 400, body: { error: `id 要写成 J20261104-3 这样，收到的是 ${id}` } };
+      }
+      const name = `${id.trim()}.md`;
+      const from = join(paths.journal, name);
+      if (!existsSync(from)) {
+        // an entry can be written and discarded inside one round; saying which of the two
+        // happened is the difference between a bug report and a no-op
+        const gone = join(paths.journalDiscarded, name);
+        if (existsSync(gone)) return { status: 200, body: { id: id.trim(), discarded: true, at: nowIso } };
+        return { status: 404, body: { error: `没有 ${id} 这条：${name} 不在 journal/ 里` } };
+      }
+      const why = text(params, "why");
+      if (why !== null) appendText(from, `\n[丢弃 ${nowIso}] ${why.trim()}`);
+      // like a closed loop: moved, not deleted. The entry was written by someone, and the
+      // book records that it happened even after it stops being true.
+      mkdirSync(paths.journalDiscarded, { recursive: true });
+      renameSync(from, join(paths.journalDiscarded, name));
+      return { status: 200, body: { id: id.trim(), discarded: true, at: nowIso } };
+    }
+
     if (route === "/loop/open") {
       const t = text(params, "text");
       if (t === null) return { status: 400, body: { error: "text 不能是空的" } };

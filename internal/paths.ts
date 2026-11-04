@@ -51,7 +51,7 @@ export interface Paths {
   waitingConsumed: string;
   intent: string;
   journal: string;
-  journalIndex: string;
+  journalDiscarded: string;
   secrets: string;
   systemMd: string;
   /** The tools, from the checkout rather than the image: mounting them read-only means
@@ -108,7 +108,7 @@ export function makePaths(root: string, instance: string): Paths {
     waitingConsumed: join(book, "waiting.consumed.json"),
     intent: join(book, "intent.json"),
     journal,
-    journalIndex: join(journal, "INDEX.md"),
+    journalDiscarded: join(journal, "discarded"),
     secrets: join(r, "secrets", `${instance}.env`),
     systemMd: join(r, "deploy", "SYSTEM.md"),
     extensions: join(r, "image", "extensions"),
@@ -127,6 +127,7 @@ export function requiredDirs(p: Paths): string[] {
     p.sessionDir,
     p.book,
     p.journal,
+    p.journalDiscarded,
     p.workspace,
     p.usage,
     p.meta,

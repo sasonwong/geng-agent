@@ -124,3 +124,14 @@ test("a file in the listing keeps its original name, and its size is what it is"
   // and the body says how to get it and how to send it, because a file has no text to show
   assert.match(openText(p, "F1", 0).text, /download\("F1", "\/work\/\.\.\."\)/);
 });
+
+test("a discarded entry is still listed, and says it no longer counts", () => {
+  const p = fixture();
+  mkdirSync(p.journalDiscarded, { recursive: true });
+  writeFileSync(join(p.journalDiscarded, "J20260303-1.md"), "记错了\n\n[丢弃 2026-03-03T10:00:00Z] 不算\n");
+  const listing = recallText(p, { sources: ["journal"] });
+  // the word for it is on the line, otherwise a taken-back entry reads like a live one
+  assert.match(listing, /已丢弃 记错了/);
+  // and `open` still reaches it, so "what did I say and why did I take it back" is answerable
+  assert.match(openText(p, "J20260303-1", 0).text, /不算/);
+});

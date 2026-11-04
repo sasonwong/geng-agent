@@ -59,11 +59,24 @@ function firstLine(text: string): string {
   return line.trim().slice(0, LINE);
 }
 
+/** A discarded entry stays here: the book records that it happened, not only what is left. */
 function journalItems(p: Paths): Item[] {
-  return files(p.journal, ".md").map((f) => {
-    const body = read(f);
-    return { id: basename(f, ".md"), source: "journal" as const, at: when(f), header: firstLine(body), body };
-  });
+  const dirs = [p.journal, p.journalDiscarded];
+  return dirs.flatMap((dir) =>
+    files(dir, ".md")
+      // only ids: a stray note in the directory is not an entry
+      .filter((f) => /^J\d+-\d+\.md$/.test(basename(f)))
+      .map((f) => {
+        const body = read(f);
+        return {
+          id: basename(f, ".md"),
+          source: "journal" as const,
+          at: when(f),
+          header: `${dir === p.journalDiscarded ? "已丢弃 " : ""}${firstLine(body)}`,
+          body,
+        };
+      }),
+  );
 }
 
 /** Open and closed alike: a closed one is still the answer to "how did that end". */

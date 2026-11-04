@@ -61,12 +61,13 @@
 |---|---|---|
 | `identity.md` | 它，直接写文件 | 硬上限 1~2KB；容器里唯一一个有写权限的路径 |
 | `journal/` `open-loops/` | 它发起，宿主落盘 | id 由宿主发，它拿不到文件名 |
+| `journal/discarded/` `open-loops/closed/` | 它发起，宿主搬文件 | 丢掉的东西不删，只是换个地方待着 |
 | `waiting.json` | 它发起，宿主落盘 | 下次什么时候醒 + 为什么 |
 | `intent.json` `world.json` | daemon | write-ahead / 世界快照 |
 | `policy.json` `mute.json` `attention.json` | 人 / gateway / daemon | 容器里一个都不挂 |
 
 **书不挂进容器。** `/state`、`/inbox`、`/people`、`/mail` 全在容器外面，写走
-`journal`/`loop_*`/`wait`/…，读走 `recall`/`open`，两条路都是 unix socket 到 daemon。
+`journal`/`discard`/`loop_*`/`wait`/…，读走 `recall`/`open`，两条路都是 unix socket 到 daemon。
 "谁写"因此不是权限位的问题，是路由的问题：一个事实只有一个入口，入口在账本里留一行。
 唯一直接写文件的例外是 `identity.md`——它是一页它随时重画的东西，不是一次动作。
 

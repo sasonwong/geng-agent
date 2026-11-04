@@ -74,7 +74,7 @@ export function allocate(paths: Paths, kind: IdKind): { id: string; n: number; d
     writeJson(paths.ids, { ...ids, fileN: n });
     return { id: `F${n}`, n, day };
   }
-  const floor = highest([paths.journal], new RegExp(`^J${day}-(\\d+)\\.md$`));
+  const floor = highest([paths.journal, paths.journalDiscarded], new RegExp(`^J${day}-(\\d+)\\.md$`));
   const n = Math.max(ids.journalDay === day ? (ids.journalN ?? 0) : 0, floor) + 1;
   writeJson(paths.ids, { ...ids, journalDay: day, journalN: n });
   return { id: `J${day}-${n}`, n, day };

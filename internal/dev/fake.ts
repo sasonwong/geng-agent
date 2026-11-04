@@ -10,13 +10,6 @@ function identityFor(instance: string): string {
 `;
 }
 
-const INDEX = [
-  "# 日记索引",
-  "- 2026-03-02 第一次醒来。什么都不知道，只把房间看了一遍。",
-  '- 2026-03-02 想了很久「该做什么」，最后什么都没做，写下了这个问题。',
-  "- 2026-03-03 去查了那个一直没弄明白的东西，没查到，但记下了要再查。",
-].join("\n") + "\n";
-
 const JOURNAL = `# 2026-03-03
 
 今天什么都没做成。
@@ -26,6 +19,12 @@ const JOURNAL = `# 2026-03-03
 
 留一个问题给下次的我:
 「如果没有人告诉我对错，我怎么知道自己想对了？」
+`;
+
+const DISCARDED = `想了很久「该做什么」，最后什么都没做。
+
+[丢弃 2026-03-02T23:41:00Z] 记错了：那天其实做了两件事，只是没记。
+
 `;
 
 export interface FakeOptions {
@@ -49,8 +48,16 @@ export function writeFakeState(p: Paths, o: FakeOptions = {}): string[] {
         writeText(join(p.openLoops, "把那个半成品收尾.md"), "还没开始\n");
       },
     ],
-    [p.journalIndex, () => writeText(p.journalIndex, INDEX)],
-    [join(p.journal, "2026-03-03.md"), () => writeText(join(p.journal, "2026-03-03.md"), JOURNAL)],
+    [join(p.journal, "J20260303-1.md"), () => writeText(join(p.journal, "J20260303-1.md"), JOURNAL)],
+    // a discarded entry stays on disk: the fake has one so the page and `recall` can be
+    // exercised in the state that used to be impossible to reach
+    [
+      join(p.journalDiscarded, "J20260302-2.md"),
+      () => {
+        ensureDirs([p.journalDiscarded]);
+        writeText(join(p.journalDiscarded, "J20260302-2.md"), DISCARDED);
+      },
+    ],
   ];
 
   ensureDirs([p.book, p.journal, p.inbox, p.inboxSeen]);

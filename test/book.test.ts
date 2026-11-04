@@ -275,3 +275,47 @@ test("saying a file by id hands the gateway the original, not a copy", async () 
   const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], files: ["F9"] }));
   assert.equal(bad.status, 404);
 });
+
+test("a wrong journal entry can be taken back without losing it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const handle = bookHandler(paths, { places: [] });
+  const written = await handle({ url: "/journal", method: "POST" } as never, JSON.stringify({ texts: ["记错了"] }));
+  const id = (written.body as { ids: string[] }).ids[0] as string;
+
+  const dropped = await handle(
+    { url: "/discard", method: "POST" } as never,
+    JSON.stringify({ id, why: "那天其实做了两件事" }),
+  );
+  assert.equal(dropped.status, 200);
+  // moved, not deleted: the reason is readable afterwards, which is the point of keeping it
+  const kept = readText(join(paths.journalDiscarded, `${id}.md`)) ?? "";
+  assert.match(kept, /记错了/);
+  assert.match(kept, /\[丢弃 .*\] 那天其实做了两件事/);
+  assert.equal(existsSync(join(paths.journal, `${id}.md`)), false);
+  // and it drops out of the count, which is what the waking page reads
+  assert.equal(readdirSync(paths.journal).filter((f) => f.endsWith(".md")).length, 0);
+
+  // a second attempt is a no-op, not an error: a round may retry after a timeout
+  const again = await handle({ url: "/discard", method: "POST" } as never, JSON.stringify({ id }));
+  assert.equal(again.status, 200);
+  // an id that never existed is a refusal, and says where it looked
+  const missing = await handle({ url: "/discard", method: "POST" } as never, JSON.stringify({ id: "J20260101-99" }));
+  assert.equal(missing.status, 404);
+  assert.match(String((missing.body as { error: string }).error), /journal\//);
+});
+
+test("a discarded entry keeps its number out of circulation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const handle = bookHandler(paths, { places: [] });
+  const first = await handle({ url: "/journal", method: "POST" } as never, JSON.stringify({ texts: ["a"] }));
+  const id = (first.body as { ids: string[] }).ids[0] as string;
+  await handle({ url: "/discard", method: "POST" } as never, JSON.stringify({ id }));
+  // the counter file is gone: only the files on disk remember, and the discarded one still does
+  rmSync(paths.ids, { force: true });
+  const next = await handle({ url: "/journal", method: "POST" } as never, JSON.stringify({ texts: ["b"] }));
+  assert.notEqual((next.body as { ids: string[] }).ids[0], id);
+});

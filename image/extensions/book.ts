@@ -1,5 +1,5 @@
 /**
- * journal / loop_open / loop_close / wait — the only way into the book.
+ * journal / discard / loop_open / loop_close / wait — the only way into the book.
  *
  * One verb per object on purpose: a single `remember(kind, …)` would carry four different
  * write semantics behind one name, and calling it wrong would put a diary entry where an
@@ -89,6 +89,23 @@ const loopCloseTool = defineTool({
   },
 });
 
+const discardTool = defineTool({
+  name: "discard",
+  label: "Discard journal entry",
+  description: '撤掉一条写错的日记。id 来自 journal 的返回（形如 J20261104-3）。why 可选，写一句为什么不算数，附在文末。不删文件，只是移到 journal/discarded/，recall 里标「已丢弃」，open 仍然读得到。返回 {id, discarded}。已经丢弃过的再调一次不算错。',
+  parameters: Type.Object({
+    id: Type.String({ description: '要撤的那条，形如 "J20261104-3"。' }),
+    why: Type.Optional(Type.String({ description: "为什么不算数，一句话。" })),
+  }),
+  async execute(_id, params) {
+    const r = await call("/discard", { id: params.id, why: params.why });
+    return {
+      content: [{ type: "text", text: say(r, `${String(r.id ?? "?")} 不算数了。`) }],
+      details: r,
+    };
+  },
+});
+
 const waitTool = defineTool({
   name: "wait",
   label: "Wait",
@@ -110,5 +127,6 @@ export default function (pi: ExtensionAPI): void {
   pi.registerTool(journalTool);
   pi.registerTool(loopOpenTool);
   pi.registerTool(loopCloseTool);
+  pi.registerTool(discardTool);
   pi.registerTool(waitTool);
 }
