@@ -2,7 +2,8 @@
   "$schema": "https://pi.dev/schemas/models.schema.json",
   "providers": {
     "opencode-go": {
-      "apiKey": "!curl -fsS --unix-socket /run/geng/book.sock http://localhost/model/key"
+      "baseUrl": "http://127.0.0.1:11434/model",
+      "apiKey": "local"
     }
   }
 }

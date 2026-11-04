@@ -5,7 +5,7 @@ import type { Paths } from "./paths.ts";
 import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
-import { readModelKey } from "./model.ts";
+import { proxyModel } from "./modelproxy.ts";
 import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -33,6 +33,8 @@ export const BOOK_SOCKET = "book.sock";
 export const BOOK_SOCKET_IN_CONTAINER = "/run/geng/book.sock";
 
 const MAX_BODY = 32 * 1024;
+// A model request is a conversation plus tool schemas; a few megabytes is generous.
+const MAX_MODEL_BODY = 32 * 1024 * 1024;
 
 export interface BookOptions {
   paths: Paths;
@@ -448,18 +450,26 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       }
       return;
     }
-    // The model key, for the same reason the GitHub token is here: the container must not
-    // have it. `models.json` runs this as `!curl …` at request time, so what leaves is the
-    // key itself and nothing that can be replayed after the waking ends.
-    if (req.method === "GET" && url === "/model/key") {
-      const found = readModelKey(o.paths);
-      if (found === null) {
-        reply(503, { error: `没有模型密钥：写 ${join("secrets", "model.env")}（OPENCODE_API_KEY=…）` });
-        return;
-      }
+    // Model traffic comes through here, because the container has no key and must not
+    // have one: it posts to /model/… and the daemon adds the credential and forwards. The
+    // body is read whole (a request is JSON; a response is a stream, handled below).
+    if (url === "/model" || url.startsWith("/model/")) {
       o.onKeyFetch?.();
-      res.writeHead(200, { "content-type": "text/plain" });
-      res.end(found.key);
+      const chunks: Buffer[] = [];
+      let size = 0;
+      req.on("data", (c: Buffer) => {
+        size += c.length;
+        if (size > MAX_MODEL_BODY) {
+          req.destroy();
+          reply(413, { error: "请求体太大" });
+          return;
+        }
+        chunks.push(c);
+      });
+      req.on("end", () => {
+        proxyModel(o.paths, req, res, Buffer.concat(chunks)).catch(guard);
+      });
+      req.on("error", guard);
       return;
     }
     // Plain text, not JSON, because the reader is `git`, not an agent: a credential helper

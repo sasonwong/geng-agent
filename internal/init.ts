@@ -8,15 +8,17 @@ import { makePaths, requiredDirs } from "./paths.ts";
 const SECRETS_TEMPLATE = `# geng: things the container is allowed to see.
 # Injected with \`docker run --env-file\` — never mounted, never in data/, never in backups.
 # The model key does NOT belong here: it goes in secrets/model.env, which the container
-# never reads (pi fetches it from the book socket at request time).
-GENG_SEARCH_TOKEN=
+# never reads (pi posts to the daemon, which adds the key). Nothing here is a credential
+# to anything outside: it is what the container is allowed to see.
 `;
 
 // Not injected anywhere: the daemon reads it and answers /model/key with it, so the
 // container can use the key without being able to read it.
 const MODEL_KEY_TEMPLATE = `# geng: the provider key for this instance's model.
-# The container never sees this file. pi asks the daemon over the book socket.
+# The container never sees this file: pi posts to the daemon, which adds the key.
 OPENCODE_API_KEY=
+# Where the provider lives. The proxy forwards here; pi is pointed at localhost instead.
+GENG_MODEL_UPSTREAM=https://opencode.ai/inference/go/v1
 `;
 
 export function initInstance(root: string, instance: string): void {

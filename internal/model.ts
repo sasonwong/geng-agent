@@ -17,6 +17,14 @@ export function modelKeyFile(p: Paths): string {
   return join(p.root, "secrets", "model.env");
 }
 
+/** Where the provider lives. The proxy needs this; pi no longer knows the address. */
+export function modelUpstream(p: Paths): string | null {
+  const file = modelKeyFile(p);
+  if (!existsSync(file)) return null;
+  const value = (readEnvFile(file).GENG_MODEL_UPSTREAM ?? "").trim();
+  return value === "" ? null : value;
+}
+
 export function readModelKey(p: Paths): { name: string; key: string } | null {
   const file = modelKeyFile(p);
   if (!existsSync(file)) return null;

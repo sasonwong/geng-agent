@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bookHandler, socketPath, startBookServer } from "../internal/book.ts";
@@ -346,32 +346,70 @@ test("git's credential question is answered by the host, or not at all", async (
   }
 });
 
-test("the model key answers on the socket, and only from the host's own file", async () => {
+test("model traffic is proxied: the key goes upstream, never to the container", async () => {
   const root = mkdtempSync(join(tmpdir(), "geng-book-"));
   const paths = makePaths(root, "alice");
   ensureDirs(requiredDirs(paths));
   mkdirSync(join(root, "secrets"), { recursive: true });
+  const got: { path: string; auth: string; body: string }[] = [];
+  const upstream = createServer((req, res) => {
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      got.push({ path: req.url ?? "", auth: String(req.headers.authorization ?? ""), body });
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("data: one\n\n");
+      res.end("data: [DONE]\n\n");
+    });
+  });
+  await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", () => r()));
+  const port = (upstream.address() as { port: number }).port;
   const server = await startBookServer({ paths, log: () => {} });
   const ask = (): Promise<{ status: number; body: string }> =>
     new Promise((resolve, reject) => {
-      const req = request({ socketPath: socketPath(paths), path: "/model/key", method: "GET" }, (res) => {
-        let body = "";
-        res.setEncoding("utf8");
-        res.on("data", (c) => (body += c));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
-      });
+      const req = request(
+        {
+          socketPath: socketPath(paths),
+          path: "/model/chat/completions",
+          method: "POST",
+          // a kept-alive socket would outlive the test and hold `server.close()` open
+          agent: false,
+          headers: { "content-type": "application/json", authorization: "Bearer mine" },
+        },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (c) => (body += c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        },
+      );
       req.on("error", reject);
-      req.end();
+      req.end(JSON.stringify({ model: "m", messages: [] }));
     });
   try {
-    // nothing configured is a refusal that names the file, so the round says why
+    // nothing configured is a refusal that names the file, so a round can say why
     const none = await ask();
     assert.equal(none.status, 503);
     assert.match(none.body, /model\.env/);
-    // and the answer is the key itself, byte for byte: pi puts it in a header
-    writeFileSync(join(root, "secrets", "model.env"), "OPENCODE_API_KEY=sk-test-123\n");
-    assert.deepEqual(await ask(), { status: 200, body: "sk-test-123" });
+    writeFileSync(
+      join(root, "secrets", "model.env"),
+      `OPENCODE_API_KEY=sk-test-123\nGENG_MODEL_UPSTREAM=http://127.0.0.1:${port}/go/v1\n`,
+    );
+    const reply = await ask();
+    assert.equal(reply.status, 200);
+    // the stream arrives as a stream, not as a buffered body
+    assert.match(reply.body, /data: \[DONE\]/);
+    assert.equal(got.length, 1);
+    // the path is the provider's, the credential is the host's, and the container's
+    // Authorization header did not survive the trip
+    assert.equal(got[0]?.path, "/go/v1/chat/completions");
+    assert.equal(got[0]?.auth, "Bearer sk-test-123");
+    assert.equal(got[0]?.body, JSON.stringify({ model: "m", messages: [] }));
   } finally {
+    server.closeAllConnections();
     await new Promise<void>((r) => server.close(() => r()));
+    upstream.closeAllConnections();
+    await new Promise<void>((r) => upstream.close(() => r()));
   }
 });

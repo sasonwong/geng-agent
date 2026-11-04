@@ -19,7 +19,7 @@ FROM debian:bookworm-slim
 
 # tzdata is not in the slim base: without it TZ=Asia/Shanghai silently means UTC
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git iproute2 tzdata \
+  && apt-get install -y --no-install-recommends ca-certificates curl git iproute2 socat tzdata \
   && rm -rf /var/lib/apt/lists/*
 
 # gh is in the image rather than downloaded per waking: a tool that has to be fetched
@@ -82,8 +82,13 @@ RUN mkdir -p /home/agent/.pi/agent/sessions \
 # cheaper than a mount that would hide the rest of the home.
 RUN cat > /usr/local/bin/geng-pi <<'SH'
 #!/bin/sh
-# `-n` so a second call in the same container (there is none today) does not copy twice
 [ -d "$HOME/.pi/agent/npm" ] || cp -r /opt/pi-npm "$HOME/.pi/agent/npm"
+# pi speaks HTTP; the daemon speaks on a unix socket. This is the bridge, and it is the
+# only listener in the container: 127.0.0.1, model traffic only, no credential in it.
+socat TCP-LISTEN:11434,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock &
+# the port is open before the first request, but give socat a moment to fail loudly if the
+# socket is missing: a broken pipe here is better than a mystery "connection refused"
+sleep 0.2
 exec pi "$@"
 SH
 RUN chmod 0755 /usr/local/bin/geng-pi
