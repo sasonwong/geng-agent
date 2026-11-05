@@ -528,7 +528,9 @@ export function scanLogBodies(dir: string): LogScan {
         if (!SKIP_DIRS.has(e.name)) walk(full);
         continue;
       }
-      if (!e.name.endsWith(".log")) continue;
+      // `appendLine` rotates to `<file>.1`, and a name that stops ending in `.log` would
+      // fall out of the scan exactly when the file it was protecting got older
+      if (!e.name.endsWith(".log") && !/\.log\.\d+$/.test(e.name)) continue;
       const tail = tailText(full);
       if (tail === null) continue;
       if (tail.truncated) truncated.push(e.name);

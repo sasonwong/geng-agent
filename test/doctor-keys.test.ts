@@ -87,6 +87,19 @@ test("scanLogBodies: 大日志只读尾巴，头部那句旧 token 不算（口�
   rmSync(root, { recursive: true, force: true });
 });
 
+test("scanLogBodies: 轮转出来的那份也是日志，不是一个没人看的新名字", () => {
+  // appendLine renames at 20 000 lines, so the *oldest* lines live in daemon.log.1 — a key
+  // appended before the rotation is exactly the one that is no longer in daemon.log
+  const root = tree((r) => {
+    writeFileSync(join(r, "daemon.log"), "2026-11-01T08:00:00Z round ok\n");
+    writeFileSync(join(r, "daemon.log.1"), "ghp_" + "f".repeat(36) + "\n");
+  });
+  const scan = scanLogBodies(root);
+  assert.deepEqual(scan.hits.map((h) => h.split(": ")[1]), ["GitHub token"]);
+  assert.match(scan.hits[0] ?? "", /daemon\.log\.1:/);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("scanLogBodies: 报十条就够了，但要说还有几条没列出来", () => {
   const root = tree((r) => {
     for (let i = 0; i < 12; i++) writeFileSync(join(r, `${i}.log`), "ghp_" + "e".repeat(36));
