@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { failedAttempt, knownPlaces, noteChat, readChats, route } from "../internal/gateway.ts";
+import { failedAttempt, knownPlaces, noteChat, readChats, route, targetChat } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/fs.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -157,6 +157,19 @@ test("a pure whitelist drops a stranger before anything is kept", () => {
       JSON.stringify(shape),
     );
   }
+});
+
+test("a message with nowhere to go is a dead end, not an endless retry", () => {
+  // `deliver` used to answer "false" for this, and false means "not sent, try again in two
+  // seconds" — forever, with no ops line and no failure count. A new instance whose bot has
+  // nobody to talk to yet queued every `say` and reported 「说了 1 句」.
+  assert.equal(targetChat(undefined, undefined, undefined), null, "no target, no pin, no home");
+  // the pinned chat wins over the learned one: one is a decision, the other is an accident
+  assert.equal(targetChat(undefined, 5, 7), 5);
+  // and an explicit target wins over both, which is how a group is spoken into
+  assert.equal(targetChat(-9, 5, 7), -9);
+  // a bot that has neither: the chat it learned first is where an unprompted word goes
+  assert.equal(targetChat(undefined, undefined, 7), 7);
 });
 
 test("a failed send is retried a few times, then let go of with one line", () => {

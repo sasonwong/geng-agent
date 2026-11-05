@@ -239,6 +239,20 @@ export function mergeBots(
   return { bots, notes };
 }
 
+/**
+ * Where a send goes: the chat the item names, else the one `bots.json` pins, else the first
+ * chat this bot ever heard from. `null` is "nowhere" — nothing named a target and nobody has
+ * ever written to it, so there is no address a retry could ever reach.
+ */
+export function targetChat(
+  want: number | undefined,
+  pinned: number | undefined,
+  home: number | undefined,
+): number | null {
+  const chat = want ?? pinned ?? home;
+  return typeof chat === "number" ? chat : null;
+}
+
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const root = o.root;
@@ -306,9 +320,18 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const mine = (chats[key] ??= { known: {} });
     // bots.json can pin the home; otherwise the first chat it ever heard from is home,
     // and a later group must be named explicitly to be spoken into
-    const home = cfg.chat ?? mine.home;
-    const chat = want ?? home;
-    if (typeof chat !== "number") return false;
+    const chat = targetChat(want, cfg.chat, mine.home);
+    if (chat === null) {
+      // Not a failure to retry: the sweep hands this back every two seconds and nothing
+      // will have changed. Acknowledged, with one line, because the words were queued as
+      // if they had somewhere to go and that is the part a person has to be told.
+      writeOps(
+        ops,
+        "gateway",
+        `${key} 没有地方可发：bots.json 里没写 chat，也还没有人跟这个 bot 说过话。这条没送到，文件在 outbox/sent/ 里。`,
+      );
+      return true;
+    }
     if (want !== undefined && !mine.known?.[String(want)]) {
       writeOps(ops, "gateway", `${key} 要发给不认识的 chat ${want}，没发。`);
       return true; // acknowledged: retrying will never make it known
