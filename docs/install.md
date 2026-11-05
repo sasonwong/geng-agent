@@ -619,6 +619,7 @@ data/<instance>/
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
   session/      pi 的会话文件，一轮一个（可写，但纸上不提它）
+  pi/           settings.json——`init` 从 deploy/ 拷来，每轮只读挂进容器（见 §10 挂载表）
   usage/ meta/ daemon.log
 secrets/<instance>.env   GitHub App 的两个 id；--env-file 注入，永不挂载（模型 key 不在这个文件里）
 secrets/<instance>.model.env  模型 key 与上游地址，只有宿主读；容器问，读不到
