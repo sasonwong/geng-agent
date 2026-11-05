@@ -463,7 +463,18 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
     for (const [i, step] of steps.entries()) {
       try {
-        await sendFile(cfg.token, chat, step.path);
+        const sent = await sendFile(cfg.token, chat, step.path);
+        // A file is a message: it takes its id before the words after it get theirs, so
+        // the row has to be written here and not with the text. `at` is when the response
+        // arrived — an upper bound on the id's instant, milliseconds away.
+        if (p) {
+          appendSaid(p.data, chat, {
+            at: new Date().toISOString(),
+            dir: "out",
+            text: placeholderFor([{ kind: sent.kind }]),
+            ...(sent.id === undefined ? {} : { id: `${chat}-${sent.id}` }),
+          });
+        }
       } catch (err) {
         // all the words went out — `sent` covers them — so only the uploads are retried,
         // and only the ones that did not: `left` is what the queue file is rewritten to.

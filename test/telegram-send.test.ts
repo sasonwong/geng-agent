@@ -83,3 +83,27 @@ test("a file too big for a bot upload is refused before it is read into memory",
     globalThis.fetch = real;
   }
 });
+
+test("a file says what it was sent as, and the id the chat got", async () => {
+  // The transcript's row for an outgoing file depends on these two: the kind picks the
+  // placeholder word, the id lets a later line point at the message the file became.
+  const dir = mkdtempSync(join(tmpdir(), "geng-sent-"));
+  const doc = join(dir, "note.txt");
+  const img = join(dir, "shot.png");
+  writeFileSync(doc, "x");
+  writeFileSync(img, "x");
+  const real = globalThis.fetch;
+  let method = "";
+  globalThis.fetch = (async (url: string) => {
+    method = String(url).slice(String(url).lastIndexOf("/") + 1);
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 77 } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    assert.deepEqual(await sendFile("t", -100, doc), { kind: "document", id: 77 });
+    assert.equal(method, "sendDocument");
+    assert.deepEqual(await sendFile("t", -100, img), { kind: "photo", id: 77 });
+    assert.equal(method, "sendPhoto");
+  } finally {
+    globalThis.fetch = real;
+  }
+});

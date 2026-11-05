@@ -237,31 +237,45 @@ export const SEND_LIMIT = 50 * 1024 * 1024;
  * there can be any size it likes, and reading one first is how the gateway would run out of
  * memory for a send that was never going to succeed.
  */
-export async function sendFile(token: string, chat: number, path: string, limit = SEND_LIMIT): Promise<void> {
+/**
+ * What went out, so the transcript can name it: the kind is what Telegram rendered it as
+ * (a `.png` is a photo, anything else a document), and the id is the message the chat got
+ * — a file takes an id before the words after it do.
+ */
+export interface SentFile {
+  kind: "photo" | "document";
+  id?: number;
+}
+
+export async function sendFile(
+  token: string,
+  chat: number,
+  path: string,
+  limit = SEND_LIMIT,
+): Promise<SentFile> {
   const size = statSync(path).size;
   if (size > limit) throw new Error(`文件 ${basename(path)} 有 ${size} 字节，超过 ${limit}，Telegram 收不下：没发`);
   const bytes = readFileSync(path);
   const name = basename(path);
+  const kind = IMAGE_EXT.test(name) ? "photo" : "document";
   const form = new FormData();
   form.set("chat_id", String(chat));
-  if (IMAGE_EXT.test(name)) {
-    form.set("photo", new Blob([bytes]), name);
-  } else {
-    form.set("document", new Blob([bytes]), name);
-  }
-  const response = await fetch(`${API}/bot${token}/${IMAGE_EXT.test(name) ? "sendPhoto" : "sendDocument"}`, {
+  form.set(kind, new Blob([bytes]), name);
+  const response = await fetch(`${API}/bot${token}/${kind === "photo" ? "sendPhoto" : "sendDocument"}`, {
     method: "POST",
     body: form,
     signal: AbortSignal.timeout(120_000),
   });
   const text = await response.text();
-  let body: { ok?: boolean; description?: string };
+  let body: { ok?: boolean; description?: string; result?: { message_id?: number } };
   try {
     body = JSON.parse(text);
   } catch {
     throw new Error(`sendFile: HTTP ${response.status} ${text.slice(0, 200)}`);
   }
   if (!body.ok) throw new Error(`sendFile: ${body.description ?? `HTTP ${response.status}`}`);
+  const id = body.result?.message_id;
+  return typeof id === "number" ? { kind, id } : { kind };
 }
 
 /**
