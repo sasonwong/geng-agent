@@ -110,3 +110,16 @@ test("a file with neither words nor attachments is set aside, and never knocks",
   assert.equal(existsSync(join(seen, "-100-10.json.bad")), true);
   assert.equal(existsSync(join(inbox, "-100-10.json")), false);
 });
+
+// 预览用同一份判据报同一句话，但不搬文件：搬一条消息是预览对收件箱唯一不能做的事。
+test("a preview names the messages it would set aside and moves none", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const inbox = join(root, "inbox");
+  const seen = join(root, "seen");
+  mkdirSync(inbox, { recursive: true });
+  mkdirSync(seen, { recursive: true });
+  writeFileSync(join(inbox, "-100-10.json"), JSON.stringify({ id: "-100-10", text: "" }));
+  assert.deepEqual(quarantine(inbox, seen, false), ["-100-10.json"]);
+  assert.equal(existsSync(join(inbox, "-100-10.json")), true, "文件还在原地");
+  assert.equal(existsSync(join(seen, "-100-10.json.bad")), false);
+});

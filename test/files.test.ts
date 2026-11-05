@@ -60,3 +60,33 @@ test("a malformed request deletes nothing", () => {
   assert.deepEqual(parseForget({ files: "x" }), []);
   assert.deepEqual(parseForget({ files: ["/files/a", 3] }), ["/files/a"]);
 });
+
+// 预览（`--dry`）要印出「下一轮会说什么」，而不是替下一轮把事做了。做过的代价不是
+// 「顺手收拾了一下」，而是那张纸永远说不出「按你说的删了 N 个」——说这句话的一轮
+// 醒来时，文件已经不在了，它只能报 0。
+test("a preview counts what it would delete and deletes nothing", () => {
+  const d = dir();
+  put(d, "old.bin", 600, 10);
+  put(d, "mid.bin", 600, 5);
+  put(d, "new.bin", 600, 1);
+
+  const preview = pruneFiles(d, { maxMb: 1, maxAgeDays: 0 }, NOW, false);
+  assert.equal(preview.removed, 2, "预览报的数和真删时报的数必须一样");
+  assert.equal(preview.bytesLeft, 600 * 1024, "剩下的字节数也要一样");
+  assert.equal(filesUsage(d).count, 3, "三个都还在盘上");
+  // 同一份输入再预览一次，答案不变：预览可以跑很多次
+  assert.equal(pruneFiles(d, { maxMb: 1, maxAgeDays: 0 }, NOW, false).removed, 2);
+
+  // 真跑一次，删掉的和预览说的一致
+  assert.equal(pruneFiles(d, { maxMb: 1, maxAgeDays: 0 }, NOW).removed, 2);
+  assert.equal(filesUsage(d).count, 1);
+});
+
+test("a preview of a forget request deletes nothing either", () => {
+  const d = dir();
+  put(d, "a.jpg", 1, 0);
+  assert.equal(forgetFiles(d, ["/files/a.jpg"], false), 1);
+  assert.equal(filesUsage(d).count, 1);
+  assert.equal(forgetFiles(d, ["/files/a.jpg"]), 1);
+  assert.equal(filesUsage(d).count, 0);
+});

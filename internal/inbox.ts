@@ -92,11 +92,18 @@ export function markSeen(dirs: string[], seenDir: string, files: string[]): void
  * A file nobody can read used to knock forever: inboxPending counted names while
  * peekInbox skipped the content, so every waking handed over nothing and the file stayed.
  * Anything unparseable is moved aside once, with a line in the log.
+ *
+ * `apply: false` names them and moves nothing: the preview computes the same list, and
+ * moving a message is the one thing a preview is not allowed to do to an inbox.
  */
-export function quarantine(dir: string, seenDir: string): string[] {
+export function quarantine(dir: string, seenDir: string, apply = true): string[] {
   const bad: string[] = [];
   for (const f of jsonFiles(dir)) {
     if (parseFile(dir, f) !== null) continue;
+    if (!apply) {
+      bad.push(f);
+      continue;
+    }
     try {
       renameSync(join(dir, f), join(seenDir, `${f}.bad`));
       bad.push(f);

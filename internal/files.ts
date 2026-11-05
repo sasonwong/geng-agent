@@ -51,18 +51,31 @@ export interface PruneResult {
   removed: number;
   /** Age of the oldest thing removed, so the page can say how old it was. */
   oldestRemovedMs: number | null;
+  /** What the directory holds once the rule has run: the same number without `apply`. */
+  bytesLeft: number;
 }
 
 /**
  * Oldest first, until both limits hold. The newest are never touched: they are what this
  * waking might want to look at.
+ *
+ * `apply: false` counts without deleting, for the preview that has to print the number the
+ * next real round would print. It used to delete here too, and the effect was not "the
+ * preview tidied up" but "the preview ate the message": the line on the page ("地方不够
+ * 了，清掉 N 个最老的") was consumed by a run that prints to stdout and exits, so the round
+ * that actually did the work had nothing left to report.
  */
-export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): PruneResult {
+export function pruneFiles(
+  dir: string,
+  policy: FilesPolicy,
+  nowMs: number,
+  apply = true,
+): PruneResult {
   let names: string[];
   try {
     names = readdirSync(dir).filter((f) => !f.startsWith("."));
   } catch {
-    return { removed: 0, oldestRemovedMs: null };
+    return { removed: 0, oldestRemovedMs: null, bytesLeft: 0 };
   }
   const entries = names
     .map((name) => {
@@ -87,24 +100,29 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): Pru
   for (const e of entries.slice(0, -1)) {
     const tooOld = ageMs !== null && nowMs - e.mtimeMs > ageMs;
     if (!tooOld && total <= capBytes) break;
-    try {
-      rmSync(join(dir, e.name), { force: true });
-      total -= e.size;
-      removed += 1;
-      oldestRemovedMs ??= e.mtimeMs;
-    } catch {
-      // a file that would not go is retried next waking
+    if (apply) {
+      try {
+        rmSync(join(dir, e.name), { force: true });
+      } catch {
+        continue; // a file that would not go is retried next waking
+      }
     }
+    total -= e.size;
+    removed += 1;
+    oldestRemovedMs ??= e.mtimeMs;
   }
-  return { removed, oldestRemovedMs };
+  return { removed, oldestRemovedMs, bytesLeft: total };
 }
 
 /**
  * What it asked to forget. Applied here rather than inside the container, because the
  * container never has the directory: it holds ids, so erasing what a person sent is a
  * request the host carries out, on its own clock, in the ledger of the round.
+ *
+ * `apply: false` is the preview: it answers how many would go, and deletes nothing. See
+ * pruneFiles for what going ahead anyway cost.
  */
-export function forgetFiles(dir: string, requested: string[]): number {
+export function forgetFiles(dir: string, requested: string[], apply = true): number {
   let removed = 0;
   for (const given of requested) {
     const name = bareName(given);
@@ -113,12 +131,14 @@ export function forgetFiles(dir: string, requested: string[]): number {
     // a name that matched nothing used to be counted as a removal — the page then said
     // "按你说的删了 3 个文件" over a directory it had emptied one file from.
     if (!existsSync(join(dir, name))) continue;
-    try {
-      rmSync(join(dir, name), { force: true });
-      removed += 1;
-    } catch {
-      // a file that would not go is retried next waking
+    if (apply) {
+      try {
+        rmSync(join(dir, name), { force: true });
+      } catch {
+        continue; // a file that would not go is retried next waking
+      }
     }
+    removed += 1;
   }
   return removed;
 }

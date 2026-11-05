@@ -265,11 +265,18 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     process.on("SIGINT", onSignal);
   }
 
-  const swept = await sweepOrphans(paths.instance);
-  if (swept > 0) log(`清扫了 ${swept} 个孤儿容器`);
-  for (const file of listSessionFiles(paths.sessionDir)) {
-    const report = repairTail(file, true);
-    if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
+  // Repairs belong to a start, not to a preview. `geng-dev packet` runs this same function
+  // with `dry`, on purpose without the pid lock, so it can be run while a daemon is working
+  // — and both lines below were hostile to exactly that: `sweepOrphans` kills every
+  // container carrying this instance's label, which is the live round's own container, and
+  // `repairTail(..., true)` rewrites a session file the running round is still appending to.
+  if (!o.dry) {
+    const swept = await sweepOrphans(paths.instance);
+    if (swept > 0) log(`清扫了 ${swept} 个孤儿容器`);
+    for (const file of listSessionFiles(paths.sessionDir)) {
+      const report = repairTail(file, true);
+      if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
+    }
   }
 
   // The book endpoint is up for as long as the daemon is, because a tool call can arrive
@@ -345,20 +352,27 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
     // Only while it is not running: a file vanishing under a read is the failure this
     // must not have. Its own requests go first, then the cap.
+    //
+    // A preview asks all three questions and writes nothing (`!o.dry`): the counts it prints
+    // are the counts the next real page prints, and the deletions that page is supposed to
+    // announce — "按你说的删了 N 个文件" — are left for it to do.
     const forgot = forgetFiles(
       paths.filesDir,
       parseForget(readJson<unknown>(paths.filesForget, null)),
+      !o.dry,
     );
-    rmSync(paths.filesForget, { force: true });
+    if (!o.dry) rmSync(paths.filesForget, { force: true });
     // A message nothing can read is moved aside instead of being skipped forever. Before
     // this, one caption-less document knocked 58 times in an hour and handed over nothing.
     const junk = [
-      ...quarantine(paths.inbox, paths.inboxSeen),
-      ...quarantine(paths.inboxLow, paths.inboxSeen),
+      ...quarantine(paths.inbox, paths.inboxSeen, !o.dry),
+      ...quarantine(paths.inboxLow, paths.inboxSeen, !o.dry),
     ];
     if (junk.length > 0) log(`丢弃了 ${junk.length} 条读不出来的消息：${junk.join("、")}`);
-    const pruned = pruneFiles(paths.filesDir, policy.files, Date.now());
-    const filesUsed = filesUsage(paths.filesDir);
+    const pruned = pruneFiles(paths.filesDir, policy.files, Date.now(), !o.dry);
+    // A preview cannot weigh what it did not delete, so it reads the total pruneFiles
+    // computed; a real round re-reads the directory it just emptied.
+    const filesUsed = o.dry ? { bytes: pruned.bytesLeft } : filesUsage(paths.filesDir);
 
     let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
