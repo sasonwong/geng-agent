@@ -51,7 +51,13 @@ export function applyProposal(paths: Paths): ProposalResult | null {
   const proposal = readJson<Record<string, unknown> | null>(file, null);
 
   const current = loadPolicy(paths.policy);
-  const draft = JSON.parse(JSON.stringify(current)) as Record<string, unknown>;
+  // The base is the file as it stands, not `current`: `loadPolicy` returns only the keys
+  // this build knows, so writing that back would delete a field a newer build had added —
+  // and adding a field is the one change the interface promises is safe. A missing file
+  // still falls back to the defaults, because then there is nothing to preserve.
+  const raw = readJson<unknown>(paths.policy, null);
+  const base = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw : current;
+  const draft = JSON.parse(JSON.stringify(base)) as Record<string, unknown>;
   const applied: ProposalResult["applied"] = [];
   const rejected: ProposalResult["rejected"] = [];
 

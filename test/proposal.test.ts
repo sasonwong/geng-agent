@@ -71,3 +71,19 @@ test("a malformed proposal is set aside, not obeyed", () => {
   assert.equal(result?.rejected[0]?.key, "*");
   assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 30);
 });
+
+test("applying a proposal keeps the keys this build does not know", () => {
+  // Adding a field to the policy is the one change the interface promises is safe, which
+  // only holds if the writer does not rebuild the file from what it understands. It did:
+  // the draft started from `loadPolicy()`'s output, so one proposal on an older build
+  // dropped every field a newer build had added.
+  const paths = fixture();
+  const base = defaultPolicy();
+  writeJson(paths.policy, { ...base, cycle: { ...base.cycle, aNewerKey: true } });
+  writeJson(join(paths.book, "policy.proposal.json"), { cycle: { defaultWakeMinutes: 45 } });
+
+  assert.equal(applyProposal(paths)?.applied.length, 1);
+  const written = JSON.parse(readFileSync(paths.policy, "utf8")) as { cycle: Record<string, unknown> };
+  assert.equal(written.cycle.aNewerKey, true, "采用一个提议不该删掉它不认识的字段");
+  assert.equal(written.cycle.defaultWakeMinutes, 45);
+});

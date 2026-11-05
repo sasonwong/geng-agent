@@ -3,10 +3,13 @@ import { readText } from "./fs.ts";
 import { chainFrom, validCidr } from "./proxy.ts";
 
 /**
- * The version of the policy file's shape. A policy written by a newer build is refused for
- * the same reason `stateSchema` exists: applying a proposal writes a draft built from what
- * this code understands, so running an older build on a newer file would silently drop the
- * fields it does not know. Additions never need a bump; only a rename or a removal does.
+ * The version of the policy file's shape.
+ *
+ * A policy written by a newer build is refused: a field that was renamed or removed would
+ * otherwise be read as missing, every default would apply, and the instance would run as
+ * something other than what the operator wrote — with nothing saying so. Additions never
+ * need a bump: a reader uses only the keys it knows, and a proposal is written into the
+ * file as it stands (see proposal.ts).
  */
 export const POLICY_SCHEMA = 1;
 
