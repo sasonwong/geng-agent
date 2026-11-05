@@ -1,11 +1,14 @@
-import { readdirSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, renameSync } from "node:fs";
+import { basename, join } from "node:path";
 import { readJson } from "./fs.ts";
 
 export interface InboxMsg {
   id: string;
   /** The file it came from, so it can be marked seen once it has actually been read. */
   file: string;
+  /** Which inbox held it. The two halves can carry the same file name, and a bare name
+   *  alone cannot say which one this round actually handed over. */
+  dir?: string;
   text: string;
   from?: string;
   at?: string;
@@ -29,6 +32,7 @@ function parseFile(dir: string, name: string): InboxMsg | null {
   return {
     id: typeof msg.id === "string" ? msg.id : name.replace(/\.json$/, ""),
     file: name,
+    dir,
     text: msg.text,
     from: msg.from,
     at: msg.at,
@@ -68,18 +72,32 @@ export function newestKnock<T extends { at?: string; chat?: number }>(messages: 
  * Anything unparseable is quarantined as *.bad — one broken message must never block
  * a whole waking.
  */
-export function markSeen(dirs: string[], seenDir: string, files: string[]): void {
-  for (const file of files) {
-    for (const dir of dirs) {
-      const from = join(dir, file);
-      const to = join(seenDir, file);
+export type SeenRef = string | { dir?: string; file: string };
+
+export function markSeen(dirs: string[], seenDir: string, files: ReadonlyArray<SeenRef>): void {
+  for (const ref of files) {
+    const name = typeof ref === "string" ? ref : ref.file;
+    const preferred = typeof ref === "string" ? undefined : ref.dir;
+    // A bare name cannot say which half held the message: both inboxes can carry
+    // `<chat>-<message_id>.json` when a redelivery changed the routing. Prefer the
+    // directory the page actually read, and only fall back to scanning the rest.
+    const candidates =
+      preferred === undefined ? dirs : [preferred, ...dirs.filter((d) => d !== preferred)];
+    for (const dir of candidates) {
+      const from = join(dir, name);
+      if (!existsSync(from)) continue;
+      // Two halves holding the same name must both be moved. Overwriting the first in
+      // seen/ would lose a message; leaving the second in the inbox would hand it over
+      // again on the next waking. The source directory's name keeps both records.
+      let to = join(seenDir, name);
+      if (existsSync(to)) to = join(seenDir, `${basename(dir)}-${name}`);
       try {
         renameSync(from, to);
       } catch {
-        continue; // not in this dir
+        continue;
       }
       try {
-        if (parseFile(seenDir, file) === null) renameSync(to, `${to}.bad`);
+        if (parseFile(seenDir, basename(to)) === null) renameSync(to, `${to}.bad`);
       } catch {
         // nothing to quarantine
       }

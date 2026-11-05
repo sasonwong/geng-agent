@@ -1,6 +1,6 @@
 /** Thin Telegram Bot API client. No SDK: a handful of methods is not worth a dependency. */
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 export interface BotConfig {
@@ -162,9 +162,17 @@ export function splitMessage(text: string, limit = 4000): string[] {
   if (text.length <= width) return [text];
   const parts: string[] = [];
   let rest = text;
+  const high = (u: number): boolean => u >= 0xd800 && u <= 0xdbff;
   while (rest.length > width) {
     let cut = rest.lastIndexOf("\n", width);
     if (cut < width / 2 || cut <= 0) cut = width;
+    // 切点正好劈开一个代理对（高位停在本段末尾、低位在下段开头）时，把高位让给下一段，
+    // emoji 和 CJK 扩展字才不会被拆成两半发到两条消息里。
+    if (high(rest.charCodeAt(cut - 1))) {
+      cut -= 1;
+      // 退到 0 会让 rest 原地不动而死循环（width=1 且开头就是代理对）：本段索性带上整个对。
+      if (cut === 0) cut = 2;
+    }
     parts.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
@@ -198,6 +206,8 @@ export async function sendMessage(
 
 /** Bots may download up to 20 MB; anything bigger is not ours to fetch. */
 export const FILE_LIMIT = 20 * 1024 * 1024;
+/** Bot API 上传上限。sendFile 会把整个文件读进内存，超过这个数就得在读之前拒绝。 */
+export const SEND_LIMIT = 50 * 1024 * 1024;
 
 export async function getFilePath(token: string, fileId: string): Promise<string> {
   const file = await call<{ file_path?: string }>(token, "getFile", { file_id: fileId });
@@ -247,6 +257,12 @@ const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
 
 /** Photos as photos, everything else as a document. `path` is a host path. */
 export async function sendFile(token: string, chat: number, path: string): Promise<void> {
+  // readFileSync 会把整个文件读进网关的内存：/work 里一个 GB 的文件就是一个 GB 的 RSS。
+  // 发之前先按 stat 拒掉，别等读进来再发现太大。
+  const size = statSync(path).size;
+  if (size > SEND_LIMIT) {
+    throw new Error(`文件超过 ${SEND_LIMIT} 字节（Bot API 上传上限），拒绝发送`);
+  }
   const bytes = readFileSync(path);
   const name = basename(path);
   const form = new FormData();

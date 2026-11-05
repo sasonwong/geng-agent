@@ -1,7 +1,7 @@
-import { readdirSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { closeSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { Paths } from "./paths.ts";
-import { readJson, writeJson } from "./fs.ts";
+import { mtimeMs, readJson, writeJson } from "./fs.ts";
 
 /**
  * Every id in the book, handed out from one place.
@@ -44,6 +44,45 @@ function highest(dirs: string[], pattern: RegExp): number {
 }
 
 /**
+ * `allocate` is a read-modify-write of `ids.json`, and three unrelated processes call it
+ * (the daemon's journal/loop writer, the gateway handing out file ids, the mail worker
+ * with its attachments). Two of them interleaving read the same ceiling and hand out the
+ * same number: two files get one `F` prefix and `fileById` answers whichever it lists
+ * first. An O_EXCL lock file serialises the whole critical section across processes.
+ *
+ * A holder that crashed leaves the lock behind, so a lock older than 10s is reclaimed;
+ * otherwise we wait, but never forever (5s), so a stuck holder cannot hang the caller.
+ */
+function withIdsLock<T>(lock: string, body: () => T): T {
+  mkdirSync(dirname(lock), { recursive: true });
+  const deadline = Date.now() + 5_000;
+  const idle = new Int32Array(new SharedArrayBuffer(4));
+  for (;;) {
+    try {
+      // "wx" fails when the file already exists: the kernel is the mutex, nothing to poll
+      const fd = openSync(lock, "wx");
+      closeSync(fd);
+      break; // acquired: the `finally` below owns removing it
+    } catch {
+      const at = mtimeMs(lock);
+      if (at !== null && Date.now() - at > 10_000) {
+        rmSync(lock, { force: true }); // a crashed holder never released it
+      } else if (Date.now() >= deadline) {
+        // bounded wait: never block a waking forever on a lock nobody will release
+        throw new Error(`ids 锁一直没释放：${lock}`);
+      } else {
+        Atomics.wait(idle, 0, 0, 50);
+      }
+    }
+  }
+  try {
+    return body();
+  } finally {
+    rmSync(lock, { force: true });
+  }
+}
+
+/**
  * The next id of a series: one past the highest number *ever handed out*.
  *
  * Looking only at the files is not enough: delete the newest entry and the next write
@@ -52,6 +91,10 @@ function highest(dirs: string[], pattern: RegExp): number {
  * snapshot has ids the counter has not seen) but not lower it.
  */
 export function allocate(paths: Paths, kind: IdKind): { id: string; n: number; day: string } {
+  return withIdsLock(`${paths.ids}.lock`, () => allocateUnlocked(paths, kind));
+}
+
+function allocateUnlocked(paths: Paths, kind: IdKind): { id: string; n: number; day: string } {
   const ids = readJson<Ids>(paths.ids, {});
   const day = today(Date.now());
   if (kind === "loop") {
@@ -108,7 +151,7 @@ export function fileById(paths: Paths, id: string): { name: string; path: string
   return name === undefined ? null : { name, path: join(paths.filesDir, name) };
 }
 
-/** Every file that has an id, newest first, for `recall`. */
+/** Every file that has an id, in directory order; `collectAll` sorts by time for `recall`. */
 export function listFiles(paths: Paths): { id: string; name: string; bytes: number }[] {
   let names: string[];
   try {

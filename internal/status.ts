@@ -70,11 +70,20 @@ export async function printStatus(root: string, instance: string): Promise<void>
   const identity = readText(p.identity);
   const loops = countLoops(p);
   const sessions = listSessionFiles(p.sessionDir);
-  const sessionBytes = sessions.reduce((n, f) => n + (statSync(f).size || 0), 0);
+  // 列出来之后被轮转/清理删掉的文件按 0 计：别让整个 status 崩在一次性 stat 上。
+  const sessionBytes = sessions.reduce((n, f) => {
+    try {
+      return n + (statSync(f).size || 0);
+    } catch {
+      return n;
+    }
+  }, 0);
   const logTail = (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] ?? "（无）";
   const spend = spendSince(p, now);
-  const snapshots = await listSnapshots(p);
-  const latest = snapshots[snapshots.length - 1];
+  const list = await listSnapshots(p);
+  const latest = list.ok && list.snapshots.length > 0 ? list.snapshots[list.snapshots.length - 1] : undefined;
+  // rustic 某些版本不给 time：Date.parse("") 是 NaN，formatDuration(NaN) 会印出 NaNh。
+  const latestAgeMs = latest === undefined ? Number.NaN : now - Date.parse(latest.time);
   // one read, one answer: the list was fetched twice in the same expression
   const places = knownPlaces(p.root, instance);
 
@@ -97,9 +106,13 @@ export async function printStatus(root: string, instance: string): Promise<void>
     `  session     ${sessions.length} 文件 / ${bytes(sessionBytes)}`,
     `  花费        ${spend.cycles} 轮 · ${spend.tokens} tokens · $${spend.cost.toFixed(4)}`,
     `  快照        ${
-      latest
-        ? `${snapshots.length} 张，最近 ${formatDuration(now - Date.parse(latest.time))} 前`
-        : "没有（或 rustic 不可用）"
+      !list.ok
+        ? `读不出（${list.detail ?? "?"}）`
+        : latest === undefined
+          ? "没有"
+          : !Number.isFinite(latestAgeMs)
+            ? `快照时间读不出来（${list.snapshots.length} 张）`
+            : `${list.snapshots.length} 张，最近 ${formatDuration(latestAgeMs)} 前`
     }`,
     `  上次一轮    ${logTail}`,
   ];

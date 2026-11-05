@@ -44,7 +44,10 @@ const downloadTool = tool({
     }
     try {
       const r = await getToFile(SOCKET, `/files/${encodeURIComponent(params.id.trim())}`, dest);
-      return say(`取到了：${params.to}（${r.bytes} 字节）。`);
+      return {
+        content: [{ type: "text" as const, text: `取到了：${params.to}（${r.bytes} 字节）。` }],
+        details: { path: params.to, bytes: r.bytes },
+      };
     } catch (err) {
       return say((err as Error).message);
     }

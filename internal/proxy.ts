@@ -1,4 +1,4 @@
-import { connect as tcpConnect } from "node:net";
+import { connect as tcpConnect, isIP } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { lookup } from "node:dns/promises";
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
@@ -33,14 +33,23 @@ function bytesOf(ip: string): { bytes: Buffer; bits: number } | null {
     if (parts.some((n) => n > 255)) return null;
     return { bytes: Buffer.from(parts as number[]), bits: 32 };
   }
-  if (!ip.includes(":")) return null;
-  // `::ffff:127.0.0.1` is the same loopback address wearing a v6 spelling. Parsed as
-  // 128 bits it matches `::/0` and misses every `!127.0.0.0/8`, so a CONNECT to the
-  // host's own services walked straight through the address rules. Collapse the two
-  // spellings to the v4 bytes before anything compares a prefix.
-  const mappedText = /^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/i.exec(ip);
-  if (mappedText) return bytesOf(mappedText.slice(1).join("."));
-  const [head, tail] = ip.split("::");
+  const clean = ip.replace(/%.*$/, "");
+  if (isIP(clean) === 0) return null;
+  // RFC 4291 §2.2.3 lets the last 32 bits be a dotted quad in *any* IPv6 spelling, not
+  // only `::ffff:…`. `parseInt("127.0.0.1", 16)` stops at the first dot, so the fully
+  // written `0:0:0:0:0:ffff:127.0.0.1` used to become a different 128-bit address — one
+  // that matched `::/0` and none of the `!127.0.0.0/8` rules. Turn the tail into its two
+  // hex groups before the `::` expansion, and let the mapped-address collapse below do
+  // the rest.
+  const dotted = /(\d{1,3}(?:\.\d{1,3}){3})$/.exec(clean);
+  let text = clean;
+  if (dotted !== null) {
+    const quad = bytesOf(dotted[1] as string);
+    if (quad === null) return null;
+    const b = quad.bytes;
+    text = `${clean.slice(0, clean.length - (dotted[1] as string).length)}${b.readUInt16BE(0).toString(16)}:${b.readUInt16BE(2).toString(16)}`;
+  }
+  const [head, tail] = text.split("::");
   const left = head ? head.split(":") : [];
   const right = tail === undefined ? [] : tail ? tail.split(":") : [];
   if (tail === undefined && left.length !== 8) return null;
@@ -82,6 +91,22 @@ export function inCidr(ip: string, cidr: string): boolean {
   return ((a.bytes[full] as number) & mask) === ((b.bytes[full] as number) & mask);
 }
 
+/**
+ * Whether this is an address or an address/prefix rule at all. `policy` needs this at
+ * load time: a rule that can never match (a host name, a prefix wider than the family,
+ * an IPv6 group that is not hex) is otherwise silent, and the operator reads "proxy
+ * ignores my rule" instead of a config error.
+ */
+export function validCidr(cidr: string): boolean {
+  const parts = cidr.split("/");
+  if (parts.length > 2) return false;
+  const parsed = bytesOf((parts[0] ?? "").replace(/^\[|\]$/g, ""));
+  if (parsed === null) return false;
+  if (parts[1] === undefined) return true;
+  const prefix = Number(parts[1]);
+  return /^\d+$/.test(parts[1]) && Number.isInteger(prefix) && prefix >= 0 && prefix <= parsed.bits;
+}
+
 /** `!` entries are exclusions and they win: order never changes the answer. */
 function entries(rule: string[]): { allow: string[]; deny: string[] } {
   return {
@@ -103,13 +128,35 @@ export function hostAllowed(host: string, rule: string[]): boolean {
   return allow.some(matches);
 }
 
+/**
+ * `bytesOf` collapses the mapped form (`::ffff:a.b.c.d`), but an IPv4-*compatible*
+ * literal (`::127.0.0.1`) stays 128 bits, and Node connects it to the embedded IPv4
+ * address. Without the second spelling every `!127.0.0.0/8` rule is blind to it.
+ */
+function embeddedV4(ip: string): string | null {
+  const parsed = bytesOf(ip);
+  if (parsed === null || parsed.bits !== 128) return null;
+  if (!parsed.bytes.subarray(0, 12).every((b) => b === 0)) return null;
+  return [...parsed.bytes.subarray(12)].join(".");
+}
+
 /** The address half. Named `addrAllowed`, not "public", because it is only what the rules say. */
 export function addrAllowed(ip: string, rule: string[]): { ok: boolean; by?: string } {
   const { allow, deny } = entries(rule);
-  const denied = deny.find((entry) => inCidr(ip, entry));
-  if (denied !== undefined) return { ok: false, by: `!${denied}` };
-  const allowed = allow.find((entry) => inCidr(ip, entry));
-  return allowed === undefined ? { ok: false } : { ok: true, by: allowed };
+  const embedded = embeddedV4(ip);
+  const forms = embedded === null ? [ip] : [ip, embedded];
+  // An exclusion wins for whichever spelling it matches; an allow has to match one too.
+  // Checking both is not a second chance to get in — it is the only way a v4 rule can
+  // describe an address that will be connected as v4.
+  for (const form of forms) {
+    const denied = deny.find((entry) => inCidr(form, entry));
+    if (denied !== undefined) return { ok: false, by: `!${denied}` };
+  }
+  for (const form of forms) {
+    const allowed = allow.find((entry) => inCidr(form, entry));
+    if (allowed !== undefined) return { ok: true, by: allowed };
+  }
+  return { ok: false };
 }
 
 export type Chain =
@@ -124,6 +171,22 @@ export type Chain =
  * not an absence: it means direct even when `HTTPS_PROXY` is set, which is what a leftover
  * systemd `Environment=` looks like otherwise. A URL overrides both.
  */
+
+/**
+ * The port as it was written. WHATWG `URL` silently drops a port it cannot parse and
+ * answers as if the default had been asked for: `http://proxy.example:not-a-port` used
+ * to become a perfectly valid chain to port 80, i.e. a proxy the operator configured
+ * and a connection that ignored it.
+ */
+function writtenPort(raw: string): string | null {
+  const authority = raw.slice(raw.indexOf("://") + 3).replace(/[/?#].*$/, "");
+  const atUser = authority.lastIndexOf("@");
+  const hostPart = authority.slice(atUser === -1 ? 0 : atUser + 1);
+  const afterHost = hostPart.startsWith("[") ? hostPart.slice(hostPart.indexOf("]") + 1) : hostPart;
+  const at = afterHost.indexOf(":");
+  return at === -1 ? null : afterHost.slice(at + 1);
+}
+
 export function chainFrom(value: string): Chain | null {
   const wanted = value.trim();
   const raw =
@@ -147,7 +210,9 @@ export function chainFrom(value: string): Chain | null {
           ? 443
           : 80
       : Number(url.port);
-  if (url.hostname === "") return null;
+  const typed = writtenPort(raw);
+  if (typed !== null && (!/^\d+$/.test(typed) || Number(typed) < 1 || Number(typed) > 65535)) return null;
+  if (url.hostname === "" || !Number.isInteger(port) || port < 1 || port > 65535) return null;
   // A URL with a broken `%` escape is a config typo. `decodeURIComponent` throws on it,
   // and this getter runs on every proxied request — an uncaught throw there takes the
   // daemon down, not just the connection.
@@ -224,6 +289,11 @@ export async function checkTarget(
   if (match === null) return { ok: false, why: `看不懂的目标：${raw}` };
   const host = match[1] as string;
   const port = Number(match[2]);
+  // `net.connect` throws synchronously on a port outside 1..65535; from inside this
+  // async function that is an unhandled rejection on the daemon's request handler.
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return { ok: false, why: `端口要是 1 到 65535：${raw}`, host, port };
+  }
   if (!hostAllowed(host, rule.allow)) return { ok: false, why: `${host} 不在放行名单里`, host, port };
   // Both keys, always — including when the daemon itself goes through a chain. Skipping the
   // address half there made `!127.0.0.0/8` a decoration: the chain would happily CONNECT to
@@ -291,6 +361,15 @@ export async function handleConnect(
     reported = true;
     report(ok, why);
   };
+  // An HTTP server removes its own error listener before emitting `connect`: from here
+  // on the socket is ours. A client that gives up while DNS is still in flight
+  // (`curl --max-time 5`, a round killed mid-handshake) would otherwise be an uncaught
+  // exception that takes the daemon down. It has to be attached before the first await,
+  // because the first await is the address check.
+  socket.on("error", (err: Error) => {
+    log(`proxy ${raw} 客户端那一头断了：${err.message}`);
+    once(false, err.message);
+  });
   // `checkTarget` resolves the name as part of the address check, so its `addr` is the
   // one that was vetted. Resolving again below would be a second lookup whose answer
   // nothing checks — the shape of a rebinding window.
@@ -333,6 +412,13 @@ function tunnelDone(
   report: (ok: boolean, why?: string) => void,
   by?: string,
 ): void {
+  // The client left while the name was being resolved or the chain was handshaking. Its
+  // 'close' has already fired, so the listener below will never run: without this the
+  // upstream connection stays open for as long as the far end keeps it.
+  if (socket.destroyed) {
+    upstream.destroy();
+    return;
+  }
   // The socket's error handler is attached where the socket is created, not here: by the
   // time this runs a failure has already been reported once.
   socket.on("error", () => upstream.destroy());
@@ -460,9 +546,29 @@ function socks5(
           upstream.destroy();
           return;
         }
-        const { user, pass } = chain.auth;
-        upstream.write(Buffer.concat([Buffer.from([1, user.length]), Buffer.from(user), Buffer.from([pass.length]), Buffer.from(pass)]));
+        const user = Buffer.from(chain.auth.user);
+        const pass = Buffer.from(chain.auth.pass);
+        // RFC 1929 puts each length in one byte; a JS `.length` counts UTF-16 units,
+        // and a longer name silently wraps into a frame the server reads as garbage.
+        if (user.length === 0 || user.length > 255 || pass.length > 255) {
+          log("proxy 上游要 SOCKS 认证，但账号或口令的字节数不合法");
+          report(false, "SOCKS 账号或口令的字节数不合法");
+          socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+          upstream.destroy();
+          return;
+        }
+        upstream.write(Buffer.concat([Buffer.from([1, user.length]), user, Buffer.from([pass.length]), pass]));
         phase = "auth";
+        return;
+      }
+      // 0xff was handled above; 1 (GSSAPI) and every other value is a method we never
+      // offered. Falling through to "no auth" would send a CONNECT into a handshake the
+      // server is still waiting to finish.
+      if (method !== 0) {
+        log(`proxy 上游选了不支持的认证方式 ${String(method)}`);
+        report(false, `上游代理选了不支持的认证方式 ${String(method)}`);
+        socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+        upstream.destroy();
         return;
       }
       phase = "connect";

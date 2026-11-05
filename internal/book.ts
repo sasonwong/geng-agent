@@ -529,7 +529,13 @@ export function startBookServer(o: BookOptions): Promise<Server> {
           "content-type": "application/octet-stream",
           "content-length": String(statSync(hit.path).size),
         });
-        createReadStream(hit.path).pipe(res);
+        const stream = createReadStream(hit.path);
+        // stat 和真正打开之间文件可能被清掉，或者同名的是个目录：createReadStream 会在
+        // 事件循环里抛 error。没有监听就是未捕获异常，能把服务到一半的 daemon 带下去。
+        stream.on("error", guard);
+        // 客户端中途断开时写侧也会抛 error；别让它变成未捕获异常。
+        res.on("error", () => {});
+        stream.pipe(res);
       } catch (err) {
         reply(500, { error: `读不出来：${(err as Error).message}` });
       }

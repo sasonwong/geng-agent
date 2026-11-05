@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { ExpectedError } from "./errors.ts";
 import type { MailConfig, MailEnv } from "./mail.ts";
-import { MODEL_KEY_VARS } from "./model.ts";
+import { MODEL_FILE_VARS } from "./model.ts";
 
 /**
  * Env files under `secrets/`, and the values that have to match something outside this
@@ -11,15 +12,25 @@ import { MODEL_KEY_VARS } from "./model.ts";
  * quietly does nothing, and no log says which.
  */
 
+/**
+ * 一行 `.env` 拆成键和值。手写文件最常见的 `export NAME=value` 在这里把前缀剥掉：
+ * 读和写共用这一把尺子，否则 `export NAME` 与 `NAME` 会被当成两个不同的键，
+ * 后者写进去也盖不住前者。注释、空行、没有等号的行返回 null。
+ */
+function parseEnvLine(raw: string): { key: string; value: string } | null {
+  const line = raw.trim().replace(/^export\s+/i, "");
+  if (line === "" || line.startsWith("#")) return null;
+  const at = line.indexOf("=");
+  if (at === -1) return null;
+  return { key: line.slice(0, at).trim(), value: line.slice(at + 1).trim() };
+}
+
 export function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
   const out: Record<string, string> = {};
   for (const raw of readFileSync(path, "utf8").split("\n")) {
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    const at = line.indexOf("=");
-    if (at === -1) continue;
-    out[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+    const parsed = parseEnvLine(raw);
+    if (parsed !== null) out[parsed.key] = parsed.value;
   }
   return out;
 }
@@ -29,18 +40,30 @@ export function readEnvFile(path: string): Record<string, string> {
  * exactly where they were: this file is the operator's, not ours.
  */
 export function writeEnvValue(path: string, name: string, value: string): void {
+  // 值里带换行会往 .env 里偷偷塞进额外的一行，而 readEnvFile 又是后写覆盖前写：
+  // 一次 `secrets set` 就能凭空写出第二把 GENG_MODEL_KEY。写之前先挡住。
+  if (/[\r\n]/.test(value)) {
+    throw new ExpectedError(`secrets: ${name} 的值不能包含换行符（\\n / \\r），那会注入额外的 env 行`);
+  }
   const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n") : [];
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   let replaced = false;
-  const out = lines.map((raw) => {
-    if (replaced) return raw;
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) return raw;
-    const at = line.indexOf("=");
-    if (at === -1 || line.slice(0, at).trim() !== name) return raw;
-    replaced = true;
-    return `${name}=${value}`;
-  });
+  const out: string[] = [];
+  for (const raw of lines) {
+    const parsed = parseEnvLine(raw);
+    const isMatch = parsed !== null && parsed.key === name;
+    if (!isMatch) {
+      out.push(raw);
+      continue;
+    }
+    // readEnvFile 是后写覆盖前写：只改第一行，后面那行旧值反而在写完之后赢。
+    // 只留第一次出现的那行写新值，其余同名行全部丢掉。export NAME 与 NAME 在这里
+    // 是同一个键，一并折叠成一行。
+    if (!replaced) {
+      out.push(`${name}=${value}`);
+      replaced = true;
+    }
+  }
   if (!replaced) out.push(`${name}=${value}`);
   // a fresh root has no secrets/ yet, and a hand-run `secrets set` is how it gets one
   mkdirSync(dirname(path), { recursive: true });
@@ -75,7 +98,7 @@ export function mailWiringProblem(
  * to know which one it is writing.
  */
 export function secretFileFor(root: string, instance: string, name: string): string {
-  return MODEL_KEY_VARS.includes(name)
+  return MODEL_FILE_VARS.includes(name)
     ? join(root, "secrets", `${instance}.model.env`)
     : join(root, "secrets", `${instance}.env`);
 }

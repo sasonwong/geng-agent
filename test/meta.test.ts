@@ -83,3 +83,68 @@ test("a hand-written cut note cannot break the page that reads it", () => {
   // and the page still renders
   assert.equal(typeof rec?.kind, "string");
 });
+
+test("手写的字符串 / 非有限计数不会流进 daemon 的算术", () => {
+  const paths = fixture();
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({
+    wakings: "3", lastWakeMs: "很久以前", lastSaid: 42, stateSchema: "1",
+  }));
+  const meta = readMeta(paths);
+  assert.equal(meta.wakings, undefined, "字符串不是计数");
+  assert.equal(meta.lastWakeMs, undefined);
+  assert.equal(meta.lastSaid, undefined, "数字不是它上一轮说的话");
+  assert.equal(meta.stateSchema, undefined);
+  // daemon 里的 (wakings ?? 0) + 1 绝不能变成 "31"
+  assert.equal((meta.wakings ?? 0) + 1, 1);
+  // 1e999 解析成 Infinity，也不是有限数
+  writeFileSync(join(paths.meta, "state.json"), '{"lastWakeMs":1e999}');
+  assert.equal(readMeta(paths).lastWakeMs, undefined);
+});
+
+test("合法数值、lastSaid 与嵌套形状按原样保留", () => {
+  const paths = fixture();
+  const env = { imageId: "sha256:abc", search: true };
+  const knockHold = { files: ["chat-1.json"], untilMs: 1_234 };
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({
+    wakings: 7, lastWakeMs: 1_000, lastSaid: "上回说到", stateSchema: 1,
+    lastCycle: { at: "x", wake: "knock", tools: "9", inbox: 1, talkedTo: ["a"], touched: 2 },
+    env, knockHold,
+  }));
+  const meta = readMeta(paths);
+  assert.equal(meta.wakings, 7);
+  assert.equal(meta.lastWakeMs, 1_000);
+  assert.equal(meta.lastSaid, "上回说到");
+  assert.equal(meta.lastCycle?.touched, 2);
+  assert.equal(meta.lastCycle?.inbox, 1);
+  assert.equal(meta.lastCycle?.tools, undefined, "字符串计数被丢掉");
+  assert.deepEqual(meta.env, env, "env 按 unknown 原样带过");
+  assert.deepEqual(meta.knockHold, knockHold, "knockHold 按 unknown 原样带过");
+});
+
+test("lastSaid 是 null 时保留，别的值丢掉", () => {
+  const paths = fixture();
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({ lastSaid: null }));
+  assert.equal(readMeta(paths).lastSaid, null);
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({ lastSaid: { text: "x" } }));
+  assert.equal(readMeta(paths).lastSaid, undefined);
+});
+
+test("非法形状的 wakes.json 不会让 daemon 崩在 .filter 上", () => {
+  const paths = fixture();
+  const now = Date.parse("2026-03-02T12:00:00Z");
+  for (const garbage of ["null", "{}", '"oops"', "42", "[1,2]"]) {
+    writeFileSync(join(paths.meta, "wakes.json"), garbage);
+    assert.deepEqual(readWakes(paths, now), [], `${garbage} 不是数组`);
+  }
+  // 数组里混入非数 / 未来时刻也该被滤掉
+  writeFileSync(join(paths.meta, "wakes.json"), JSON.stringify([now - 1000, "x", now + 1000, null]));
+  assert.deepEqual(readWakes(paths, now), [now - 1000]);
+});
+
+test("state.json 字面是 null / 标量 / 数组时返回空 meta", () => {
+  const paths = fixture();
+  for (const garbage of ["null", "42", '"oops"', "[1,2]", "true"]) {
+    writeFileSync(join(paths.meta, "state.json"), garbage);
+    assert.deepEqual(readMeta(paths), {}, `${garbage} 不是 meta`);
+  }
+});

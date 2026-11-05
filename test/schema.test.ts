@@ -36,3 +36,20 @@ test("an unstamped file is older, not unknown", () => {
   assert.equal(onDiskSchema(paths), 0);
   assert.equal(schemaConflict(0), null);
 });
+
+test("小数 / 负数 / 越界大数都不是版本号，按老文件处理", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  mkdirSync(paths.meta, { recursive: true });
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({ stateSchema: 1.5 }));
+  assert.equal(onDiskSchema(paths), 0);
+  assert.equal(schemaConflict(onDiskSchema(paths)), null, "一个小数不能让人误判成更新版本而拒绝启动");
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({ stateSchema: -1 }));
+  assert.equal(onDiskSchema(paths), 0);
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({ stateSchema: STATE_SCHEMA + 0.5 }));
+  assert.equal(onDiskSchema(paths), 0);
+  assert.equal(schemaConflict(onDiskSchema(paths)), null);
+  // 2^53 不是安全整数，也不能被当成「更新版本写的」
+  writeFileSync(join(paths.meta, "state.json"), JSON.stringify({ stateSchema: 2 ** 53 }));
+  assert.equal(onDiskSchema(paths), 0);
+});

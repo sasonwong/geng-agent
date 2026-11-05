@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseInboxId, parseReplyTo, quoteFor, quotedOf } from "../internal/quote.ts";
-import { appendSaid, readSaid } from "../internal/people.ts";
+import { appendSaid, readSaid, saidHasId } from "../internal/people.ts";
 import { nameOf } from "../internal/telegram.ts";
 
 test("an inbox id carries the chat it belongs to, negative chats included", () => {
@@ -80,4 +80,34 @@ test("a quote is read by one parser, whether it arrives as an id or as an object
   for (const junk of ["151", "abc", 42, { chat: "-1001" }]) {
     assert.equal(parseReplyTo(junk), null, JSON.stringify(junk));
   }
+});
+
+test("对象写法与 id 写法共用同一套校验，一个也不多认", () => {
+  // 两种写法最终都过 quoteOf：Number.isSafeInteger + chat !== 0 + messageId > 0。
+  // 任何一边多认一个，reply_to_message_id 就会带着非法值走到 Telegram 拿 400。
+  for (const [chat, messageId] of [
+    [-1001, 151],
+    [-1001, Number.NaN],
+    [-1001, 0],
+    [-1001, -5],
+    [-1001, 1.5],
+    [0, 151],
+    [1.5, 151],
+    [Number.POSITIVE_INFINITY, 151],
+    [Number.MAX_SAFE_INTEGER + 1, 151],
+  ] as const) {
+    const asId = parseInboxId(`${chat}-${messageId}`);
+    const asObject = parseReplyTo({ chat, messageId });
+    assert.deepEqual(asObject, asId, `两种写法对 ${chat}-${messageId} 要同一结论`);
+  }
+});
+
+test("saidHasId 认得出已经记过的行，供重投去重", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const chat = -100;
+  assert.equal(saidHasId(root, chat, "-100-151"), false, "没有这个 chat 的 transcript");
+  appendSaid(root, chat, { at: "2026-03-02T09:00:00Z", dir: "in", text: "这句", id: "-100-151" });
+  assert.equal(saidHasId(root, chat, "-100-151"), true);
+  assert.equal(saidHasId(root, chat, "-100-999"), false, "同一 chat 里没有的 id");
+  assert.equal(saidHasId(root, -999, "-100-151"), false, "别的人说过的不算");
 });

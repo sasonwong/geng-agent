@@ -14,6 +14,13 @@ import { readEnvFile } from "./secret.ts";
 export const MODEL_KEY_VARS = ["GENG_MODEL_KEY", "OPENCODE_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 
 /**
+ * 和模型一起住在 secrets/<inst>.model.env 里的名字。modelUpstream() 从那个文件读
+ * GENG_MODEL_UPSTREAM，所以 `secrets set` 写上游时也得落到同一处：写进 <inst>.env 的
+ * 话没有任何读者，而那个文件反而会被 `--env-file` 注进容器。
+ */
+export const MODEL_FILE_VARS = [...MODEL_KEY_VARS, "GENG_MODEL_UPSTREAM"];
+
+/**
  * One key file per instance, not one for the machine.
  *
  * It was `secrets/model.env` while there was one instance to run; a second instance would

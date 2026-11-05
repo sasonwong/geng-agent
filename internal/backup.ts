@@ -130,8 +130,11 @@ export interface Snapshot {
   files: number;
 }
 
-/** rustic emits two different group shapes across releases; flatten both. */
-export function parseSnapshots(text: string): Snapshot[] {
+/**
+ * rustic emits two different group shapes across releases; flatten both.
+ * 读不出输出和「一张快照都没有」是两件事：前者返回 null，后者返回空数组。
+ */
+export function parseSnapshots(text: string): Snapshot[] | null {
   type Entry = {
     id?: string;
     time?: string;
@@ -141,9 +144,9 @@ export function parseSnapshots(text: string): Snapshot[] {
   try {
     parsed = JSON.parse(text);
   } catch {
-    return [];
+    return null;
   }
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) return null;
   const flat = parsed.flatMap((g: unknown): Entry[] => {
     if (Array.isArray(g)) return (g[1] as Entry[]) ?? []; // rustic 0.7: [[group, [snaps]]]
     const grouped = (g as { snapshots?: Entry[] }).snapshots; // rustic 0.11: [{group_key, snapshots}]
@@ -158,16 +161,35 @@ export function parseSnapshots(text: string): Snapshot[] {
     }));
 }
 
-export async function listSnapshots(paths: Paths): Promise<Snapshot[]> {
+export interface SnapshotList {
+  ok: boolean;
+  snapshots: Snapshot[];
+  detail?: string;
+}
+
+/** 读不出列表（没密码、rustic 报错、输出看不懂）和「列表是空的」不能是同一个答案。 */
+export async function listSnapshots(paths: Paths): Promise<SnapshotList> {
   const password = readPassword(paths.root);
-  if (!password) return [];
+  if (!password) {
+    return { ok: false, snapshots: [], detail: "没有密码：secrets/rustic.env 里没有 RUSTIC_PASSWORD" };
+  }
   const result = await run(
     [...baseArgs(backupRepo(paths)), "snapshots", "--json"],
     { RUSTIC_PASSWORD: password },
     60_000,
   );
-  if (result.code !== 0) return [];
-  return parseSnapshots(result.stdout);
+  if (result.code !== 0) {
+    return {
+      ok: false,
+      snapshots: [],
+      detail: `rustic 退出 ${result.code}：${result.stderr.trim().slice(0, 200)}`,
+    };
+  }
+  const snapshots = parseSnapshots(result.stdout);
+  if (snapshots === null) {
+    return { ok: false, snapshots: [], detail: "看不懂 rustic 的快照列表输出" };
+  }
+  return { ok: true, snapshots };
 }
 
 export interface BackupOptions {
@@ -264,8 +286,9 @@ export async function restore(o: RestoreOptions): Promise<{ ok: boolean; detail:
 
   let id = o.snapshot;
   if (!id) {
-    const snapshots = await listSnapshots(o.paths);
-    id = snapshots[snapshots.length - 1]?.id;
+    const list = await listSnapshots(o.paths);
+    if (!list.ok) return { ok: false, detail: `读不出快照列表：${list.detail ?? "?"}` };
+    id = list.snapshots[list.snapshots.length - 1]?.id;
     if (!id) return { ok: false, detail: "没有快照" };
   }
 

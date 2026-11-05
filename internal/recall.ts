@@ -58,6 +58,20 @@ function firstLine(text: string): string {
   return line.trim().slice(0, LINE);
 }
 
+/**
+ * Arrays in the book are JSON written by other processes (mail ingest, the gateway, pi
+ * itself), so their elements are `unknown`, not the shape a reader expects. A null
+ * element used to reach `a.id` / `b.type` and throw, taking the whole recall / open
+ * query down — and those are tool calls the model makes every round. Keep only
+ * well-formed object entries; callers still check each field's own type.
+ */
+function sanitizeArray(raw: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (x): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x),
+  );
+}
+
 /** A discarded entry stays here: the book records that it happened, not only what is left. */
 function journalItems(p: Paths): Item[] {
   const dirs = [p.journal, p.journalDiscarded];
@@ -116,11 +130,11 @@ function mailItems(p: Paths): Item[] {
         header: `${from} · ${subject}`,
         body: [
           typeof raw.text === "string" ? raw.text : "",
-          ...(Array.isArray(raw.attachments)
-            ? (raw.attachments as { id?: unknown; name?: unknown; note?: unknown }[]).map((a) =>
-                typeof a.id === "string" ? `附件 ${a.id}：${typeof a.name === "string" ? a.name : "文件"}` : `附件：${String(a.note ?? "没取")}`,
-              )
-            : []),
+          ...sanitizeArray(raw.attachments).map((a) =>
+            typeof a.id === "string"
+              ? `附件 ${a.id}：${typeof a.name === "string" ? a.name : "文件"}`
+              : `附件：${typeof a.note === "string" ? a.note : "没取"}`,
+          ),
         ]
           .filter((l) => l !== "")
           .join("\n"),
@@ -221,7 +235,7 @@ function render(lines: string[]): string {
     const content = rec.message?.content;
     if (typeof content === "string") parts.push(content);
     else if (Array.isArray(content)) {
-      for (const b of content as Record<string, unknown>[]) {
+      for (const b of sanitizeArray(content)) {
         if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
         else if (b.type === "toolCall" && typeof b.name === "string") parts.push(`[${b.name}]`);
       }
@@ -400,8 +414,14 @@ export function openText(p: Paths, id: string, offset: number): OpenResult {
   const page = item.body.slice(offset, offset + PAGE);
   const rest = item.body.length - offset - page.length;
   const out = [`${item.id}  ${item.source}  ${stamp(item.at)}`, ""];
-  out.push(page === "" ? "（这一件没有正文）" : page);
-  if (rest > 0) out.push("", `（还有 ${rest} 字，offset=${offset + page.length} 接着读）`);
+  // Asking to continue past the end used to give an empty page with the confusing
+  // "这一件没有正文": it is not empty, the reader has simply run off the end of it.
+  if (offset > 0 && offset >= item.body.length) {
+    out.push(`这一件只有 ${item.body.length} 字，offset=${offset} 已经越过末尾了，没有更多内容。`);
+  } else {
+    out.push(page === "" ? "（这一件没有正文）" : page);
+    if (rest > 0) out.push("", `（还有 ${rest} 字，offset=${offset + page.length} 接着读）`);
+  }
   if (item.source === "mail") {
     const had = readJson<unknown>(p.mailRead, []);
     const before = new Set(Array.isArray(had) ? had.filter((x): x is string => typeof x === "string") : []);

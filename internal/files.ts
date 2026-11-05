@@ -27,23 +27,31 @@ export function filesUsage(dir: string): Usage {
   }
   let bytes = 0;
   let oldestMs: number | null = null;
+  let count = 0;
   for (const name of names) {
     try {
       const s = statSync(join(dir, name));
       if (!s.isFile()) continue;
+      // Count what was actually weighed. A stray directory in files/ used to appear
+      // in `count` but not in `bytes`, so the page said "N 个文件" over N-1 files.
+      count += 1;
       bytes += s.size;
       if (oldestMs === null || s.mtimeMs < oldestMs) oldestMs = s.mtimeMs;
     } catch {
       // a file that vanished is not an error
     }
   }
-  return { count: names.length, bytes, oldestMs };
+  return { count, bytes, oldestMs };
 }
 
 /** A path it named: only ever a bare name inside the directory, never a way out. */
 export function bareName(given: string): string | null {
   const trimmed = given.trim().replace(/^\/files\//, "");
-  if (trimmed === "" || trimmed.includes("/") || trimmed.includes("..")) return null;
+  // Only a separator can walk out of this directory. Rejecting every name that merely
+  // CONTAINS ".." also refused perfectly ordinary attachments (`report..pdf`), and
+  // `forget` then silently left them on disk while the page said it had deleted them.
+  if (trimmed === "" || trimmed === "." || trimmed === "..") return null;
+  if (trimmed.includes("/") || trimmed.includes("\\")) return null;
   return trimmed;
 }
 
@@ -51,6 +59,9 @@ export interface PruneResult {
   removed: number;
   /** Age of the oldest thing removed, so the page can say how old it was. */
   oldestRemovedMs: number | null;
+  /** Bytes the directory holds once the rule has run. A preview cannot weigh a
+   *  directory it did not empty, so it uses this instead of re-reading the disk. */
+  bytesLeft: number;
 }
 
 /**
@@ -75,7 +86,7 @@ export function pruneFiles(
   try {
     names = readdirSync(dir).filter((f) => !f.startsWith(".") && !exclude.has(f));
   } catch {
-    return { removed: 0, oldestRemovedMs: null };
+    return { removed: 0, oldestRemovedMs: null, bytesLeft: 0 };
   }
   const entries = names
     .map((name) => {
@@ -111,7 +122,7 @@ export function pruneFiles(
       // a file that would not go is retried next waking
     }
   }
-  return { removed, oldestRemovedMs };
+  return { removed, oldestRemovedMs, bytesLeft: total };
 }
 
 /**

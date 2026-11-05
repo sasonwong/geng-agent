@@ -168,3 +168,13 @@ export function readSaid(data: string, chat: number, limit: number): Transcript 
   }
   return { total: all.length, bytes, tail: all.slice(-limit) };
 }
+
+/**
+ * Whether the transcript for a chat already carries a line with this id. The gateway
+ * uses it to dedup redelivery: a message recorded once must not be handed over twice
+ * just because an outbox item was replayed.
+ */
+export function saidHasId(data: string, chat: number, id: string): boolean {
+  const t = readSaid(data, chat, Number.POSITIVE_INFINITY);
+  return t !== null && t.tail.some((l) => l.id === id);
+}

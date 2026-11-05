@@ -8,7 +8,7 @@
  * The socket is mounted read-only into the container, so a tool cannot replace it, and
  * a host-side process is the only thing on the other end.
  */
-import { createWriteStream, rmSync } from "node:fs";
+import { createWriteStream, renameSync, rmSync } from "node:fs";
 import { request } from "node:http";
 
 export interface UdsReply {
@@ -97,18 +97,40 @@ export function getToFile(
   return new Promise((resolve, reject) => {
     // postJson has a deadline; this one did not. A host that stopped answering left the
     // download tool hanging until the daemon's wall-clock timeout killed the whole round.
+    // Stream into a sibling part file first: a body that stops halfway used to leave a
+    // half-written file at `dest` that looked whole and was later sent out as the document.
+    // And a failed re-download must never delete the good file already at `dest`.
+    const part = `${dest}.geng-part-${process.pid}`;
     let settled = false;
     const once = (fn: () => void): void => {
       if (settled) return;
       settled = true;
       fn();
     };
-    // Nothing usable was written if the stream broke: a half file at `dest` would later
-    // be sent out as if it were the attachment.
-    const discard = (err: Error): void => {
-      rmSync(dest, { force: true });
+    // Only the part file is ever removed. `force` makes a missing part a no-op; the
+    // try/catch is for the moment the fd is still open and Windows refuses the unlink —
+    // the `close` listener below retries once the handle is released.
+    const cleanup = (): void => {
+      try {
+        rmSync(part, { force: true });
+      } catch {
+        // 等 close 再清；实在不行，下一轮下载前的 cleanup() 会兜底
+      }
+    };
+    let out: ReturnType<typeof createWriteStream> | null = null;
+    // Every way the transfer can break goes through here, and none of them touches `dest`.
+    const fail = (err: Error): void => {
+      if (settled) return;
+      if (out !== null) {
+        // 句柄释放后再清一次：fd 还开着时 Windows 的 rmSync 会撞上 EBUSY
+        out.once("close", cleanup);
+        out.destroy();
+      }
+      cleanup();
       once(() => reject(err));
     };
+    // A part left by a process killed mid-write must not be appended to.
+    cleanup();
     const req = request(
       { socketPath, path, method: "GET", signal: AbortSignal.timeout(timeoutMs) },
       (res) => {
@@ -119,20 +141,30 @@ export function getToFile(
             body += c;
           });
           res.on("end", () => once(() => reject(new Error(`取不到：${body.slice(0, 300)}`))));
-          res.on("error", (err) => discard(err));
+          res.on("error", fail);
+          res.on("aborted", () => fail(new Error("响应中断")));
           return;
         }
-        const out = createWriteStream(dest);
-        res.pipe(out);
-        out.on("finish", () => once(() => resolve({ status: 200, bytes: out.bytesWritten })));
-        out.on("error", discard);
-        res.on("error", (err) => {
-          out.destroy();
-          discard(err);
+        const stream = createWriteStream(part);
+        out = stream;
+        res.on("error", fail);
+        res.on("aborted", () => fail(new Error("响应中断")));
+        out.on("error", fail);
+        out.on("finish", () => {
+          // 已经失败就别把一个半截的 part 提升成 dest。
+          if (settled) return;
+          try {
+            renameSync(part, dest);
+          } catch (err) {
+            fail(err as Error);
+            return;
+          }
+          once(() => resolve({ status: 200, bytes: stream.bytesWritten }));
         });
+        res.pipe(stream);
       },
     );
-    req.on("error", discard);
+    req.on("error", fail);
     req.end();
   });
 }

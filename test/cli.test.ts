@@ -76,3 +76,28 @@ test("the same two commands with a name still work", async () => {
   assert.equal(bots.code, 0, bots.out);
   assert.deepEqual(readdirSync(join(r, "secrets")).filter((f) => f === "bots.json"), ["bots.json"]);
 });
+
+test("--chat abc 和 --allow abc 都被拒绝，不写坏 bots.json", async () => {
+  const r = root();
+  const botLine = "1:not-a-bot\n";
+  for (const extra of [
+    ["--chat", "abc"],
+    ["--allow", "abc"],
+  ]) {
+    const out = await run(["bots", "add", "alice", "--root", r, "--token-stdin", ...extra], botLine);
+    // Number("abc") 是 NaN：旧实现把 allow 过滤成空表、把 chat 写成 null，
+    // bots.json 照样落盘，谁也叫不醒它。
+    assert.equal(out.code, 2, `${extra.join(" ")}：${out.out}`);
+    assert.match(out.out, /数字 id/);
+  }
+  assert.equal(existsSync(join(r, "secrets", "bots.json")), false, "打错 id 不该写进 bots.json");
+});
+
+test("backup --list 在快照读不出时返回 1，而不是说没有快照", async () => {
+  const r = root();
+  const out = await run(["backup", "alice", "--list", "--root", r]);
+  // 没有 rustic.env：listSnapshots 返回 ok:false。旧实现把它和空列表都当成「还没拍过」，
+  // 打印「没有快照」并返回 0，一个连不上的仓库看起来只是还没备份。
+  assert.equal(out.code, 1, out.out);
+  assert.match(out.out, /读不出快照列表/);
+});

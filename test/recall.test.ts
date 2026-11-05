@@ -135,3 +135,53 @@ test("a discarded entry is still listed, and says it no longer counts", () => {
   // and `open` still reaches it, so "what did I say and why did I take it back" is answerable
   assert.match(openText(p, "J20260303-1", 0).text, /不算/);
 });
+
+test("mail 的 attachments 里有 null 元素，recall 与 open 都不崩", () => {
+  const p = fixture();
+  mkdirSync(p.mail, { recursive: true });
+  // 别的进程写进来的数组元素是 unknown：null 以前被送到 a.id 上抛 TypeError，
+  // 整次 recall / open 查询（模型每轮都调）就这么没了。
+  writeFileSync(
+    join(p.mail, "m1.json"),
+    JSON.stringify({
+      id: "E1",
+      at: "2026-03-02T07:00:00Z",
+      from: "a@example.invalid",
+      subject: "带附件",
+      text: "正文",
+      attachments: [null, 42, "坏数据"],
+    }),
+  );
+  assert.match(recallText(p, { sources: ["mail"] }), /E1/);
+  assert.match(openText(p, "E1", 0).text, /正文/);
+});
+
+test("session 里 content 为 null 或数组含 null 元素，recall 都不崩", () => {
+  const p = fixture();
+  const dir = join(p.sessionDir, "--proj-x");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "session-1.jsonl"),
+    [
+      // 某个 pi 版本会给 content 写 null：整条 JSONL 字段不能是 iterable
+      JSON.stringify({ message: { role: "user", content: null } }),
+      // 数组里混进一个 null 元素，旧的 for…of 会读它 .type 而抛
+      JSON.stringify({
+        message: { role: "assistant", content: [null, { type: "text", text: "你好" }] },
+      }),
+    ].join("\n") + "\n",
+  );
+  assert.match(recallText(p, { sources: ["sessions"], query: "你好" }), /R1[\s\S]*你好/);
+});
+
+test("offset 越过末尾时说清有多长，而不是给一页空白", () => {
+  const p = fixture();
+  mkdirSync(p.journal, { recursive: true });
+  writeFileSync(join(p.journal, "J20260302-1.md"), "今天很安静"); // 5 字
+  const r = openText(p, "J20260302-1", 9_999);
+  assert.equal(r.found, true);
+  // 旧代码给空页还说「这一件没有正文」，读的人以为它是空的
+  assert.match(r.text, /只有 5 字/);
+  assert.match(r.text, /越过末尾/);
+  assert.doesNotMatch(r.text, /这一件没有正文/);
+});

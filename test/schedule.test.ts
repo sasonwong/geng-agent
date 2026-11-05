@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alarmSpent, knockFloorMs, knockable, parseAfter, readWaiting } from "../internal/schedule.ts";
+import { alarmSpent, formatDuration, knockFloorMs, knockable, parseAfter, readWaiting } from "../internal/schedule.ts";
 import { planFor } from "../internal/escalation.ts";
 
 function tmpFile(content: string): string {
@@ -89,4 +89,33 @@ test("the knock floor never goes backwards as the ladder climbs", () => {
   }
   // the parked rung has no timer behind it, so it must be the longest wait, not the shortest
   assert.ok((floors[3] as number) > (floors[2] as number), "level 4 is parked: backoff is 0");
+});
+
+test("formatDuration 对 NaN／无穷／负值也完备，不往唤醒纸里写 NaN", () => {
+  // meta 里一个 "3"+"1" 的手拼字段会把 NaN 喂进来；旧代码 Math.max(0, NaN)
+  // 留着 NaN，最后落到小时分支，唤醒纸上印出「NaNh」。
+  assert.equal(formatDuration(Number.NaN), "未知");
+  assert.equal(formatDuration(Number.POSITIVE_INFINITY), "未知");
+  assert.equal(formatDuration(Number.NEGATIVE_INFINITY), "未知");
+  assert.equal(formatDuration(-1), "0s");
+  assert.equal(formatDuration(-60_000), "0s");
+  assert.doesNotMatch(formatDuration(Number.NaN), /NaN/);
+  // 正常值一个都不能被这次改动碰坏
+  assert.equal(formatDuration(0), "0s");
+  assert.equal(formatDuration(45_000), "45s");
+  assert.equal(formatDuration(120_000), "2m");
+  assert.equal(formatDuration(7_200_000), "2.0h");
+});
+
+test("parseAfter 不把 NaN、无穷、null 和 400 位数字当闹钟", () => {
+  // 数字分支用 Number.isFinite 挡住：这几样都是 number，却永远不会到点。
+  assert.equal(parseAfter(Number.NaN), null);
+  assert.equal(parseAfter(Number.POSITIVE_INFINITY), null);
+  assert.equal(parseAfter(Number.NEGATIVE_INFINITY), null);
+  // 一个 400 位的数字在 JS 里就是 Infinity，到 Infinity 的闹钟等于没有
+  assert.equal(parseAfter(1e400), null, "400 位数字溢出成 Infinity");
+  // null 在 readWaiting 的边界就被挡掉，根本到不了 parseAfter
+  assert.equal(readWaiting(tmpFile('{"wake":{"after":null}}')), null, "null 不是闹钟");
+  assert.equal(parseAfter("20 minutes"), null, "字符串写法必须带单位");
+  assert.equal(parseAfter(20), 20 * 60_000);
 });

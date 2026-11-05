@@ -90,3 +90,17 @@ test("a malformed proposal is set aside, not obeyed", () => {
   assert.equal(result?.rejected[0]?.key, "*");
   assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 30);
 });
+
+test("legal JSON that is not an object is answered, not silently applied", () => {
+  // `readJson` parses, so `42`, `"x"` and `[]` are not "invalid JSON". `getPath` and
+  // `flatten` both yield nothing for them: the file used to be archived as an applied
+  // proposal with an empty applied list and an empty rejected list — no answer at all.
+  for (const value of [42, "x", false, [], null]) {
+    const paths = fixture();
+    writeFileSync(join(paths.book, "policy.proposal.json"), JSON.stringify(value));
+    const result = applyProposal(paths);
+    assert.equal(result?.applied.length, 0);
+    assert.equal(result?.rejected[0]?.key, "*", `${JSON.stringify(value)} 被无声归档了`);
+    assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 30);
+  }
+});

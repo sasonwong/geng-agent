@@ -50,10 +50,12 @@ export class Tripwire {
     this.times = this.times.filter((t) => now - t < this.windowMs);
     this.times.push(now);
     this.said = this.said.filter((s) => now - s.at < this.windowMs);
-    for (const t of texts) {
-      this.said.push({ text: t, at: now });
-      if (this.said.length > 40) this.said.shift();
-    }
+    // The window is the bound. A fixed cap of 40 used to make a configured `repeat`
+    // above 40 unreachable — the buffer could never hold enough identical lines to
+    // reach the threshold, so that wire was silently dead. Entries are dropped by age
+    // above, and while paused nothing is recorded, so this list cannot grow without
+    // bound in a running gateway.
+    for (const t of texts) this.said.push({ text: t, at: now });
     if (this.times.length > this.rate) {
       this.pausedUntil = now + this.pauseMs;
       this.free = true;

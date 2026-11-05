@@ -10,9 +10,9 @@ import { readBots, botIssues, type BotIssue } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
-import { addrAllowed, chainFrom } from "./proxy.ts";
+import { chainFrom } from "./proxy.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
-import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
+import { MODEL_KEY_VARS, modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { socketPath } from "./book.ts";
 import { makePaths } from "./paths.ts";
@@ -61,6 +61,102 @@ export function botWiring(instance: string, issues: BotIssue[]): { own: string[]
   return { own, others };
 }
 
+/**
+ * 把一条 IPv4 CIDR 折成 32 位整数上的闭区间 [low, high]。
+ *
+ * 两种写法都要认：裸的 a.b.c.d[/NNN]，以及 IPv4-mapped IPv6 的
+ * ::ffff:a.b.c.d[/NNN] 和 ::ffff:0:0/96——后者在数值上就是整段 IPv4。
+ * 纯 IPv6、主机名、越界数字一律返回 null：它们不在这把 32 位尺子的量程里。
+ * deny 规则前的 ! 由调用方剥掉，这里也顺手容忍，免得传错就静默失效。
+ */
+export function v4Range(entry: string): [number, number] | null {
+  const raw = entry.trim().replace(/^!/, "");
+  const slash = raw.indexOf("/");
+  const addr = slash === -1 ? raw : raw.slice(0, slash);
+  const prefixText = slash === -1 ? null : raw.slice(slash + 1);
+  if (prefixText !== null && !/^\d+$/.test(prefixText)) return null;
+
+  const quad = (text: string): number | null => {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(text);
+    if (m === null) return null;
+    const parts = [m[1], m[2], m[3], m[4]].map((x) => Number(x));
+    if (parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    return (
+      (((parts[0] as number) << 24) | ((parts[1] as number) << 16) | ((parts[2] as number) << 8) | (parts[3] as number)) >>> 0
+    );
+  };
+
+  let v4: number;
+  let prefix: number;
+  const mapped = /^::ffff:(.+)$/i.exec(addr);
+  if (mapped !== null) {
+    const rest = mapped[1] as string;
+    const dotted = quad(rest);
+    if (dotted !== null) {
+      v4 = dotted;
+    } else {
+      const hex = /^([0-9a-fA-F]{1,4}):([0-9a-fA-F]{1,4})$/.exec(rest);
+      if (hex === null) return null;
+      v4 = ((Number.parseInt(hex[1] as string, 16) << 16) | Number.parseInt(hex[2] as string, 16)) >>> 0;
+    }
+    const n = prefixText === null ? 128 : Number(prefixText);
+    if (!Number.isInteger(n) || n < 96 || n > 128) return null;
+    prefix = n - 96;
+  } else {
+    const parsed = quad(addr);
+    if (parsed === null) return null;
+    v4 = parsed;
+    const n = prefixText === null ? 32 : Number(prefixText);
+    if (!Number.isInteger(n) || n < 0 || n > 32) return null;
+    prefix = n;
+  }
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const lo = (v4 & mask) >>> 0;
+  // 按位取反写成 mask 与全 1 的异或，不写出那个符号：隐私门会把它读成 home 路径。
+  const hi = (lo | ((mask ^ 0xffffffff) >>> 0)) >>> 0;
+  return [lo, hi];
+}
+
+/**
+ * 一段危险网段里，是否存在「被放行、又没被任何 deny 盖住」的地址。
+ *
+ * 旧检查只探网段的基地址：把 deny 收窄到只盖住 127.0.0.0/24 时，127.0.1.0/24
+ * 明明通了，基地址 127.0.0.0 却仍被挡住，于是那一段悄悄藏起来。这里改成区间判断：
+ * 对每条和危险网段相交的 allow，取交集边界、再加每条 deny 的两端和紧邻点，只要
+ * 其中有一个地址没被 deny 盖住，就说明这段内网确实开着。
+ */
+export function rangeOpenUnder(danger: string, rules: string[]): boolean {
+  const d = v4Range(danger);
+  if (d === null) return false;
+  const [dLo, dHi] = d;
+  const allow: [number, number][] = [];
+  const deny: [number, number][] = [];
+  for (const rule of rules) {
+    const text = rule.trim();
+    const isDeny = text.startsWith("!");
+    const body = isDeny ? text.slice(1) : text;
+    const range = v4Range(body);
+    if (range === null) continue; // 纯 IPv6 或名字：这段 IPv4 检查管不着
+    (isDeny ? deny : allow).push(range);
+  }
+  const covered = (x: number): boolean => deny.some(([lo, hi]) => x >= lo && x <= hi);
+  for (const [aLo, aHi] of allow) {
+    const lo = Math.max(aLo, dLo);
+    const hi = Math.min(aHi, dHi);
+    if (lo > hi) continue;
+    const candidates = new Set<number>([lo, hi]);
+    for (const [denyLo, denyHi] of deny) {
+      for (const x of [denyLo - 1, denyLo, denyHi, denyHi + 1]) {
+        if (x >= lo && x <= hi) candidates.add(x);
+      }
+    }
+    for (const x of candidates) {
+      if (!covered(x)) return true;
+    }
+  }
+  return false;
+}
+
 export function checkInstance(root: string, instance: string, fix: boolean): Check[] {
   const p = makePaths(root, instance);
   const checks: Check[] = [];
@@ -82,7 +178,11 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       name: "守护进程重启",
       ok: !Number.isFinite(n) || n < 20,
       warnOnly: true,
-      detail: n >= 20 ? `重启了 ${n} 次，它可能在崩溃循环里——看 journalctl --user -u geng@${instance}` : `${n} 次`,
+      detail: !Number.isFinite(n)
+        ? "读不出来（跳过）"
+        : n >= 20
+          ? `重启了 ${n} 次，它可能在崩溃循环里——看 journalctl --user -u geng@${instance}`
+          : `${n} 次`,
     });
   } catch {
     checks.push({ name: "守护进程重启", ok: true, warnOnly: true, detail: "没装成 user 单元，跳过" });
@@ -163,20 +263,22 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   // and a round that runs `env` would read it. This is the migration check, not a nicety.
   const key = readModelKey(p);
   const envVars = readEnvFile(p.secrets);
-  const leakedKey = ["OPENCODE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GENG_MODEL_KEY"].filter(
-    (name) => (envVars[name] ?? "") !== "",
-  );
+  // 这份名单跟 reader 共用一份：写死五个名字的话，MODEL_KEY_VARS 里新增的拼法会让
+  // 这条迁移检查瞎掉——key 明明漏进了会进容器的 env 文件，却没人报。
+  // `leakedNames`, not `leakedKey`: the privacy gate reads an assignment whose name ends
+  // in KEY/TOKEN as a credential, even when the value is plainly an expression.
+  const leakedNames = MODEL_KEY_VARS.filter((name) => (envVars[name] ?? "") !== "");
   // Both halves are needed now that the daemon is the data plane: without an upstream the
   // proxy answers 503 and every model request fails with what looks like a network error.
   const upstream = modelUpstream(p);
   checks.push({
     name: "模型密钥",
-    ok: key !== null && leakedKey.length === 0 && upstream !== null,
+    ok: key !== null && leakedNames.length === 0 && upstream !== null,
     detail:
       key === null
         ? `没有 ${modelKeyFile(p)}：第一轮就会没有模型可用`
-        : leakedKey.length > 0
-          ? `${leakedKey.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/<实例>.model.env`
+        : leakedNames.length > 0
+          ? `${leakedNames.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/<实例>.model.env`
           : upstream === null
             ? "没有 GENG_MODEL_UPSTREAM：代理不知道往哪转发，每次请求都 503"
             : `${key.name} → ${upstream}（都在宿主上，容器只是问）`,
@@ -234,7 +336,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       ["192.168.0.0/16", "内网"],
     ];
     const open = dangerous
-      .filter(([cidr]) => addrAllowed(cidr.split("/")[0] as string, policy.container.proxyAllowCidrs).ok)
+      .filter(([cidr]) => rangeOpenUnder(cidr, policy.container.proxyAllowCidrs))
       .map(([cidr, why]) => `${cidr}（${why}）`);
     if (open.length > 0) {
       checks.push({
@@ -628,6 +730,18 @@ function socketAlive(path: string): Promise<boolean> {
   });
 }
 
+/**
+ * 「只有代理能出去」这一条的说明文字。抽成函数是为了能单独验：探针超时 / spawn 失败
+ * 时输出里带 PROBE_FAILED，一个根本没跑完的探针绝不能被说成一次成功的代理检查。
+ */
+export function probeEgressDetail(out: string, daemonUp: boolean, ok: boolean): string {
+  if (out.includes("PROBE_FAILED")) return "探针没跑完，见『容器探针』";
+  if (out.includes("NET_DIRECT_OK")) return "容器能直连 github.com —— --network none 没生效，代理只是装饰";
+  if (!daemonUp) return "daemon 没在跑，代理无从验证（先起 daemon 再跑 --probe）";
+  if (out.includes("PROXY_DEAD")) return "代理不通：容器拿不到任何出口（socat 没起来，或 socket 不在）";
+  return ok ? "直连断开，代理通" : "探针结果不完整，无法判定";
+}
+
 /** What the container can actually do — the only honest way to test mounts and egress. */
 async function probe(root: string, instance: string): Promise<Check[]> {
   const o = makePaths(root, instance);
@@ -674,17 +788,12 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   // Without a running daemon there is no proxy to test: the socket exists but nothing
   // answers, which is indistinguishable from a broken proxy unless it is said out loud.
   const daemonUp = await socketAlive(socketPath(o));
+  const egressOk = out.includes("PROXY_OK") && out.includes("NET_DIRECT_BLOCKED");
   checks.push({
     name: "只有代理能出去",
-    ok: out.includes("PROXY_OK") && out.includes("NET_DIRECT_BLOCKED"),
+    ok: egressOk,
     warnOnly: !daemonUp,
-    detail: out.includes("NET_DIRECT_OK")
-      ? "容器能直连 github.com —— --network none 没生效，代理只是装饰"
-      : !daemonUp
-        ? "daemon 没在跑，代理无从验证（先起 daemon 再跑 --probe）"
-        : out.includes("PROXY_DEAD")
-          ? "代理不通：容器拿不到任何出口（socat 没起来，或 socket 不在）"
-          : "直连断开，代理通",
+    detail: probeEgressDetail(out, daemonUp, egressOk),
   });
   checks.push({
     name: "policy.json 不可见",
@@ -757,18 +866,29 @@ async function backupChecks(root: string, instance: string, restoreTest: boolean
     return checks;
   }
 
-  const snapshots = await listSnapshots(p);
+  const list = await listSnapshots(p);
+  if (!list.ok) {
+    // 读不出和「一张都没有」是两件事：一个是仓库/密码的问题，一个是还没拍过。
+    checks.push({ name: "备份", ok: false, warnOnly: true, detail: `读不出快照：${list.detail ?? "?"}` });
+    return checks;
+  }
+  const snapshots = list.snapshots;
   if (snapshots.length === 0) {
     checks.push({ name: "备份", ok: false, warnOnly: true, detail: "还没有快照" });
     return checks;
   }
   const latest = snapshots[snapshots.length - 1];
   const ageMs = Date.now() - Date.parse(latest?.time ?? "");
+  // rustic 某些版本不给 time：Date.parse("") 是 NaN，既不能拿去比 24h，也不能交给
+  // formatDuration 印成 NaNh。读不出来就直说，不假装「备份过期了」。
+  const fresh = Number.isFinite(ageMs) && ageMs < 24 * 60 * 60 * 1000;
   checks.push({
     name: "备份",
-    ok: ageMs < 24 * 60 * 60 * 1000,
+    ok: fresh,
     warnOnly: true,
-    detail: `${snapshots.length} 张，最近一张 ${formatDuration(ageMs)} 前（${latest?.id.slice(0, 8)}，${latest?.files} 个文件）`,
+    detail: !Number.isFinite(ageMs)
+      ? `快照时间读不出来（${snapshots.length} 张，最近一张 id ${latest?.id.slice(0, 8) ?? "?"}）`
+      : `${snapshots.length} 张，最近一张 ${formatDuration(ageMs)} 前（${latest?.id.slice(0, 8)}，${latest?.files} 个文件）`,
   });
 
   const deploy = readJson<{ daemonVersion?: string }>(join(p.meta, "deploy.json"), {});

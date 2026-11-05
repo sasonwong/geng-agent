@@ -3,6 +3,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "n
 import { dirname, join } from "node:path";
 import { makePaths, requiredDirs } from "./paths.ts";
 import { readJson } from "./fs.ts";
+import { readEnvFile, writeEnvValue } from "./secret.ts";
+import { MODEL_KEY_VARS } from "./model.ts";
 
 // Everything in this file is `--env-file` into the container, so nothing secret goes here.
 // It holds only what the container is allowed to see: the two GitHub App ids.
@@ -89,6 +91,22 @@ export function initInstance(root: string, instance: string, opts: InitOptions =
     writeFileSync(modelEnv, modelEnvText(opts.modelKey ?? "", opts.upstream ?? DEFAULT_UPSTREAM), {
       mode: 0o600,
     });
+  } else if (opts.modelKey || opts.upstream) {
+    // CLI 让操作者「export 之后重跑 init」。只在文件「不存在」时写的话，重跑永远报
+    // 成功，却把新的 key / upstream 丢在一边——而 modelUpstream() 读的正是这个文件。
+    if (opts.modelKey) {
+      const env = readEnvFile(modelEnv);
+      // 复用文件里已经在用的那个 key 变量名，别给同一份配置添出第二种拼法。
+      const keyName =
+        MODEL_KEY_VARS.find((n) => (env[n] ?? "") !== "") ??
+        MODEL_KEY_VARS.find((n) => Object.prototype.hasOwnProperty.call(env, n)) ??
+        "OPENCODE_API_KEY";
+      for (const name of MODEL_KEY_VARS) {
+        if (name !== keyName && (env[name] ?? "") !== "") writeEnvValue(modelEnv, name, "");
+      }
+      writeEnvValue(modelEnv, keyName, opts.modelKey);
+    }
+    if (opts.upstream) writeEnvValue(modelEnv, "GENG_MODEL_UPSTREAM", opts.upstream);
   }
   chmodSync(modelEnv, 0o600);
 

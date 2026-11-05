@@ -1,5 +1,6 @@
 import { ExpectedError } from "./errors.ts";
 import { readText } from "./fs.ts";
+import { chainFrom, validCidr } from "./proxy.ts";
 
 export interface Policy {
   schema: number;
@@ -87,6 +88,14 @@ function num(v: unknown, path: string, min: number): number {
   return v;
 }
 
+/** 次数和进程上限是整数：一个 2.5 次的「卡住」判定、512.5 个进程都读不出意思。 */
+function int(v: unknown, path: string, min: number): number {
+  if (typeof v !== "number" || !Number.isInteger(v) || v < min) {
+    throw new ExpectedError(`policy: ${path} must be an integer >= ${min}`);
+  }
+  return v;
+}
+
 function str(v: unknown, path: string): string {
   if (typeof v !== "string" || v.length === 0) {
     throw new ExpectedError(`policy: ${path} must be a non-empty string`);
@@ -143,7 +152,7 @@ export function loadPolicy(file: string): Policy {
       timeoutSec: num(cycle.timeoutSec, "cycle.timeoutSec", 10),
       defaultWakeMinutes: num(cycle.defaultWakeMinutes, "cycle.defaultWakeMinutes", 1),
       minWakeMinutes: num(cycle.minWakeMinutes, "cycle.minWakeMinutes", 1),
-      repeatThreshold: num(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
+      repeatThreshold: int(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
     backup: { enabled: p.backup?.enabled !== false },
     timezone: timezoneOf(p.timezone ?? d.timezone, "timezone"),
@@ -155,12 +164,17 @@ export function loadPolicy(file: string): Policy {
       image: str(container.image, "container.image"),
       memory: str(container.memory, "container.memory"),
       cpus: str(container.cpus, "container.cpus"),
-      pidsLimit: num(container.pidsLimit, "container.pidsLimit", 16),
+      pidsLimit: int(container.pidsLimit, "container.pidsLimit", 16),
       proxyChain: (() => {
         const raw = typeof container.proxyChain === "string" ? container.proxyChain.trim() : d.container.proxyChain;
         if (raw === "" || raw === "auto" || raw === "off") return raw === "" ? "auto" : raw;
         if (!/^(https?|socks5h?):\/\//.test(raw)) {
           throw new ExpectedError(`policy: container.proxyChain 要是 auto、off 或 http(s)/socks5 URL，收到 ${raw}`);
+        }
+        // 正则只认协议头；一个能过正则、却让 chainFrom 读不懂的 URL（端口越界、
+        // 坏的 % 转义）会被运行时当成直连，操作者配的代理就这么被无声忽略。
+        if (chainFrom(raw) === null) {
+          throw new ExpectedError(`policy: container.proxyChain 是 URL，但运行时读不懂：${raw}`);
         }
         return raw;
       })(),
@@ -184,11 +198,9 @@ export function loadPolicy(file: string): Policy {
               return stringList(container.proxyAllowCidrs, "container.proxyAllowCidrs")
                 .map((entry) => {
                   const body = entry.startsWith("!") ? entry.slice(1) : entry;
-                  // A name here would never match an address, and the silence would look
-                  // like the proxy ignoring the rule.
-                  // a bare word (no slash, no dot, no colon) is a host name, not an address
-                  const bare = !body.includes("/") && !body.includes(".") && !body.includes(":");
-                  if (bare || !/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(body)) {
+                  // 用真正解析地址的那一把尺子量：名字、越界的八位数、过大的前缀都会
+                  // 在这里被挡住，而不是等到代理「好像忽略了这条规则」才发现。
+                  if (!validCidr(body)) {
                     throw new ExpectedError(`policy: container.proxyAllowCidrs 只收网段或地址，收到 ${entry}`);
                   }
                   return entry;

@@ -46,3 +46,50 @@ test("a live pid that is not ours really does hold the lock", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("EPERM 不是空锁：别的用户的进程不能读成没人在", () => {
+  const dir = mkdtempSync(join(tmpdir(), "geng-guard-eperm-"));
+  const file = join(dir, "daemon.pid");
+  const pid = 424242;
+  writeFileSync(file, JSON.stringify({ pid }));
+  const eperm = Object.assign(new Error("operation not permitted"), { code: "EPERM" });
+  // 这个 pid 存在，但不属于当前用户：kill(pid, 0) 抛 EPERM，而不是 ESRCH。
+  const probe = () => { throw eperm; };
+  try {
+    assert.equal(pidLockHeld(file, probe), true, "EPERM 必须算锁还被占着");
+    assert.throws(() => acquirePidLock(file, probe), /另一个 daemon 正在跑/, "第二个 daemon 必须被挡住");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("只有 ESRCH 才说明真的没人，其它错误一律当作还占着锁", () => {
+  const dir = mkdtempSync(join(tmpdir(), "geng-guard-errors-"));
+  const file = join(dir, "daemon.pid");
+  writeFileSync(file, JSON.stringify({ pid: 424243 }));
+  const esrch = Object.assign(new Error("no such process"), { code: "ESRCH" });
+  const unknown = Object.assign(new Error("unknown"), { code: "EUNKNOWN" });
+  try {
+    assert.equal(pidLockHeld(file, () => { throw esrch; }), false, "ESRCH 说明进程真的没了");
+    assert.equal(pidLockHeld(file, () => { throw unknown; }), true, "未知错误不能读成没人");
+    assert.equal(pidLockHeld(file, () => {}), true, "探得到就是活着");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("非正 / 非安全整数的 pid 根本不会被拿去发信号", () => {
+  const dir = mkdtempSync(join(tmpdir(), "geng-guard-badpid-"));
+  const file = join(dir, "daemon.pid");
+  let probed = 0;
+  const probe = () => { probed++; };
+  try {
+    for (const pid of [0, -1, 1.5, 1e20]) {
+      writeFileSync(file, JSON.stringify({ pid }));
+      assert.equal(pidLockHeld(file, probe), false, `pid ${pid} 不算活着的 daemon`);
+    }
+    assert.equal(probed, 0, "kill(0, 0) 会探整个进程组：非法 pid 必须在发信号前挡掉");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { printStatus, spendSince } from "../internal/status.ts";
@@ -42,4 +42,41 @@ test("status counts open loops the way the page does: files, not the old JSON sh
     rmSync(root, { recursive: true, force: true });
   }
   assert.match(lines.join("\n"), /未闭合\s+1 件/);
+});
+
+test("快照列表读不出时 status 说「读不出」，不是笼统的「没有」", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = makePaths(root, "alice");
+  mkdirSync(p.openLoops, { recursive: true });
+  // 没有 secrets/rustic.env，也没有 RUSTIC_PASSWORD：listSnapshots 返回 ok:false。
+  // 旧实现把读不出和空列表都吞成 []，status 只说「没有（或 rustic 不可用）」。
+  const lines: string[] = [];
+  const old = console.log;
+  console.log = (s: string) => lines.push(s);
+  try {
+    await printStatus(root, "alice");
+  } finally {
+    console.log = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.match(lines.join("\n"), /快照\s+读不出（/);
+});
+
+test("session 文件在列出来之后消失，status 不崩", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = makePaths(root, "alice");
+  mkdirSync(p.sessionDir, { recursive: true });
+  // dangling symlink：readdirSync 会把它当 .jsonl 列出来，statSync 却抛 ENOENT，
+  // 正是「列出来之后被轮转/清理删掉」的形状。旧实现里整个 printStatus 会抛出去。
+  symlinkSync(join(p.sessionDir, "gone.jsonl"), join(p.sessionDir, "dangling.jsonl"), "file");
+  const lines: string[] = [];
+  const old = console.log;
+  console.log = (s: string) => lines.push(s);
+  try {
+    await printStatus(root, "alice");
+  } finally {
+    console.log = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.match(lines.join("\n"), /session\s+1 文件/, "列的那一件还在，只是按 0 字节算");
 });

@@ -62,8 +62,43 @@ export interface CutRecord {
   capMinutes?: number;
 }
 
+function finite(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * 盘上的 state.json 是输入，不是承诺：daemon 拿 wakings 做 + 1、拿 lastWakeMs 做
+ * 减法、把 lastSaid 直接拼进唤醒纸。老版本或一次手写留下的 "wakings": "3" 会让
+ * 3 + 1 变成 "31"，让 formatDuration 吃到 NaN。读的一侧把会进算术的字段收敛成
+ * 有限数（不是就丢掉）、lastSaid 收敛成字符串或 null；knockHold / env 这类嵌套
+ * 形状按 unknown 原样带过，不在这里重建。
+ */
 export function readMeta(paths: Paths): Meta {
-  return readJson<Meta>(join(paths.meta, "state.json"), {});
+  const raw = readJson<unknown>(join(paths.meta, "state.json"), {});
+  // 文件里若字面写着 null / 数组 / 标量，readJson 会原样返回（fallback 只在缺失或
+  // 解析失败时生效），随后读 .env / .wakings 就抛。先确认它是个普通对象。
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const obj = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...obj };
+  for (const key of ["stateSchema", "lastWakeMs", "wakings"] as const) {
+    const v = finite(obj[key]);
+    if (v === undefined) delete out[key];
+    else out[key] = v;
+  }
+  if (typeof obj.lastSaid !== "string" && obj.lastSaid !== null) delete out.lastSaid;
+  const cycle = obj.lastCycle;
+  if (cycle !== null && typeof cycle === "object" && !Array.isArray(cycle)) {
+    const c = { ...(cycle as Record<string, unknown>) };
+    for (const key of ["tools", "inbox", "touched"] as const) {
+      const v = finite(c[key]);
+      if (v === undefined) delete c[key];
+      else c[key] = v;
+    }
+    out.lastCycle = c;
+  } else {
+    delete out.lastCycle;
+  }
+  return out as unknown as Meta;
 }
 
 export function writeMeta(paths: Paths, meta: Meta): void {
@@ -72,10 +107,14 @@ export function writeMeta(paths: Paths, meta: Meta): void {
 }
 
 export function readWakes(paths: Paths, nowMs: number): number[] {
-  return readJson<number[]>(
-    join(paths.meta, "wakes.json"),
-    [],
-  ).filter((t) => nowMs - t < DAY_MS);
+  // readJson 的 fallback 只在文件缺失 / 解析失败时生效；内容是合法 JSON 但形状不对
+  // （null / {} / "oops" / 42）时会原样返回，.filter 不是函数，daemon 每轮醒来都崩。
+  const arr = readJson<unknown>(join(paths.meta, "wakes.json"), []);
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(
+    (t): t is number =>
+      typeof t === "number" && Number.isFinite(t) && nowMs - t >= 0 && nowMs - t < DAY_MS,
+  );
 }
 
 /**

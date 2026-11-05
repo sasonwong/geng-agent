@@ -58,3 +58,60 @@ test("a wrong type in an allow list is an error, not a silent empty list", () =>
   writeFileSync(file, JSON.stringify({ ...good, container: { ...container, proxyAllow: [] } }));
   assert.deepEqual(loadPolicy(file).container.proxyAllow, []);
 });
+
+test("次数和进程上限必须是整数，不是小数", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
+  const base = defaultPolicy() as unknown as Record<string, unknown>;
+  const cycle = base.cycle as Record<string, unknown>;
+  const container = base.container as Record<string, unknown>;
+
+  // 旧实现用 num()，2.5 次「卡住」判定、512.5 个进程都照单全收。
+  writeFileSync(file, JSON.stringify({ ...base, cycle: { ...cycle, repeatThreshold: 2.5 } }));
+  assert.throws(() => loadPolicy(file), /integer/, "2.5 次卡住判定要被挡住");
+  writeFileSync(file, JSON.stringify({ ...base, container: { ...container, pidsLimit: 512.5 } }));
+  assert.throws(() => loadPolicy(file), /integer/, "512.5 个进程要被挡住");
+
+  writeFileSync(
+    file,
+    JSON.stringify({ ...base, cycle: { ...cycle, repeatThreshold: 4 }, container: { ...container, pidsLimit: 256 } }),
+  );
+  assert.equal(loadPolicy(file).cycle.repeatThreshold, 4);
+  assert.equal(loadPolicy(file).container.pidsLimit, 256);
+});
+
+test("chainFrom 读不懂的 proxyChain 被拒绝，而不是悄悄直连", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
+  const base = defaultPolicy() as unknown as Record<string, unknown>;
+  const container = base.container as Record<string, unknown>;
+  // 端口越界：正则认得 http://，但 chainFrom() 返回 null。旧实现原样放行，操作者
+  // 配的代理就这么被无声忽略，daemon 自己直连。
+  writeFileSync(
+    file,
+    JSON.stringify({ ...base, container: { ...container, proxyChain: "http://proxy.example:99999" } }),
+  );
+  assert.throws(() => loadPolicy(file), /proxyChain/);
+  writeFileSync(
+    file,
+    JSON.stringify({ ...base, container: { ...container, proxyChain: "http://proxy.example:3128" } }),
+  );
+  assert.equal(loadPolicy(file).container.proxyChain, "http://proxy.example:3128");
+});
+
+test("proxyAllowCidrs 里一段垃圾地址被挡住，而不是永远匹配不上", () => {
+  const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
+  const base = defaultPolicy() as unknown as Record<string, unknown>;
+  const container = base.container as Record<string, unknown>;
+  for (const bad of ["999.999.999.999", "0.0.0.0/999", "!999.999.999.999"]) {
+    writeFileSync(
+      file,
+      JSON.stringify({ ...base, container: { ...container, proxyAllowCidrs: ["0.0.0.0/0", bad] } }),
+    );
+    // 旧的正则只量字符形状：越界的八位数、过大的前缀都混过来了。
+    assert.throws(() => loadPolicy(file), /proxyAllowCidrs/, `${bad} 要被挡住`);
+  }
+  writeFileSync(
+    file,
+    JSON.stringify({ ...base, container: { ...container, proxyAllowCidrs: ["0.0.0.0/0", "!127.0.0.0/8"] } }),
+  );
+  assert.deepEqual(loadPolicy(file).container.proxyAllowCidrs, ["0.0.0.0/0", "!127.0.0.0/8"]);
+});

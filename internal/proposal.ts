@@ -55,8 +55,12 @@ export function applyProposal(paths: Paths): ProposalResult | null {
   const applied: ProposalResult["applied"] = [];
   const rejected: ProposalResult["rejected"] = [];
 
-  if (!proposal) {
-    rejected.push({ key: "*", reason: "不是合法的 JSON" });
+  // `readJson` returns parsed JSON, not "an object or null": `42`, `"x"`, `false` and
+  // `[]` are all legal JSON. `getPath` and `flatten` quietly yield nothing for them, so
+  // they used to be archived as an applied proposal with an empty applied *and* an empty
+  // rejected list — the agent asked for a change and was told nothing at all happened.
+  if (proposal === null || typeof proposal !== "object" || Array.isArray(proposal)) {
+    rejected.push({ key: "*", reason: "提案必须是一个 JSON 对象" });
   } else {
     for (const [key, rule] of Object.entries(NEGOTIABLE)) {
       const proposed = getPath(proposal, key);

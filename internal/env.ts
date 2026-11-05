@@ -1,21 +1,13 @@
-import { spawn } from "node:child_process";
 import type { Policy } from "./policy.ts";
 import type { Env } from "./meta.ts";
+import { dockerRun } from "./docker.ts";
 
 /** The image the next cycle will actually run, by content id rather than by tag. */
-export function imageId(policy: Policy): Promise<string | null> {
-  return new Promise((resolve) => {
-    const p = spawn("docker", ["image", "inspect", "--format", "{{.Id}}", policy.container.image], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    let text = "";
-    p.stdout.setEncoding("utf8");
-    p.stdout.on("data", (c: string) => {
-      text += c;
-    });
-    p.on("error", () => resolve(null));
-    p.on("close", (code) => resolve(code === 0 ? text.trim() || null : null));
-  });
+export async function imageId(policy: Policy): Promise<string | null> {
+  // This runs while the wake packet is being assembled. A wedged docker daemon used to
+  // hold the whole waking open here, with no answer to the container and no log line.
+  const r = await dockerRun(["image", "inspect", "--format", "{{.Id}}", policy.container.image], true);
+  return r.code === 0 ? r.text.trim() || null : null;
 }
 
 /**

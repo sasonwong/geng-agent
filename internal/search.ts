@@ -186,6 +186,15 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
   };
 
   const server = createServer((req, res) => {
+    // 一个跑到一半断掉的请求（容器里 curl --max-time 到了）会在 req 上抛 error；没有
+    // 监听就是长驻网关里的未捕获异常，一次掉队的调用能把所有 bot 的搜索一起带走。
+    let failed = false;
+    req.on("error", (err) => {
+      failed = true;
+      log(`search ← 请求流断了：${(err as Error).message}`);
+    });
+    // 回信写到一半客户端没了，res 也会抛 error；这里只负责别让它变成未捕获异常。
+    res.on("error", () => {});
     const send = (status: number, body: unknown) => {
       const text = JSON.stringify(body);
       res.writeHead(status, { "content-type": "application/json" });
@@ -204,11 +213,13 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
     let over = false;
     req.setEncoding("utf8");
     req.on("data", (c: string) => {
-      if (over) return; // drain the rest; do not parse a truncated body
+      if (failed || over) return; // drain the rest; do not parse a truncated body
       body += c;
       if (body.length > 64 * 1024) over = true;
     });
     req.on("end", () => {
+      // 413 之后、或请求流已经断掉之后，绝不再把截断的 body 交给下游。
+      if (failed) return;
       // destroy() closes the socket under the answer, and leaves the client with a
       // connection reset instead of a reason. Answer once, on a whole stream.
       if (over) return send(413, { error: "请求体太大" });

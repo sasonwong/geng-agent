@@ -65,12 +65,19 @@ test("two instances actually get two different keys and upstreams", () => {
   assert.equal(modelUpstream(a), "https://alice.invalid/v1");
   assert.equal(modelUpstream(b), "https://bob.invalid/v1");
 
-  // init 是幂等的：再跑一次 bob 不能把 alice 的 key 顺手改掉，也不能覆盖已有值。
-  initInstance(r, "bob", { modelKey: ["ignored", "-key"].join(""), upstream: "https://other.invalid/v1" });
+  // CLI 让操作者「export 后重跑 init」来改一个填错的 key / upstream。旧实现只在
+  // model.env 不存在时写，重跑会报成功却什么都没改——reader 永远读着那把旧 key。
+  const freshKey = ["fresh-key-for-", "bob"].join("");
+  initInstance(r, "bob", { modelKey: freshKey, upstream: "https://other.invalid/v1" });
+  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: freshKey }, "重跑要真的换上新 key");
+  assert.equal(modelUpstream(b), "https://other.invalid/v1", "重跑要真的换上新 upstream");
+  // 但 bob 的重跑不能顺手改掉 alice
   assert.deepEqual(readModelKey(a), { name: "OPENCODE_API_KEY", key: aliceKey });
-  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: bobKey });
   assert.equal(modelUpstream(a), "https://alice.invalid/v1");
-  assert.equal(modelUpstream(b), "https://bob.invalid/v1");
+  // 不带新值重跑则保持不动（CLI 没 export key 时就是这条路径）
+  initInstance(r, "bob");
+  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: freshKey });
+  assert.equal(modelUpstream(b), "https://other.invalid/v1");
 });
 
 test("without flags the template's values survive, and the key file is still created", () => {

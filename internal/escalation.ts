@@ -24,14 +24,33 @@ export interface Plan {
 
 const FRESH: Escalation = { level: 0, streak: 0, symptom: null, detail: "", updatedAt: null };
 
+/** 计数只能是有限的非负安全整数：分数、负数、NaN 会掉进 planFor 的 default，
+ *  把实例悄悄踢下升级阶梯，或者在 daemon 里做成算术。 */
+function countOrZero(v: unknown): number {
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0;
+}
+
 export function loadEscalation(paths: Paths): Escalation {
-  const raw = readJson<Partial<Escalation>>(join(paths.meta, "escalation.json"), {});
+  // readJson 的 fallback 只在文件缺失 / 解析失败时生效；字面写着 null / 数组 / 标量时
+  // 会原样返回，raw.level 直接抛。daemon 在主循环之前就调它，一抛就是起不来。
+  const raw = readJson<unknown>(join(paths.meta, "escalation.json"), {});
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { ...FRESH };
+  // 盘上的文件是输入，不是承诺：恢复出来的快照、一次手写都可能带任意值。
+  const o = raw as Record<string, unknown>;
+  const level = Math.min(countOrZero(o.level), 4);
+  const streak = countOrZero(o.streak);
+  // symptom 必须是 SYMPTOM_LABEL 的键，不然 SYMPTOM_LABEL[e.symptom] 是 undefined，
+  // 唤醒纸会说「上一轮undefined」，timeoutNotice 也永远不响。
+  const symptom =
+    typeof o.symptom === "string" && Object.hasOwn(SYMPTOM_LABEL, o.symptom)
+      ? (o.symptom as Symptom)
+      : null;
   return {
-    level: typeof raw.level === "number" ? raw.level : 0,
-    streak: typeof raw.streak === "number" ? raw.streak : 0,
-    symptom: (raw.symptom as Symptom) ?? null,
-    detail: typeof raw.detail === "string" ? raw.detail : "",
-    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+    level,
+    streak,
+    symptom,
+    detail: typeof o.detail === "string" ? o.detail : "",
+    updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : null,
   };
 }
 

@@ -375,7 +375,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       // a dry round does not delete, so it has to be told which files are spoken for.
       dry ? new Set(gone) : new Set<string>(),
     );
-    const filesUsed = filesUsage(paths.filesDir);
+    // A preview cannot weigh what it did not delete: it uses the total pruneFiles just
+    // computed over the same directory, so the page says "删了 N 个，还剩 X" with X
+    // matching the world the next real round would see. A real round reads the disk it
+    // has just emptied.
+    const filesUsed = dry ? { bytes: pruned.bytesLeft } : filesUsage(paths.filesDir);
 
     let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
@@ -603,7 +607,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       markSeen(
         [paths.inbox, paths.inboxLow],
         paths.inboxSeen,
-        [...inbox.map((m) => m.file), ...read],
+        // Carry the directory: both inbox halves may hold the same `<chat>-<id>.json`,
+        // and a bare name alone used to move the wrong one (or overwrite the first in
+        // seen/ with the second). The page read these exact files, not just these names.
+        [...inbox.map((m) => ({ dir: m.dir, file: m.file })), ...read],
       );
     }
     const before = escalation;

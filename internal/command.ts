@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import type { Policy } from "./policy.ts";
 import { readSearchEnv } from "./search.ts";
 import { bookSocketExists, BOOK_SOCKET_IN_CONTAINER } from "./book.ts";
+import { dockerRun } from "./docker.ts";
 
 export interface Command {
   cmd: string;
@@ -181,34 +181,18 @@ export function buildCommand(
 
 /** A killed daemon leaves `docker run` children alive; nothing else cleans them up. */
 export async function sweepOrphans(instance: string): Promise<number> {
-  const listed = await new Promise<string>((resolve) => {
-    const p = spawn("docker", ["ps", "-q", "-f", `label=agent.instance=${instance}`], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    let out = "";
-    p.stdout?.setEncoding("utf8");
-    p.stdout?.on("data", (c: string) => {
-      out += c;
-    });
-    p.on("error", () => resolve(""));
-    p.on("close", () => resolve(out));
-  });
-  const ids = listed.split("\n").map((s) => s.trim()).filter(Boolean);
+  const listed = await dockerRun(["ps", "-q", "-f", `label=agent.instance=${instance}`], true);
+  // A failed `docker ps` is not "no orphans": it is "could not tell". Reporting zero
+  // either way is fine here, but the output of a failed command must never be read as ids.
+  if (listed.code !== 0) return 0;
+  const ids = listed.text.split("\n").map((s) => s.trim()).filter(Boolean);
   if (ids.length === 0) return 0;
-  await new Promise<void>((resolve) => {
-    const p = spawn("docker", ["kill", ...ids], { stdio: "ignore" });
-    p.on("error", () => resolve());
-    p.on("close", () => resolve());
-  });
+  await dockerRun(["kill", ...ids], false);
   return ids.length;
 }
 
 export async function killContainer(instance: string): Promise<void> {
-  await new Promise<void>((resolve) => {
-    const p = spawn("docker", ["kill", `agent-${instance}`], { stdio: "ignore" });
-    p.on("error", () => resolve());
-    p.on("close", () => resolve());
-  });
+  await dockerRun(["kill", `agent-${instance}`], false);
 }
 
 export function listSessionFiles(dir: string): string[] {

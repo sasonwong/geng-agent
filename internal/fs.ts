@@ -106,5 +106,5 @@ export function mtimeMs(file: string): number | null {
 export function excerpt(text: string | null, maxChars: number): string {
   if (!text) return "";
   const t = text.trim();
-  return t.length <= maxChars ? t : t.slice(0, maxChars) + "\n…(截断)";
+  return t.length <= maxChars ? t : `${t.slice(0, maxChars)}…(截断)`;
 }

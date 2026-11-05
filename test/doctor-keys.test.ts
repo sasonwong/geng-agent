@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PROBE, botWiring, keyFiles, scanLogBodies } from "../internal/doctor.ts";
+import { PROBE, botWiring, keyFiles, scanLogBodies, v4Range, rangeOpenUnder, probeEgressDetail } from "../internal/doctor.ts";
 import { botIssues } from "../internal/bots.ts";
 
 function tree(build: (root: string) => void): string {
@@ -147,4 +147,45 @@ test("scanLogBodies: 报十条就够了，但要说还有几条没列出来", ()
   assert.equal(scan.hits.length, 10);
   assert.equal(scan.more, 2);
   rmSync(root, { recursive: true, force: true });
+});
+
+test("v4Range 认得裸 IPv4 和 IPv4-mapped IPv6 两种写法", () => {
+  assert.deepEqual(v4Range("127.0.1.0/24"), [0x7f000100, 0x7f0001ff]);
+  assert.deepEqual(v4Range("0.0.0.0/0"), [0, 0xffffffff]);
+  // ::ffff:0:0/96 在数值上就是整段 IPv4；/104 等于 v4 的 /8
+  assert.deepEqual(v4Range("::ffff:0:0/96"), [0, 0xffffffff]);
+  assert.deepEqual(v4Range("::ffff:7f00:0/104"), [0x7f000000, 0x7fffffff]);
+  assert.deepEqual(v4Range("::ffff:127.0.0.1"), [0x7f000001, 0x7f000001]);
+  assert.equal(v4Range("fc00::/7"), null, "纯 IPv6 不在这把 32 位尺子里");
+  assert.equal(v4Range("999.999.999.999"), null);
+});
+
+test("探针没跑完时 detail 不说『直连断开，代理通』", () => {
+  // 90s 超时 / spawn 失败都带 PROBE_FAILED 且 ok=false。旧实现让这类输出一路落到
+  // 最后的 fallback，无条件下结论「直连断开，代理通」——一个根本没跑的探针被报成
+  // 一次成功的代理检查。
+  assert.equal(
+    probeEgressDetail("PROBE_FAILED docker run 超时（90s），探针没有跑完", true, false),
+    "探针没跑完，见『容器探针』",
+  );
+  assert.equal(
+    probeEgressDetail("PROBE_FAILED spawn ENOENT", false, false),
+    "探针没跑完，见『容器探针』",
+  );
+  // 没有标记、结果也不完整：最后的 fallback 要看 ok，不能一律报成功
+  assert.equal(probeEgressDetail("半截输出", true, false), "探针结果不完整，无法判定");
+  assert.equal(probeEgressDetail("PROXY_OK NET_DIRECT_BLOCKED", true, true), "直连断开，代理通");
+});
+
+test("rangeOpenUnder 看到危险网段里没被 deny 盖住的那一段", () => {
+  // 旧检查只探基地址 127.0.0.0：把 deny 收窄到只盖 127.0.0.0/24，127.0.1.0/24
+  // 明明通了，基地址却仍被挡住，于是那一段悄悄藏起来，doctor 说「没开」。
+  assert.equal(rangeOpenUnder("127.0.0.0/8", ["0.0.0.0/0", "!127.0.0.0/24"]), true);
+  // 直接把藏起来的那段当 danger 也一样报开
+  assert.equal(rangeOpenUnder("127.0.1.0/24", ["0.0.0.0/0", "!127.0.0.1/32"]), true);
+  // 整段被 !127.0.0.0/8 盖住时不该误报
+  assert.equal(rangeOpenUnder("127.0.0.0/8", ["0.0.0.0/0", "!127.0.0.0/8"]), false);
+  // IPv4-mapped 的 allow / deny 也要照同一把尺子算
+  assert.equal(rangeOpenUnder("127.0.0.0/8", ["::ffff:0:0/96", "!::ffff:7f00:0/104"]), false);
+  assert.equal(rangeOpenUnder("127.0.0.0/8", ["::ffff:0:0/96", "!::ffff:7f00:0/112"]), true);
 });

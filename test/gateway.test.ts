@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { failedAttempt, knownPlaces, noteChat, readChats, route, targetChat, unsentPart } from "../internal/gateway.ts";
+import { failedAttempt, HANDLE_ATTEMPTS, knownPlaces, noteChat, readChats, route, targetChat, unsentPart } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/fs.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -184,6 +184,19 @@ test("a failed send is retried a few times, then let go of with one line", () =>
   // and a success clears the count, so separate blips never add up
   failures.delete("1-x.json");
   assert.deepEqual(failedAttempt(failures, "1-x.json"), { n: 1, giveUp: false });
+});
+
+test("a failed handling gets its own bounded set of retries", () => {
+  const failures = new Map<string, number>();
+  const verdicts = Array.from({ length: HANDLE_ATTEMPTS }, () =>
+    failedAttempt(failures, "update-17", HANDLE_ATTEMPTS),
+  );
+  assert.deepEqual(verdicts.map((v) => v.n), [1, 2, 3, 4, 5]);
+  assert.deepEqual(verdicts.map((v) => v.giveUp), [false, false, false, false, true]);
+  // one update's failures must not spend another update's attempts
+  assert.equal(failedAttempt(failures, "update-18", HANDLE_ATTEMPTS).n, 1);
+  failures.delete("update-17");
+  assert.equal(failedAttempt(failures, "update-17", HANDLE_ATTEMPTS).giveUp, false);
 });
 
 test("a send that broke halfway puts back only the words and files still owed", () => {

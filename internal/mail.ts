@@ -362,6 +362,15 @@ export interface MailServerOptions {
 export async function startMailServer(o: MailServerOptions): Promise<Server> {
   const maxBytes = o.maxBytes ?? INGEST_MAX_BYTES;
   const server = createServer((req, res) => {
+    // 一个跑到一半断掉的上传（Worker 死了、容器里 curl --max-time 到了）会在 req 上抛
+    // error；没有监听就是长驻网关里的未捕获异常，一封掉队的信能把所有 bot 的信箱一起带走。
+    let failed = false;
+    req.on("error", (err) => {
+      failed = true;
+      o.log(`mail ← 请求流断了：${(err as Error).message}`);
+    });
+    // 回信写到一半客户端没了，res 也会抛 error；这里只负责别让它变成未捕获异常。
+    res.on("error", () => {});
     const send = (code: number, body: unknown): void => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
@@ -378,10 +387,13 @@ export async function startMailServer(o: MailServerOptions): Promise<Server> {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on("data", (chunk: Buffer) => {
+      if (failed) return;
       size += chunk.length;
       if (size <= maxBytes) chunks.push(chunk);
     });
     req.on("end", () => {
+      // 413 之后、或请求流已经断掉之后，绝不再把截断的 body 交给 accept()。
+      if (failed) return;
       if (size > maxBytes) {
         send(413, { ok: false, error: "too big" });
         return;

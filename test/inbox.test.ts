@@ -47,6 +47,28 @@ test("markSeen moves only what this wake handed over", () => {
   assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".json")), ["002.json"]);
 });
 
+test("two inbox halves holding one filename do not lose or redeliver a message", () => {
+  const base = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const high = join(base, "inbox");
+  const low = join(base, "inbox-low");
+  const seen = join(base, "seen");
+  for (const d of [high, low, seen]) mkdirSync(d, { recursive: true });
+  const name = "111-42.json";
+  writeFileSync(join(high, name), JSON.stringify({ text: "高优先级那一半" }));
+  writeFileSync(join(low, name), JSON.stringify({ text: "低优先级那一半" }));
+
+  const both = [...peekInbox(high), ...peekInbox(low)];
+  assert.equal(both.length, 2, "两半各自读到了自己的文件");
+  assert.notEqual(both[0]?.dir, both[1]?.dir);
+
+  markSeen([high, low], seen, both.map((m) => ({ dir: m.dir, file: m.file })));
+  // 两份都离开了 inbox，seen/ 里也留下了两份可读记录，没有互相覆盖。
+  assert.equal(readdirSync(high).filter((f) => f.endsWith(".json")).length, 0);
+  assert.equal(readdirSync(low).filter((f) => f.endsWith(".json")).length, 0);
+  assert.equal(readdirSync(seen).filter((f) => f.endsWith(".json")).length, 2);
+  assert.equal(peekInbox(high).length + peekInbox(low).length, 0, "下一轮不再重复递送");
+});
+
 test("markSeen quarantines an unparseable message instead of dying", () => {
   const { dir, seen } = inbox();
   writeFileSync(join(dir, "001.json"), "{not json");
