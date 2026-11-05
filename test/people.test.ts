@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { activeSince, appendSaid, lastSaidIn, readSaid, saidFile } from "../internal/people.ts";
+import { activeSince, appendSaid, lastSaidIn, readSaid, saidFile, saidHasId } from "../internal/people.ts";
 
 function data(): string {
   return mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -17,6 +17,17 @@ test("a transcript keeps both directions in order", () => {
   assert.equal(t?.total, 2);
   assert.deepEqual(t?.tail.map((l) => l.text), ["在吗", "在"]);
   assert.equal(t?.tail[0]?.from, "telegram:@you");
+});
+
+test("a redelivery is recognized by its id, not by where its record sits", () => {
+  const d = data();
+  // the inbox record may already be consumed (moved to seen/) when Telegram hands the
+  // same message over again; the transcript is what says these words were already logged
+  appendSaid(d, 42, { at: "2026-03-02T09:00:00Z", dir: "in", text: "在吗", from: "telegram:@you", id: "42-7" });
+  assert.equal(saidHasId(d, 42, "42-7"), true);
+  assert.equal(saidHasId(d, 42, "42-8"), false, "另一条消息不算");
+  assert.equal(saidHasId(d, 43, "42-7"), false, "另一个地址不算");
+  assert.equal(saidHasId(d, 44, "44-1"), false, "没有记录的地址不算");
 });
 
 test("the tail is the newest few, and the count is everything", () => {

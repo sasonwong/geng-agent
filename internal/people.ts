@@ -132,6 +132,17 @@ export interface Transcript {
 }
 
 /**
+ * Whether this message id already has its line. A redelivery — Telegram hands a message
+ * over again when the offset never moved, whatever the reason — must rewrite the inbox
+ * record but must not say the same words twice in here. Checked by id, not by "is this
+ * the first delivery": the record file may have been consumed in the meantime.
+ */
+export function saidHasId(data: string, chat: number, id: string): boolean {
+  const transcript = readSaid(data, chat, Number.POSITIVE_INFINITY);
+  return transcript !== null && transcript.tail.some((line) => line.id === id);
+}
+
+/**
  * shortcut: reads the whole file to know how many things were ever said.
  * Only worth fixing past a few MB — at 200 bytes a line that is tens of thousands
  * of messages.
