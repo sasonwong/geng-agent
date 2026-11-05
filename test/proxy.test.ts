@@ -126,12 +126,15 @@ test("a CONNECT to a name that resolves inside the host's own network is refused
         on: () => {},
         destroy: () => {},
       };
-      void handleConnect(`localhost:${port}`, socket as never, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] }, (l) => {
+      void handleConnect(`localhost:${port}`, socket as never, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["0.0.0.0/0", "::/0", "!127.0.0.0/8", "!::1/128"] }, (l) => {
         refusals.push(l);
       });
     });
     assert.match(denied, /403/);
-    assert.match(refusals.join("\n"), /127\.0\.0\.1/);
+    // Which loopback `localhost` resolves to is the host's business: Node >= 17 answers in
+    // the resolver's order, and GitHub's runners give ::1 first. Pin both, so this says "a
+    // loopback address is refused" and not "this machine is IPv4-only".
+    assert.match(refusals.join("\n"), /127\.0\.0\.1|::1/);
   } finally {
     restore();
     await new Promise<void>((r) => target.close(() => r()));
@@ -180,9 +183,10 @@ test("when the host is itself behind a proxy, the tunnel goes through it", async
   const restore = clearProxyEnv();
   process.env.HTTPS_PROXY = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
   const chain = chainFrom("auto");
-  // `localhost` resolves without a network; the chain stub never looks at the name
+  // `localhost` resolves without a network (to 127.0.0.1 or ::1, per the host); both
+  // loopbacks are allowed here because the point is the chain, not the address rules
   const clientSide = createTcp((socket) => {
-    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
   });
   await new Promise<void>((r) => clientSide.listen(0, "127.0.0.1", () => r()));
   try {
@@ -262,7 +266,7 @@ test("a SOCKS5 chain does the handshake before it pipes anything", async () => {
   await new Promise<void>((r) => socks.listen(0, "127.0.0.1", () => r()));
   const chain = chainFrom(`socks5://me:secret@127.0.0.1:${(socks.address() as { port: number }).port}`);
   const front = createTcp((socket) => {
-    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
   });
   await new Promise<void>((r) => front.listen(0, "127.0.0.1", () => r()));
   try {
