@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseInboxId, quoteFor, quotedOf } from "../internal/quote.ts";
+import { parseInboxId, parseReplyTo, quoteFor, quotedOf } from "../internal/quote.ts";
 import { appendSaid, readSaid } from "../internal/people.ts";
 import { nameOf } from "../internal/telegram.ts";
 
@@ -48,4 +48,18 @@ test("a transcript line keeps the quote it was written with", () => {
   const t = readSaid(root, -100, 5);
   assert.deepEqual(t?.tail[0]?.quote, quote);
   assert.equal(t?.tail[0]?.id, "-100-9");
+});
+
+test("a quote is read by one parser, whether it arrives as an id or as an object", () => {
+  // the tool writes the id a listing printed; the outbox stores `{chat, messageId}`
+  for (const id of ["M-1001-151", "-1001-151", "#-1001-151", " M-1001-151 "]) {
+    assert.deepEqual(parseReplyTo(id), { chat: -1001, messageId: 151 }, id);
+  }
+  assert.deepEqual(parseReplyTo({ chat: -1001, messageId: 151 }), { chat: -1001, messageId: 151 });
+  // absent and unreadable are different answers: the caller refuses one and ignores the other
+  assert.equal(parseReplyTo(undefined), undefined);
+  assert.equal(parseReplyTo(null), undefined);
+  for (const junk of ["151", "abc", 42, { chat: "-1001" }]) {
+    assert.equal(parseReplyTo(junk), null, JSON.stringify(junk));
+  }
 });

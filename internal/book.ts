@@ -8,7 +8,7 @@ import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
 import { forwardPlain, handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
 import { keyCanMute } from "./mute.ts";
-import { parseInboxId } from "./quote.ts";
+import { parseReplyTo } from "./quote.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
 import { parseAfter } from "./schedule.ts";
@@ -102,24 +102,6 @@ function flatKeys(obj: unknown, prefix = ""): string[] {
       ? flatKeys(v, `${prefix}${k}.`)
       : [`${prefix}${k}`],
   );
-}
-
-/**
- * Which line it is answering. Two spellings, one result: the id a listing prints
- * (`-1001-151`, with the `M` an inbox item carries) is what the model actually has in
- * front of it, and the object form is what an older tool description asked for. Both
- * land in the outbox as `{chat, messageId}`, because the gateway reads one shape.
- */
-function parseReplyTo(raw: unknown): { chat: number; messageId: number } | undefined | null {
-  if (raw === undefined || raw === null) return undefined;
-  if (typeof raw === "string") {
-    const text = raw.trim().replace(/^[M#]/, "");
-    return parseInboxId(text);
-  }
-  if (typeof raw !== "object") return null;
-  const o = raw as { chat?: unknown; messageId?: unknown };
-  if (typeof o.chat !== "number" || typeof o.messageId !== "number") return null;
-  return { chat: o.chat, messageId: o.messageId };
 }
 
 /** Append to a file it may not have written yet, keeping whatever is already there. */
@@ -393,6 +375,12 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       const originals: { id: string; path: string; name: string }[] = [];
       for (const f of files) {
         if (f.startsWith("/")) {
+          // Refused here rather than at the gateway: only /work is its own, and a path the
+          // gateway would drop left the tool answering "带 1 个文件" over something that
+          // never left the container.
+          if (!f.startsWith("/work/") || f.includes("..")) {
+            return { status: 400, body: { error: `只能发 /work 里的文件：${f}` } };
+          }
           made.push(f);
           continue;
         }

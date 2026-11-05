@@ -302,6 +302,17 @@ test("saying a file by id hands the gateway the original, not a copy", async () 
   // an id nothing has is refused before anything is queued
   const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], files: ["F9"] }));
   assert.equal(bad.status, 404);
+
+  // and a path outside /work is refused here, not silently dropped by the gateway: the
+  // tool used to answer "带 1 个文件" over a file that never left the container
+  for (const escape of ["/etc/passwd", "/work/../policy.json", "/state/identity.md"]) {
+    const r = await handle(
+      { url: "/say", method: "POST" } as never,
+      JSON.stringify({ messages: ["x"], to: -1001, files: [escape] }),
+    );
+    assert.equal(r.status, 400, escape);
+  }
+  assert.equal(readdirSync(paths.outbox).length, 1, "被拒的那几次不该入队");
 });
 
 test("a wrong journal entry can be taken back without losing it", async () => {
