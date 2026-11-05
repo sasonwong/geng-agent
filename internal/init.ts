@@ -46,8 +46,8 @@ export function initInstance(root: string, instance: string, opts: InitOptions =
   const p = makePaths(root, instance);
   for (const d of requiredDirs(p)) mkdirSync(d, { recursive: true });
 
-  // daemon.log is bind-mounted into the container: docker creates a *directory* for a
-  // missing host path, and then every line the daemon tries to append fails with EISDIR.
+  // A *directory* here breaks every append with EISDIR, and the failure is a log with no
+  // lines rather than a stack trace. init is where it is created, so it is created as a file.
   if (!existsSync(p.daemonLog)) writeFileSync(p.daemonLog, "");
 
   const policyTemplate = join(root, "deploy", "policy.json");

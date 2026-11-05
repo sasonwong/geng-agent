@@ -2,10 +2,10 @@
  * say / mute / listen / forget / propose — the things the agent can do to the world
  * outside its own writing.
  *
- * `say` writes /outbox, which the gateway drains; everything else changes a file in
- * /state that the gateway or the daemon reads, and /state is a mount this container may
- * not write. Those go through the book endpoint instead: the host builds the file from
- * these words, so the shape of the book stays a fact of the host.
+ * None of them touches the disk: each one is a POST to the book endpoint, which builds the
+ * file from these words — the outbox item the gateway drains, the mute map, the attention
+ * window, the forget list, the proposal. The host owns every shape, so what the gateway
+ * reads is never something the container wrote.
  *
  * None of it talks to Telegram. The container has no bot token, and must not have one.
  */

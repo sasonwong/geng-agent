@@ -1,5 +1,5 @@
-# The one check that is not self-reported: it runs the same two gates a human runs
-# (`npm run check`, `npm test`) on a machine that has no stake in the answer.
+# The one check that is not self-reported: it runs the same three gates a human runs
+# (`npm run gate`, `npm run check`, `npm test`) on a machine that has no stake in the answer.
 name: ci
 
 on:

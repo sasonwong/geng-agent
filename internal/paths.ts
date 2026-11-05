@@ -26,10 +26,10 @@ export interface Paths {
   /** Every mail it ever received, one file each. Never mounted and never moved: "read" is
    * a list in its own book, not a place files are put. */
   mail: string;
-  /** The mail ids it has declared read, written only by the `mail` tool. */
+  /** The mail ids it has declared read, written by `open` in the call that shows the body. */
   mailRead: string;
   outbox: string;
-  /** Files people sent it. Read-only inside the container, never its business to write. */
+  /** Files people sent it, each with an id. Not in the container: tools take the id. */
   filesDir: string;
   /** What it asked to have forgotten; the daemon applies this before the next waking. */
   filesForget: string;

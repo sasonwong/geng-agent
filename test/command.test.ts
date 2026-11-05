@@ -25,24 +25,24 @@ test("the container writes nothing but the page it calls its own", () => {
 
 test("the tools are loaded from outside the agent's home", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
-  tools(root, ["mail.ts", "say-mute.ts", "websearch.ts"]);
+  tools(root, ["ledger.ts", "say-mute.ts", "websearch.ts"]);
   const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "你是…");
   const joined = args.join(" ");
   assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
   assert.match(joined, /-e \/opt\/geng\/extensions\/websearch\.ts/);
-  assert.match(joined, /-e \/opt\/geng\/extensions\/mail\.ts/);
+  assert.match(joined, /-e \/opt\/geng\/extensions\/ledger\.ts/);
 });
 
 test("a tool dropped into image/extensions/ is loaded, with no other edit", () => {
   // the page and the docs promise "add a tool, save it": three hardcoded -e paths meant
   // the fourth file was mounted into the container and never loaded, and nothing said so
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
-  tools(root, ["say-mute.ts", "websearch.ts", "mail.ts", "calendar.ts", "README.md", "helper.js"]);
+  tools(root, ["say-mute.ts", "websearch.ts", "ledger.ts", "calendar.ts", "README.md", "helper.js"]);
   const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "P");
   const loaded = args.filter((a) => a.startsWith("/opt/geng/extensions/"));
   assert.deepEqual(loaded, [
     "/opt/geng/extensions/calendar.ts",
-    "/opt/geng/extensions/mail.ts",
+    "/opt/geng/extensions/ledger.ts",
     "/opt/geng/extensions/say-mute.ts",
     "/opt/geng/extensions/websearch.ts",
   ]);

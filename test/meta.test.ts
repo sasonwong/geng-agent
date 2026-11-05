@@ -67,8 +67,9 @@ test("a cut note that nothing can read is worth less than a waking that starts",
 
 test("a hand-written cut note cannot break the page that reads it", () => {
   const paths = fixture();
-  // `/state` is writable from inside, so every field is an input, not a promise: `tools`
-  // used to arrive as a string and throw on `.join` while a waking was being assembled
+  // meta/ is host-owned now, but it is still a file a hand edit or an old restore can get
+  // wrong, so every field is an input, not a promise: `tools` used to arrive as a string and
+  // throw on `.join` while a waking was being assembled
   writeFileSync(
     join(paths.meta, "cut.json"),
     JSON.stringify({ kind: "timeout", tools: "bash ls", capMinutes: "20", openMs: null, waking: "7" }),

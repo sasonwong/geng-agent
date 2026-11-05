@@ -80,18 +80,13 @@
 `doctor` 会在这些网段被放开时 `warn`，并把后果说出来（`127.0.0.0/8` = 宿主的所有 loopback 服务、
 `169.254.0.0/16` = 云元数据、`172.17.0.0/16` = 同机的其他容器）。
 
-名字放行、地址拒绝时，`net.log` 会写明缺的是哪一半：
+名字放行、地址拒绝时，`net.log` 会写明缺的是哪一半。每一次连接都记一行
+`data/<inst>/net.log`，成功时括号里是**命中的那条网段**（不是解析出的地址），失败时是原因：
 
 ```
-拒绝 git.internal:443（10.20.0.5，不在 proxyAllowCidrs 里）
-出去 codeload.github.com:443（140.82.112.4，0.0.0.0/0）
-```
-
-每一次连接都记一行 `data/<inst>/net.log`：
-
-```
-2026-11-05T01:39:31.000Z 出去 github.com:443
+2026-11-05T01:39:31.000Z 出去 github.com:443（0.0.0.0/0）
 2026-11-05T01:39:31.400Z 拒绝 pi.dev:443（pi.dev 不在放行名单里）
+2026-11-05T01:39:32.000Z 拒绝 git.internal:443（git.internal 指向 10.20.0.5，不在 proxyAllowCidrs 里）
 ```
 
 它自己一个文件，因为一次 `git clone` 就是十几行；轮次行里仍然只有 `net=N` 这个数。
@@ -590,7 +585,7 @@ git fetch origin && git reset --hard origin/main
 |---|---|---|
 | unit active，`daemon.log` 不增长 | `tail daemon.log` 的时间 | 它睡的比你想的长（纸上有"下次醒来"）；或者循环卡在等一个不会来的条件 |
 | unit 反复重启，`ExecMainStatus=0` | `systemctl --user show <u> -p NRestarts`、`journalctl --user -u <u>` | 干净退出而不是崩溃：某个子进程死了没人 settle、事件循环空了。锁被占也是这个形状 |
-| 没有 `daemon.log` 这一行，但状态里有一轮 | `ls -l data/<inst>/daemon.log` | 它是**目录**：容器挂载把不存在的路径建成了目录 |
+| 没有 `daemon.log` 这一行，但状态里有一轮 | `ls -l data/<inst>/daemon.log` | 它是**目录**：每次 append 都 EISDIR，所以症状是"日志不涨"而不是报错。删掉再跑一次 `init` |
 | unit 127，每十秒一次 | unit 里的 `@NODE@` | node 绝对路径错（nvm 不在 systemd 的 PATH 里） |
 | 容器压根没起来，日志里也没有一轮 | 手工跑一遍完整的 `docker run` | argv 里少了一个 `-e`（比如 `TZ=…` 没带 `-e`，docker 会把它当镜像名） |
 | 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（`GENG_BOOK_SOCK` 缺了，`web_search`/`say` 这一类干脆不注册自己，`journal` 则在调用时报错） |
@@ -610,11 +605,12 @@ git fetch origin && git reset --hard origin/main
 
 ```
 data/<instance>/
-  book/   它的书：identity.md  open-loops/  journal/  几个没人读的 json
-                mail.read.json（打开过的邮件 id）· 只有 identity.md 挂进容器，可写
+  book/   它的书：identity.md  open-loops/  journal/
+                几个只有宿主读的 json：policy.proposal / mute / attention / intent / mail.read（打开过的邮件 id）
+                只有 identity.md 挂进容器，可写
   policy.json   它活在什么规矩下——在书外面，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）——容器里除了它和 identity.md 只有 tmpfs
-  files/        别人发来的图片和文件，一封信一对 F<n>（不进容器，靠 id）
+  files/        别人发来的图片和文件，每个附件一个 F<n>（不进容器，靠 id）
   inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
   mail/         收到的邮件，一封一个文件（不进容器，靠 recall 读）
   people/       一个地址一份对话记录，只追加，不总结
