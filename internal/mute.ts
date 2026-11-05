@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readJson, writeJson } from "./fs.ts";
 import { parseReplyTo } from "./quote.ts";
 
@@ -108,10 +108,26 @@ export function ackOutbox(dir: string, file: string): void {
   const sent = join(dir, "sent");
   mkdirSync(sent, { recursive: true });
   try {
-    renameSync(file, join(sent, file.split("/").pop() as string));
+    // basename, not a hand-rolled split: on a path with a different separator the split
+    // returns the whole path and the file lands somewhere no one reads it from
+    renameSync(file, join(sent, basename(file)));
   } catch {
     // if the rename fails the item is retried; the file may still be there
   }
+}
+
+/**
+ * Take the parts that already went out of the queue file, so a retry says only the rest.
+ * A multi-part send that failed half-way used to be retried whole: the first parts went
+ * out twice, and the transcript (written as each part went out) showed the duplication.
+ */
+export function trimOutbox(file: string, sent: number): void {
+  if (sent <= 0) return;
+  const raw = readJson<Record<string, unknown> | null>(file, null);
+  if (raw === null || !Array.isArray(raw.messages)) return;
+  const left = (raw.messages as unknown[]).slice(sent);
+  if (left.length === raw.messages.length) return;
+  writeJson(file, { ...raw, messages: left });
 }
 
 export function ensureGatewayDirs(root: string): { ops: string } {
