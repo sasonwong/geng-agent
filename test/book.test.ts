@@ -5,6 +5,7 @@ import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bookHandler, socketPath, startBookServer } from "../internal/book.ts";
+import { knownPlaces } from "../internal/gateway.ts";
 import { countLoops } from "../internal/packet.ts";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { readWaiting } from "../internal/schedule.ts";
@@ -239,6 +240,37 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   // and a quote it cannot parse is a refusal, not a message without one
   const quote = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], replyTo: "151" }));
   assert.equal(quote.status, 400);
+});
+
+test("a chat the gateway learned after the daemon started can be spoken into", async () => {
+  // The endpoint is built once and the daemon lives for days. Taking the list of places at
+  // listen time meant the page (built fresh every cycle) offered a group the tool then
+  // refused: being added to a group made the bot deaf to nothing and mute to everyone.
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const file = join(root, "data", "_gateway", "chats.json");
+  mkdirSync(join(root, "data", "_gateway"), { recursive: true });
+  const chats = (known: Record<string, unknown>): string => JSON.stringify({ alice: { known } });
+  const owner = { kind: "private", who: "telegram:@owner" };
+  writeFileSync(file, chats({ "111": owner }));
+
+  const server = await startBookServer({
+    paths,
+    log: () => {},
+    places: () => knownPlaces(root, "alice").map((p) => p.id),
+  });
+  try {
+    const sock = socketPath(paths);
+    assert.equal((await postJson(sock, "/say", { messages: ["hi"], to: -1009 })).status, 400);
+
+    // exactly what handleUpdate writes when the bot is added to a new group
+    writeFileSync(file, chats({ "111": owner, "-1009": { kind: "group", title: "新群" } }));
+    const sent = await postJson(sock, "/say", { messages: ["hi"], to: -1009 });
+    assert.equal(sent.status, 200, sent.body);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
 });
 
 test("a quote is the id the listing printed, and it says which conversation", async () => {

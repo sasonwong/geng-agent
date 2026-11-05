@@ -324,31 +324,24 @@ test("plain http is proxied too, and refused by the same address rules", async (
       req.end();
     });
   const port = (target.address() as { port: number }).port;
-  const denyAll = await startBookServer({
-    paths: up,
-    log: () => {},
-    proxy: { allow: ["*"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] },
-  });
+  // The rule is read per request: the daemon reloads policy.json every cycle, so a
+  // snapshot taken when the endpoint started is a security setting that quietly stopped
+  // being read. One server, one `rule`, edited in between — that is the whole test.
+  let rule = { allow: ["*"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] };
+  const server = await startBookServer({ paths: up, log: () => {}, proxy: () => rule });
   try {
     // the rule refuses it before anything is fetched: 127/8 is excluded
     const denied = await ask(`http://127.0.0.1:${port}/a`);
     assert.equal(denied.status, 403);
     assert.match(denied.body, /127\.0\.0\.1/);
-  } finally {
-    denyAll.close();
-  }
-  // and when the operator does open loopback, the same request is actually forwarded
-  const opened = await startBookServer({
-    paths: up,
-    log: () => {},
-    proxy: { allow: ["*"], cidrs: ["0.0.0.0/0"] },
-  });
-  try {
+
+    // the operator opens loopback in policy.json; no restart, no new endpoint
+    rule = { allow: ["*"], cidrs: ["0.0.0.0/0"] };
     const ok = await ask(`http://127.0.0.1:${port}/a`);
     assert.equal(ok.status, 200);
     assert.equal(ok.body, "hello /a");
   } finally {
-    opened.close();
+    server.close();
     target.close();
   }
 });

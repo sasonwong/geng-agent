@@ -38,15 +38,28 @@ const MAX_BODY = 32 * 1024;
 // A model request is a conversation plus tool schemas; a few megabytes is generous.
 const MAX_MODEL_BODY = 32 * 1024 * 1024;
 
+/**
+ * A value for a test, a function for the daemon.
+ *
+ * Policy is re-read at the top of every cycle and a new chat is learned whenever somebody
+ * adds the bot to a group, so anything derived from either is stale the moment it is read
+ * once. The daemon passes a getter; a test passes a literal.
+ */
+type Live<T> = T | (() => T);
+
+function at<T>(v: Live<T>): T {
+  return typeof v === "function" ? (v as () => T)() : v;
+}
+
 export interface BookOptions {
   paths: Paths;
   log?: (line: string) => void;
   /** `policy.cycle.minWakeMinutes`, so an alarm can be told what it really became. */
-  minWakeMs?: number;
+  minWakeMs?: Live<number>;
   /** Which chats it may speak into or listen to; the daemon already knows, the container does not. */
-  places?: number[];
+  places?: Live<number[]>;
   /** Hosts the outbound proxy may reach. Absent means no proxy, which is what tests want. */
-  proxy?: ProxyRule;
+  proxy?: Live<ProxyRule>;
   /**
    * Called once per `/model` request. pi posts here for every model call, and the socket is
    * reachable from `bash` too: a count above the number of calls is that, and it is the
@@ -56,12 +69,12 @@ export interface BookOptions {
   /** Called once per proxied connection: the only evidence that it went somewhere. */
   onNetwork?: (event: { target: string; ok: boolean; why?: string }) => void;
   /** How the daemon itself reaches the network: null for direct. */
-  chain?: Chain | null;
+  chain?: Live<Chain | null>;
 }
 
 export interface HandlerOptions {
-  minWakeMs?: number;
-  places?: number[];
+  minWakeMs?: Live<number>;
+  places?: Live<number[]>;
 }
 
 interface Reply {
@@ -119,9 +132,10 @@ function parseWhen(when: string): number | null {
 }
 
 export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
-  const minWakeMs = o.minWakeMs ?? 0;
-  const places = o.places ?? [];
   return async (req: IncomingMessage, body: string): Promise<Reply> => {
+    // per request, not per factory: see Live above
+    const minWakeMs = at(o.minWakeMs ?? 0);
+    const places = at(o.places ?? []);
     const route = req.url ?? "";
     let params: unknown = {};
     if (body.trim() !== "") {
@@ -420,7 +434,9 @@ export function startBookServer(o: BookOptions): Promise<Server> {
   const sock = socketPath(o.paths);
   const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs, places: o.places });
 
-  const rule = o.proxy ?? { allow: [], cidrs: [] };
+  // read per request: the operator edits policy.json and the daemon reloads it every cycle
+  const rule = (): ProxyRule => (o.proxy === undefined ? { allow: [], cidrs: [] } : at(o.proxy));
+  const chain = (): Chain | null => (o.chain === undefined ? null : at(o.chain));
   const server = createServer((req, res) => {
     const reply = (status: number, body: unknown): void => {
       res.writeHead(status, { "content-type": "application/json" });
@@ -499,7 +515,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
         chunks.push(c);
       });
       req.on("end", () => {
-        forwardPlain(req, res, Buffer.concat(chunks), rule, o.chain ?? null, (ok, why) =>
+        forwardPlain(req, res, Buffer.concat(chunks), rule(), chain(), (ok, why) =>
           o.onNetwork?.({ target: url, ok, why }),
         ).catch(guard);
       });
@@ -542,7 +558,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
   server.on("connect", (req, socket, head) => {
     const target = req.url ?? "";
     const report = (ok: boolean, why?: string): void => o.onNetwork?.({ target, ok, why });
-    handleConnect(target, socket, head, rule, log, o.chain ?? null, report).catch((err: unknown) => {
+    handleConnect(target, socket, head, rule(), log, chain(), report).catch((err: unknown) => {
       log(`proxy ${target} 出错：${(err as Error).message}`);
       report(false, (err as Error).message);
       socket.destroy();

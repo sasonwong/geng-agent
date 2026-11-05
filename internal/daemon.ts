@@ -287,10 +287,13 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       await startBookServer({
         paths,
         log,
-        minWakeMs: policy.cycle.minWakeMinutes * 60_000,
-        places: knownPlaces(paths.root, o.instance).map((p) => p.id),
-        proxy: { allow: policy.container.proxyAllow, cidrs: policy.container.proxyAllowCidrs },
-        chain: chainFrom(policy.container.proxyChain),
+        // Getters, not values: `policy` is reloaded every cycle and `chats.json` changes
+        // whenever a bot is added to a group. A snapshot taken here was a second answer,
+        // and it refused to speak into a chat the page had just told it about.
+        minWakeMs: () => policy.cycle.minWakeMinutes * 60_000,
+        places: () => knownPlaces(paths.root, o.instance).map((p) => p.id),
+        proxy: () => ({ allow: policy.container.proxyAllow, cidrs: policy.container.proxyAllowCidrs }),
+        chain: () => chainFrom(policy.container.proxyChain),
         onNetwork: (event) => {
           netCalls += 1;
           // Its own file: one line per connection, so `net=N` on the round line stays a
