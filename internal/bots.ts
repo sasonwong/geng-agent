@@ -91,6 +91,13 @@ export function botProblems(bots: Bots, hasInstance: (key: string) => boolean): 
       out.push("ops：没有 chat，运维消息发不出去");
     }
   }
+  // The gateway drains `data/_ops/outbox` only under an "ops" key, so a bots.json without
+  // one accepts every ops line — mute notices, gateway failures, the parked rung — and
+  // delivers none of them. Only a problem once there is a bot at all: an instance with no
+  // Telegram is a warn everywhere else and should stay one.
+  if (Object.keys(bots).length > 0 && !bots.ops) {
+    out.push("没有 ops 这个 bot：静音通知、gateway 断线、停车通知只写不送，会堆在 data/_ops/outbox");
+  }
   return out;
 }
 

@@ -70,6 +70,18 @@ test("the problems it reports are the ones that produce silence, not errors", ()
   assert.match(text, /bob：data\/bob\/ 不存在/, "a bot with no instance can never wake anything");
 });
 
+test("a bots.json with no ops mouth is a problem, because nothing drains that queue", () => {
+  // the sweep only reads data/_ops/outbox under an "ops" key; without one, every line the
+  // daemon or the gateway writes there stays there and nobody is told anything
+  assert.match(botProblems({ alice: { token: "t" } }, () => true).join("\n"), /没有 ops 这个 bot/);
+  // an instance with no bots at all stays a warn: there is no queue to drain either
+  assert.deepEqual(botProblems({}, () => true), []);
+  assert.doesNotMatch(
+    botProblems({ alice: { token: "t" }, ops: { token: "t", chat: 1 } }, () => true).join("\n"),
+    /没有 ops/,
+  );
+});
+
 test("the description says the three states apart, because allow=0 and allow=absent look the same", () => {
   assert.match(describeBot(undefined), /没有 bot/);
   assert.match(describeBot({ token: "t" }), /allow=不限/);
