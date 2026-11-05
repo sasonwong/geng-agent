@@ -79,7 +79,7 @@ function bytesOf(ip: string): { bytes: Buffer; bits: number } | null {
     bytes[i * 2] = value >> 8;
     bytes[i * 2 + 1] = value & 0xff;
   }
-  // An IPv4-mapped address *is* the IPv4 address it maps (RFC 4291 §2.5.5.2), so it is
+  // An IPv4-mapped address *is* the IPv4 address it maps (RFC 4291 §2.5.5), so it is
   // compared — and sent — as one. Parsing it right is not enough on its own: left at 128
   // bits it still never matches a `!`-rule written for an IPv4 range, and the whole
   // `::ffff:0:0/96` block is a second spelling of every address those rules exclude.

@@ -63,11 +63,11 @@ test("a prefix is a byte comparison, not a string one", () => {
   // RFC 4291 lets the last 32 bits be written as a dotted quad; the long form and the
   // compressed one are the same eight groups
   assert.equal(inCidr("2001:0db8:0000:0000:0000:0000:0000:0005", "2001:db8::/32"), true);
-  assert.equal(inCidr("2001:db8::1.2.3.4", "2001:db8::/32"), true);
+  assert.equal(inCidr("2001:db8::192.0.2.7", "2001:db8::/32"), true);
   assert.equal(inCidr("::1", "::1/128"), true);
   assert.equal(inCidr("::", "::/0"), true);
   // an address that does not parse is not "in" anything, including 0/0
-  for (const junk of ["1:2:3", "::g", "1::2::3", "::1.2.3", "::ffff:1.2.3.999", "300.1.2.3"]) {
+  for (const junk of ["1:2:3", "::g", "1::2::3", "::1.2.3", "::ffff:192.0.2.999", "300.1.2.3"]) {
     assert.equal(inCidr(junk, "::/0"), false, `${junk} 不是地址`);
     assert.equal(inCidr(junk, "0.0.0.0/0"), false, `${junk} 不是地址`);
   }
@@ -83,9 +83,9 @@ test("the v6 spelling of a v4 address is the same address", () => {
   }
   assert.equal(inCidr("::ffff:127.0.0.1", "127.0.0.0/8"), true);
   // 公网的那个仍然放行：这条挡的是排除项，不是形状
-  assert.equal(addrAllowed("::ffff:8.8.4.4", rule).ok, true);
+  assert.equal(addrAllowed("::ffff:192.0.2.7", rule).ok, true);
   // 发出去的时候它也还是那个 v4 地址：ATYP=1，四字节，不是把它当成一个十六条目的域名
-  assert.equal(socksConnectBody("::ffff:1.2.3.4", 80)?.toString("hex"), "05010001010203040050");
+  assert.equal(socksConnectBody("::ffff:192.0.2.7", 80)?.toString("hex"), "05010001c00002070050");
 });
 
 test("a target has to be both named and public before it is opened", async () => {
