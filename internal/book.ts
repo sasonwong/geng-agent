@@ -469,7 +469,17 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // leaves the book, so `download` names a file by id and chooses where it lands.
     const url = req.url ?? "";
     if (req.method === "GET" && url.startsWith("/files/")) {
-      const wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      // `decodeURIComponent` throws on a malformed escape, and this is inside the request
+      // listener: an uncaught throw here takes the daemon down with the round it is
+      // serving. The download tool encodes what it is given, but `bash` in the container
+      // can send any path it likes to the same socket.
+      let wanted: string;
+      try {
+        wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      } catch {
+        reply(400, { error: "文件 id 的编码看不懂" });
+        return;
+      }
       const hit = fileById(o.paths, wanted);
       if (hit === null) {
         reply(404, { error: `没有这个文件：${wanted}` });
@@ -480,7 +490,11 @@ export function startBookServer(o: BookOptions): Promise<Server> {
           "content-type": "application/octet-stream",
           "content-length": String(statSync(hit.path).size),
         });
-        createReadStream(hit.path).pipe(res);
+        // same reason as above: a file that goes away between the stat and the read emits
+        // 'error' on the stream, and an unhandled one is the daemon's death
+        createReadStream(hit.path)
+          .on("error", () => res.destroy())
+          .pipe(res);
       } catch (err) {
         reply(500, { error: `读不出来：${(err as Error).message}` });
       }

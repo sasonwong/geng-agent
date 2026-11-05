@@ -502,3 +502,20 @@ test("model traffic is proxied: the key goes upstream, never to the container", 
     await new Promise<void>((r) => upstream.close(() => r()));
   }
 });
+
+test("a malformed file id is a refusal, not a crash", { timeout: 10_000 }, async () => {
+  // The download tool encodes what it is given, so this path is only reachable from the
+  // container's shell — which is reachable: `--user` is the same uid that owns the socket.
+  // `decodeURIComponent("%")` throws, the throw was inside the request listener, and an
+  // uncaught throw there takes the daemon down with the round it was serving.
+  const f = fixture();
+  const server = await startBookServer({ paths: f.paths, log: () => {} });
+  try {
+    const sock = socketPath(f.paths);
+    await assert.rejects(() => getToFile(sock, "/files/%ZZ", join(f.root, "x.bin")));
+    // the endpoint still answers: a refused request is not a dead one
+    assert.equal((await postJson(sock, "/nope", {})).status, 404);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
