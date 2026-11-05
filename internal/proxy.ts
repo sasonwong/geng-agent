@@ -204,6 +204,15 @@ export async function handleConnect(
   chain: Chain | null = null,
   report: (ok: boolean, why?: string) => void = () => {},
 ): Promise<void> {
+  // One connection is one line, whatever happens after it opens: `net=N` counts the places
+  // a round went, so a tunnel that broke halfway must not be reported a second time as if
+  // it had never opened.
+  let reported = false;
+  const once = (ok: boolean, why?: string): void => {
+    if (reported) return;
+    reported = true;
+    report(ok, why);
+  };
   // `checkTarget` resolves the name as part of the address check, so its `addr` is the
   // one that was vetted. Resolving again below would be a second lookup whose answer
   // nothing checks — the shape of a rebinding window.
@@ -211,18 +220,27 @@ export async function handleConnect(
   if (!decision.ok || decision.host === undefined || decision.port === undefined) {
     const why = decision.why ?? "?";
     log(`proxy 拒绝 ${raw}：${why}`);
-    report(false, why);
+    once(false, why);
     socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
   if (chain !== null) {
     // The daemon lifts its own proxy's weight: the name check already ran, and resolving
     // here would fail on a host that has no DNS of its own.
-    tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log, report);
+    tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log, once);
     return;
   }
-  const upstream = tcpConnect(decision.port, decision.addr as string, () => {
-    tunnelDone(socket, upstream, head, log, raw, report, decision.by);
+  const upstream = tcpConnect(decision.port, decision.addr as string);
+  // Attached before the connection can fail. It used to live inside the connect callback,
+  // so a refused port emitted an 'error' with no listener — an uncaught exception that takes
+  // the daemon down with the round it was serving.
+  upstream.on("error", (err) => {
+    log(`proxy ${raw} 连不上：${err.message}`);
+    once(false, err.message);
+    socket.destroy();
+  });
+  upstream.on("connect", () => {
+    tunnelDone(socket, upstream, head, once, decision.by);
   });
 }
 
@@ -234,16 +252,11 @@ function tunnelDone(
   socket: Duplex,
   upstream: import("node:net").Socket,
   head: Buffer,
-  log: (line: string) => void,
-  label: string,
   report: (ok: boolean, why?: string) => void,
   by?: string,
 ): void {
-  upstream.on("error", (err) => {
-    log(`proxy ${label} 连不上：${err.message}`);
-    report(false, err.message);
-    socket.destroy();
-  });
+  // The socket's error handler is attached where the socket is created, not here: by the
+  // time this runs a failure has already been reported once.
   socket.on("error", () => upstream.destroy());
   socket.on("close", () => upstream.destroy());
   // "出去" means a connection exists, so it is said here and nowhere earlier: a chain
@@ -292,7 +305,7 @@ function tunnel(
     ready = true;
     // the upstream may have sent bytes of the tunnel in the same chunk
     const rest = chunk.subarray(text.indexOf("\r\n\r\n") + 4);
-    tunnelDone(socket, upstream, head, log, o.connect, report);
+    tunnelDone(socket, upstream, head, report);
     if (rest.length > 0) upstream.unshift(rest);
   });
   upstream.on("connect", () => {
@@ -386,7 +399,7 @@ function socks5(
       upstream.destroy();
       return;
     }
-    tunnelDone(socket, upstream, head, log, o.connect, report);
+    tunnelDone(socket, upstream, head, report);
     if (rest.length > 0) upstream.unshift(rest);
   };
 

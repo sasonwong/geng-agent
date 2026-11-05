@@ -350,3 +350,40 @@ test("one connection is one report, and it is said only once the tunnel is up", 
   assert.equal(reports.length, 1, JSON.stringify(reports));
   assert.equal(reports[0]?.[0], true);
 });
+
+test("a refused direct connection is a refusal, not an uncaught error", async () => {
+  // A port that was just closed, so "nothing is listening" is the truth on any machine.
+  const probe = createTcp(() => {});
+  await new Promise<void>((r) => probe.listen(0, "127.0.0.1", () => r()));
+  const port = (probe.address() as { port: number }).port;
+  await new Promise<void>((r) => probe.close(() => r()));
+
+  // The error listener used to be attached inside the connect callback, so ECONNREFUSED
+  // arrived on a socket with no listener: an uncaught 'error' event takes the daemon down
+  // with the round it was serving. A listener here is what lets the test see that happen.
+  const crashes: unknown[] = [];
+  const onCrash = (e: unknown): void => {
+    crashes.push(e);
+  };
+  process.on("uncaughtException", onCrash);
+  const reports: [boolean, string | undefined][] = [];
+  const fake = { write: () => {}, end: () => {}, on: () => {}, destroy: () => {} };
+  try {
+    await handleConnect(
+      `127.0.0.1:${port}`,
+      fake as never,
+      Buffer.alloc(0),
+      { allow: ["*"], cidrs: ["127.0.0.0/8"] },
+      () => {},
+      null,
+      (ok, why) => reports.push([ok, why]),
+    );
+    await new Promise((r) => setTimeout(r, 500));
+  } finally {
+    process.off("uncaughtException", onCrash);
+  }
+  assert.deepEqual(crashes, [], "一次拒连不该把 daemon 带走");
+  // And it is a refusal, said once: `net=N` counts places it went.
+  assert.deepEqual(reports.map((r) => r[0]), [false], JSON.stringify(reports));
+  assert.match(reports[0]?.[1] ?? "", /ECONNREFUSED/);
+});
