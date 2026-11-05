@@ -57,10 +57,23 @@ export interface PruneResult {
  * Oldest first, until both limits hold. The newest are never touched: they are what this
  * waking might want to look at.
  */
-export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): PruneResult {
+/**
+ * `apply: false` computes exactly what would be removed without removing anything.
+ * The dev packet preview builds the same page a real waking would, and showing
+ * "删了 N 个旧文件" over files it just deleted is not a preview.
+ */
+export function pruneFiles(
+  dir: string,
+  policy: FilesPolicy,
+  nowMs: number,
+  apply = true,
+  /** Names a preceding forget pass already removed — needed only by the dry preview,
+   * which cannot see them disappear from the directory. */
+  exclude: ReadonlySet<string> = new Set<string>(),
+): PruneResult {
   let names: string[];
   try {
-    names = readdirSync(dir).filter((f) => !f.startsWith("."));
+    names = readdirSync(dir).filter((f) => !f.startsWith(".") && !exclude.has(f));
   } catch {
     return { removed: 0, oldestRemovedMs: null };
   }
@@ -88,7 +101,9 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): Pru
     const tooOld = ageMs !== null && nowMs - e.mtimeMs > ageMs;
     if (!tooOld && total <= capBytes) break;
     try {
-      rmSync(join(dir, e.name), { force: true });
+      if (apply) rmSync(join(dir, e.name), { force: true });
+      // The dry pass still counts it and still lowers the running total, so the
+      // same number of files is selected as in the real pass.
       total -= e.size;
       removed += 1;
       oldestRemovedMs ??= e.mtimeMs;
@@ -104,17 +119,27 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): Pru
  * container never has the directory: it holds ids, so erasing what a person sent is a
  * request the host carries out, on its own clock, in the ledger of the round.
  */
-export function forgetFiles(dir: string, requested: string[]): number {
-  let removed = 0;
+/** The names this pass accounts for, whether or not it actually deletes them. */
+export function forgetNames(dir: string, requested: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
   for (const given of requested) {
     const name = bareName(given);
-    if (name === null) continue;
-    // Counted only when it was there. `rmSync(force)` does not throw on a missing file, so
-    // a name that matched nothing used to be counted as a removal — the page then said
-    // "按你说的删了 3 个文件" over a directory it had emptied one file from.
-    if (!existsSync(join(dir, name))) continue;
+    if (name === null || seen.has(name)) continue;
+    seen.add(name);
+    // Counted only when it was there. `rmSync(force)` does not throw on a missing file,
+    // so a name that matched nothing used to be counted as a removal — the page then
+    // said "按你说的删了 3 个文件" over a directory it had emptied one file from.
+    if (existsSync(join(dir, name))) out.push(name);
+  }
+  return out;
+}
+
+export function forgetFiles(dir: string, requested: string[], apply = true): number {
+  let removed = 0;
+  for (const name of forgetNames(dir, requested)) {
     try {
-      rmSync(join(dir, name), { force: true });
+      if (apply) rmSync(join(dir, name), { force: true });
       removed += 1;
     } catch {
       // a file that would not go is retried next waking
