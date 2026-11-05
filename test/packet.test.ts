@@ -4,7 +4,7 @@ import { mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { buildPacket, type PacketInput } from "../internal/packet.ts";
 import { makePaths } from "../internal/paths.ts";
-import { writeJson, writeText } from "../internal/fs.ts";
+import { writeText } from "../internal/fs.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 

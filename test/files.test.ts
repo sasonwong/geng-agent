@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bareName, filesUsage, forgetFiles, parseForget, pruneFiles } from "../internal/files.ts";

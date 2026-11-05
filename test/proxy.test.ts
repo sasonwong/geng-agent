@@ -8,7 +8,7 @@ import { startBookServer, socketPath } from "../internal/book.ts";
 import assert from "node:assert/strict";
 import { createServer as createHttp } from "node:http";
 import { connect, createServer as createTcp } from "node:net";
-import { addrAllowed, chainFrom, hostAllowed, inCidr, resolveChecked, checkTarget, handleConnect } from "../internal/proxy.ts";
+import { addrAllowed, chainFrom, hostAllowed, inCidr, checkTarget, handleConnect } from "../internal/proxy.ts";
 
 test("a host is allowed by itself or as a subdomain, never as a suffix of something else", () => {
   const allow = ["github.com", "npmjs.org"];

@@ -89,7 +89,6 @@ test("a trailing note on the quota line is the note's problem, not the quota's",
 
 test("the quota the agent is shown uses the same reading of an empty line", () => {
   const f = fixture();
-  const instance = join(f.root, "instance.env");
     try {
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY="));
     assert.equal(searchQuota(f.root)?.limit, 111);
@@ -106,7 +105,6 @@ test("no socket, no quota: the page must not promise what the container cannot s
   // is not running has to read as "no search" — otherwise the page says "今天还能搜 200 次"
   // over a container that has no web_search at all.
   const f = fixture();
-  const instance = join(f.root, "instance.env");
   try {
     assert.notEqual(searchQuota(f.root), null);
     // a socket path nothing created: the endpoint is configured, the service is not up
@@ -143,7 +141,6 @@ test("a quota file left at zero by an earlier run is not a permanent verdict", a
   const f = fixture();
   let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
   const usage = join(f.root, "data", "_ops", "usage", "search.json");
-  const instance = join(f.root, "instance.env");
   const day = new Date().toISOString().slice(0, 10);
   try {
     mkdirSync(join(f.root, "data", "_ops", "usage"), { recursive: true });
