@@ -14,6 +14,14 @@ import { readEnvFile } from "./secret.ts";
 export const MODEL_KEY_VARS = ["GENG_MODEL_KEY", "OPENCODE_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 
 /**
+ * Everything that lives in the per-instance model file: the key, and the upstream the
+ * proxy needs to reach the provider. `modelUpstream()` reads GENG_MODEL_UPSTREAM out of
+ * that file, so a writer that files it under `secrets/<inst>.env` instead writes a value
+ * nothing ever reads — and hands the container a copy of it into the bargain.
+ */
+export const MODEL_FILE_VARS = [...MODEL_KEY_VARS, "GENG_MODEL_UPSTREAM"];
+
+/**
  * One key file per instance, not one for the machine.
  *
  * It was `secrets/model.env` while there was one instance to run; a second instance would

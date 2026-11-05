@@ -12,6 +12,9 @@ test("a model key never lands in the file the container is handed", () => {
   for (const name of ["GENG_MODEL_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY"]) {
     assert.equal(secretFileFor(root, "alice", name), join(root, "secrets", "alice.model.env"), name);
   }
+  // the upstream belongs with the key: modelUpstream() reads it there, and the value
+  // would otherwise sit unread in the one file the container can see
+  assert.equal(secretFileFor(root, "alice", "GENG_MODEL_UPSTREAM"), join(root, "secrets", "alice.model.env"));
   // per instance, not per machine
   assert.notEqual(secretFileFor(root, "alice", "OPENCODE_API_KEY"), secretFileFor(root, "bob", "OPENCODE_API_KEY"));
 });

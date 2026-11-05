@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { MailConfig, MailEnv } from "./mail.ts";
-import { MODEL_KEY_VARS } from "./model.ts";
+import { MODEL_FILE_VARS } from "./model.ts";
 
 /**
  * Env files under `secrets/`, and the values that have to match something outside this
@@ -25,22 +25,28 @@ export function readEnvFile(path: string): Record<string, string> {
 }
 
 /**
- * Replace one `NAME=value` line, or append it. Comments and every other line stay
- * exactly where they were: this file is the operator's, not ours.
+ * Replace the `NAME=value` line, or append it. Comments and every other line stay exactly
+ * where they were: this file is the operator's, not ours. A name that appears twice is
+ * collapsed to one line: `readEnvFile` is last-wins, so replacing only the first
+ * occurrence left the *old* value winning after the write.
  */
 export function writeEnvValue(path: string, name: string, value: string): void {
   const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n") : [];
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   let replaced = false;
-  const out = lines.map((raw) => {
-    if (replaced) return raw;
+  const out: string[] = [];
+  for (const raw of lines) {
     const line = raw.trim();
-    if (line === "" || line.startsWith("#")) return raw;
-    const at = line.indexOf("=");
-    if (at === -1 || line.slice(0, at).trim() !== name) return raw;
+    const at = line === "" || line.startsWith("#") ? -1 : line.indexOf("=");
+    const mine = at !== -1 && line.slice(0, at).trim() === name;
+    if (!mine) {
+      out.push(raw);
+      continue;
+    }
+    if (replaced) continue; // a duplicate is dropped, not left to win the read back
     replaced = true;
-    return `${name}=${value}`;
-  });
+    out.push(`${name}=${value}`);
+  }
   if (!replaced) out.push(`${name}=${value}`);
   // a fresh root has no secrets/ yet, and a hand-run `secrets set` is how it gets one
   mkdirSync(dirname(path), { recursive: true });
@@ -75,7 +81,7 @@ export function mailWiringProblem(
  * to know which one it is writing.
  */
 export function secretFileFor(root: string, instance: string, name: string): string {
-  return MODEL_KEY_VARS.includes(name)
+  return MODEL_FILE_VARS.includes(name)
     ? join(root, "secrets", `${instance}.model.env`)
     : join(root, "secrets", `${instance}.env`);
 }
