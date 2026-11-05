@@ -48,11 +48,11 @@ export interface BookOptions {
   /** Hosts the outbound proxy may reach. Absent means no proxy, which is what tests want. */
   proxy?: ProxyRule;
   /**
-   * Called once per model-key fetch. pi asks for the key on every model request, so the
-   * count should track the number of calls; a round that fetched it more often than it
-   * talked to the model fetched it for something else.
+   * Called once per `/model` request. pi posts here for every model call, and the socket is
+   * reachable from `bash` too: a count above the number of calls is that, and it is the
+   * only way it shows up.
    */
-  onKeyFetch?: () => void;
+  onModelRequest?: () => void;
   /** Called once per proxied connection: the only evidence that it went somewhere. */
   onNetwork?: (event: { target: string; ok: boolean; why?: string }) => void;
   /** How the daemon itself reaches the network: null for direct. */
@@ -459,7 +459,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // have one: it posts to /model/… and the daemon adds the credential and forwards. The
     // body is read whole (a request is JSON; a response is a stream, handled below).
     if (url === "/model" || url.startsWith("/model/")) {
-      o.onKeyFetch?.();
+      o.onModelRequest?.();
       const chunks: Buffer[] = [];
       let size = 0;
       req.on("data", (c: Buffer) => {

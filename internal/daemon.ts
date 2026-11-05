@@ -176,7 +176,7 @@ function logLine(
   // same act as handing over something a person wrote
   inj: { total: number; unread: number },
   /** Model requests: one per call is normal, more means something else used the socket. */
-  keyFetches: number,
+  modelRequests: number,
   /** Outbound connections through the proxy: the count of places it went. */
   netCalls: number,
   interventions: string[],
@@ -205,7 +205,7 @@ function logLine(
   parts.push(`inbox=${inboxCount}`);
   // `llm=`, not `key=`: the number is model requests, and `key` next to `net=` reads
   // like a credential or a lookup key rather than a count.
-  if (keyFetches > 0) parts.push(`llm=${keyFetches}`);
+  if (modelRequests > 0) parts.push(`llm=${modelRequests}`);
   if (netCalls > 0) parts.push(`net=${netCalls}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
   if (inj.total > 0) {
@@ -280,7 +280,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // instance down over a socket.
   // Model requests in this round. The endpoint lives as long as the daemon, so the counter
   // is reset when a round starts and read when it logs.
-  let keyFetches = 0;
+  let modelRequests = 0;
   let netCalls = 0;
   if (!o.dry) {
     try {
@@ -300,11 +300,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
             `${new Date().toISOString()} ${event.ok ? "出去" : "拒绝"} ${event.target}${event.why ? `（${event.why}）` : ""}`,
           );
         },
-        // One per model request: pi posts here for every model call, and the socket is
-        // reachable from `bash` too — a count above the number of calls is that, and it is
-        // the only way it shows up.
-        onKeyFetch: () => {
-          keyFetches += 1;
+        onModelRequest: () => {
+          modelRequests += 1;
         },
       });
     } catch (err) {
@@ -365,7 +362,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
 
     let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
-    keyFetches = 0;
+    modelRequests = 0;
     netCalls = 0;
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
@@ -635,7 +632,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       escalation.level,
       inbox.length,
       inj,
-      keyFetches,
+      modelRequests,
       netCalls,
       interventions,
       backup,
