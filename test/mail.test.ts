@@ -133,6 +133,25 @@ test("a redelivered mail overwrites instead of arriving twice", () => {
   assert.equal(readdirSync(f.paths.mail).filter((x) => x.endsWith(".json")).length, 1);
 });
 
+test("a redelivered mail keeps the attachments it already stored", () => {
+  // Cloudflare may hand one mail over twice. The mail file is reused by message hash, but
+  // the attachment loop allocated a new id every time: the first copy stayed on disk —
+  // counted by the size cap, listed by `recall(sources:["files"])`, reachable by `download`
+  // — while the mail pointed at the second one.
+  const f = fixture();
+  const mail = f.mail({
+    attachments: [{ name: "a.txt", bytes: 5, content: Buffer.from("hello").toString("base64") }],
+  });
+  const first = accept(mail, loadMailConfig(f.root)!, f.root, () => {});
+  const stored = JSON.parse(readFileSync(mailFile(f.paths.mail, (first as { id: string }).id), "utf8"));
+
+  const second = accept(mail, loadMailConfig(f.root)!, f.root, () => {});
+  assert.equal((second as { id: string }).id, (first as { id: string }).id);
+  assert.deepEqual(readdirSync(f.paths.filesDir), ["F1-0-a.txt"], "重投不该多存一份附件");
+  const again = JSON.parse(readFileSync(mailFile(f.paths.mail, (second as { id: string }).id), "utf8"));
+  assert.deepEqual(again.attachments, stored.attachments, "指向的附件也得还是那一个");
+});
+
 test("attachments land in /files and oversized ones are named, not fetched", () => {
   const f = fixture();
   const small = Buffer.from("hello").toString("base64");

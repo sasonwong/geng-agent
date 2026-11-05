@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readdirSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { makePaths, type Paths } from "./paths.ts";
@@ -225,6 +225,11 @@ export function accept(
   const text = `${subject}\n\n${body.trim() === "" ? "（没有正文）" : body.trim()}`.slice(0, BODY_LIMIT);
   const hash = mailId(mail.messageId, `${mail.from}|${mail.date ?? ""}|${subject}`);
   const { id, file: mailFile } = mailNumber(paths, hash);
+  // A replay lands on the same file, and the first copy is complete (`writeJson` writes and
+  // renames). Rewriting it would allocate a fresh id for every attachment: the previous
+  // files would stay on disk, counted by the cap and listed by `recall`, while the mail
+  // pointed at copies — so one redelivery cost the same bytes twice.
+  if (existsSync(mailFile)) return { ok: true, id, instance: account.instance };
   const at = mail.date ?? new Date(nowMs).toISOString();
 
   const attachments: { kind: string; id?: string; name?: string; note?: string; bytes?: number }[] = [];
