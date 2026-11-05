@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defaultPolicy, loadPolicy, policyDrift, templateValue } from "../internal/policy.ts";
+import { writeJson } from "../internal/fs.ts";
 
 test("a policy copy is compared with the template key by key", () => {
   const template = {
@@ -74,4 +75,20 @@ test("integer fields do not become half a container or a fractional threshold", 
     writeFileSync(file, JSON.stringify(merged));
     assert.throws(() => loadPolicy(file), new RegExp(path), `${path} = ${value}`);
   }
+});
+
+test("a policy from a newer build is refused, not quietly rewritten", () => {
+  // The same hazard `stateSchema` exists for, on the file that decides how the daemon runs:
+  // a field that was renamed or removed reads as missing to an older build, every default
+  // applies, and the instance runs as something the operator never wrote — with nothing
+  // saying so. Additions never bump the stamp: a reader uses only the keys it knows.
+  const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
+  writeJson(file, { ...defaultPolicy(), schema: defaultPolicy().schema + 1 });
+  assert.throws(() => loadPolicy(file), /更新版本/);
+  // the current stamp and no stamp at all are both readable: older is not unknown
+  writeJson(file, defaultPolicy());
+  assert.equal(loadPolicy(file).cycle.timeoutSec, 1800);
+  const { schema: _, ...unstamped } = defaultPolicy();
+  writeJson(file, unstamped);
+  assert.equal(loadPolicy(file).cycle.timeoutSec, 1800);
 });

@@ -2,6 +2,14 @@ import { ExpectedError } from "./errors.ts";
 import { readText } from "./fs.ts";
 import { chainFrom, validCidr } from "./proxy.ts";
 
+/**
+ * The version of the policy file's shape. A policy written by a newer build is refused for
+ * the same reason `stateSchema` exists: applying a proposal writes a draft built from what
+ * this code understands, so running an older build on a newer file would silently drop the
+ * fields it does not know. Additions never need a bump; only a rename or a removal does.
+ */
+export const POLICY_SCHEMA = 1;
+
 export interface Policy {
   schema: number;
   cycle: {
@@ -48,7 +56,7 @@ export interface Policy {
 
 export function defaultPolicy(): Policy {
   return {
-    schema: 1,
+    schema: POLICY_SCHEMA,
     cycle: { timeoutSec: 1800, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
     backup: { enabled: true },
     timezone: "Asia/Shanghai",
@@ -117,6 +125,12 @@ export function loadPolicy(file: string): Policy {
   }
   const p = raw as Partial<Policy>;
   const d = defaultPolicy();
+  const schema = typeof p.schema === "number" ? p.schema : 0;
+  if (schema > POLICY_SCHEMA) {
+    throw new ExpectedError(
+      `policy: ${file} 是更新版本写的（schema ${schema} > ${POLICY_SCHEMA}）：不要用旧代码跑它。`,
+    );
+  }
   const cycle = p.cycle ?? d.cycle;
   const container = p.container ?? d.container;
   return {
