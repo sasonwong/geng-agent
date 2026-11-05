@@ -204,7 +204,9 @@ function logLine(
     );
   }
   parts.push(`inbox=${inboxCount}`);
-  if (keyFetches > 0) parts.push(`key=${keyFetches}`);
+  // `llm=`, not `key=`: the number is model requests, and `key` next to `net=` reads
+  // like a credential or a lookup key rather than a count.
+  if (keyFetches > 0) parts.push(`llm=${keyFetches}`);
   if (netCalls > 0) parts.push(`net=${netCalls}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
   if (inj.total > 0) {
