@@ -293,7 +293,9 @@ loginctl enable-linger "$USER"
 
 三个模板都含 `@ROOT@`、`@NODE@`；少装一个的表现是那个 `systemctl --user enable --now`
 报 "Unit file ... does not exist"，或者即便手工拷进去也因为占位符没换而 `ExecStart` 失败。
-`deploy/update.sh` 重启的也是这三个 user unit，名字和这里一一对应。
+**模板只是安装的输入**：`deploy/update.sh` 每次升级都会用最新的三份重装它们并
+`daemon-reload`，然后只重启**已启用**的那些（§4 故意让 gateway / search 先不启用）。
+名字和这里一一对应。
 
 `@NODE@` 写错的表现是 unit 每十秒以 127 退出、`Restart=always` 把它变成一个看不见的循环，
 而 `systemctl status` 只写着 "Scheduled restart job"。`loginctl enable-linger` 忘了的表现是
@@ -593,17 +595,32 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 ## 8. 升级
 
 ```bash
-deploy/update.sh      # git pull --ff-only + 重建镜像 + 重启已装的 unit
+deploy/update.sh
 ```
+
+脚本按这个顺序走，任何一步失败就停，不会打印「更新完成」：
+
+1. 工作区必须干净、HEAD 必须在分支上。否则 `git pull --ff-only` 可能留下一个既不是
+   新提交也不是旧提交的在跑版本，而镜像已经重建过了。
+2. `git pull --ff-only`。
+3. 用 `deploy/` 里最新的三份**模板重装** `~/.config/systemd/user/` 下的 unit，再
+   `daemon-reload`。只重启不重装的话，`KillMode`、`RuntimeDirectory`、`ExecStart` 的
+   改动永远到不了 systemd。
+4. 读 `data/*/policy.json` 里的 `container.image`，为每一个在用的 tag 重建镜像（也可以
+   用 `GENG_IMAGE` 再指定一个）。用 `--image` 建的实例不该因为只重建了
+   `geng-agent:latest` 就一直留在旧镜像上。
+5. 只重启已启用的 unit。重启失败是升级失败——旧脚本用 `2>/dev/null || true` 把它和
+   成功印成同一句话。
 
 | 改了什么 | 要做什么 | 它会知道吗 |
 |---|---|---|
 | `internal/`、`cmd/` | `git pull` + 重启 unit | 直接经历到（不同的纸、不同的行为） |
 | `image/extensions/` | 存盘（`build.sh` 对它没有作用） | 下一轮醒来工具就是新的 |
 | `Dockerfile` | 重建镜像 | 下一张纸开头多一行 `环境变了。` |
+| `deploy/*.service`（模板） | `deploy/update.sh` 会重装，**不用手拷** | 下一次 `systemctl` 重启起生效 |
 | `deploy/policy.json`（模板） | **没有用**，老实例的 policy 是生成时的副本；要手改 `data/<inst>/policy.json` | — |
 
-最后一行是最容易漏的：模板只是 `init` 的输入。所以升级之后值得跑一次
+倒数第二行和最后一行是一对：unit 模板会被重装，policy 模板不会。所以升级之后值得跑一次
 `geng doctor <inst>`，看它有没有报 policy 与模板不一致。
 
 历史被重写过（`git pull` 报 "no common history"）时不是坏了，是那份 clone 停在旧提交上：
