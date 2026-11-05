@@ -11,6 +11,10 @@
     "noEmit": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    // the tree is clean under both, so an unused import or local is a compile error rather
+    // than something a reader has to notice
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
     "skipLibCheck": true,
     "types": ["node"]
   },
