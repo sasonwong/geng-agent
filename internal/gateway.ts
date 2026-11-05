@@ -1,5 +1,5 @@
 import { existsSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { attentionActive, parseAttention } from "./attention.ts";
 import { Tripwire } from "./tripwire.ts";
 import { quoteFor, quotedOf } from "./quote.ts";
@@ -197,6 +197,49 @@ export const HANDLE_ATTEMPTS = 5;
  * not to spin. */
 const POLL_PAUSE_MS = 3_000;
 
+/** One thing a queued item still owes: a `/work` path the container named, or a host path. */
+export interface SendStep {
+  /** what goes back into the queue file when this step has not been sent yet */
+  given: string;
+  /** where the bytes actually are */
+  path: string;
+  name: string;
+  kind: "work" | "file";
+}
+
+/**
+ * The upload half of an item, decided once, before anything is sent.
+ *
+ * Two reasons it is a plan and not a loop over `files` followed by a loop over
+ * `attachments`: a `/work` path that cannot be published is refused here (a retry would
+ * otherwise repeat the same line every two seconds), and the retry needs to know exactly
+ * which of these already went out. A counted prefix over the two lists did not survive a
+ * refusal in the middle: `["/etc/x", "/work/ok"]` would keep the refused one and drop the
+ * sent one.
+ */
+export function sendPlan(
+  workspace: string,
+  files: string[],
+  attachments: { path: string; name: string }[],
+): { steps: SendStep[]; refused: string[] } {
+  const steps: SendStep[] = [];
+  const refused: string[] = [];
+  for (const given of files) {
+    // the path came from inside the container, so it can be anything it likes: only
+    // /work is its own, and only files that exist there are sent
+    const host = hostPathForWorkPath(workspace, given);
+    if (host === null) {
+      refused.push(given);
+      continue;
+    }
+    steps.push({ given, path: host, name: basename(host), kind: "work" });
+  }
+  // the daemon resolved these from ids it handed out, so they are already host paths;
+  // nothing here can be talked into reading somewhere else
+  for (const a of attachments) steps.push({ given: a.path, path: a.path, name: a.name, kind: "file" });
+  return { steps, refused };
+}
+
 export function failedAttempt(
   failures: Map<string, number>,
   file: string,
@@ -346,7 +389,13 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     files: string[] = [],
     replyTo?: { chat: number; messageId: number },
     attachments: { path: string; name: string }[] = [],
-  ): Promise<{ ack: boolean; sent: number; error: Error | null }> => {
+  ): Promise<{
+    ack: boolean;
+    sent: number;
+    error: Error | null;
+    /** the upload steps still owed, when the failure was one of them */
+    left?: { files: string[]; attachments: { path: string; name: string }[] };
+  }> => {
     const cfg = bots[key];
     if (!cfg) return { ack: false, sent: 0, error: null };
     const mine = (chats[key] ??= { known: {} });
@@ -408,28 +457,26 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       }
       sent += 1;
     }
-    for (const given of files) {
-      // the path came from inside the container, so it can be anything it likes: only
-      // /work is its own, and only files that exist there are sent
-      const host = hostPathForWorkPath(p?.workspace ?? "", given);
-      if (host === null) {
-        writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
-        continue;
-      }
-      try {
-        await sendFile(cfg.token, chat, host);
-      } catch (err) {
-        // all the words went out — `sent` covers them — so only the files are retried
-        return { ack: false, sent, error: err as Error };
-      }
+    const { steps, refused } = sendPlan(p?.workspace ?? "", files, attachments);
+    for (const given of refused) {
+      writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
     }
-    // the daemon resolved these from ids it handed out, so they are already host paths;
-    // nothing here can be talked into reading somewhere else
-    for (const a of attachments) {
+    for (const [i, step] of steps.entries()) {
       try {
-        await sendFile(cfg.token, chat, a.path);
+        await sendFile(cfg.token, chat, step.path);
       } catch (err) {
-        return { ack: false, sent, error: err as Error };
+        // all the words went out — `sent` covers them — so only the uploads are retried,
+        // and only the ones that did not: `left` is what the queue file is rewritten to.
+        const owed = steps.slice(i);
+        return {
+          ack: false,
+          sent,
+          error: err as Error,
+          left: {
+            files: owed.filter((s) => s.kind === "work").map((s) => s.given),
+            attachments: owed.filter((s) => s.kind === "file").map((s) => ({ path: s.path, name: s.name })),
+          },
+        };
       }
     }
     return { ack: true, sent, error: null };
@@ -809,7 +856,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
             ackOutbox(dir, item.file);
             continue;
           }
-          let outcome: { ack: boolean; sent: number; error: Error | null };
+          let outcome: Awaited<ReturnType<typeof deliver>>;
           try {
             outcome = await deliver(key, item.messages, item.chat, item.files, item.replyTo, item.attachments);
           } catch (err) {
@@ -818,7 +865,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
           }
           // What went out leaves the queue: a retry says only the rest, not the parts
           // already delivered (and already in the transcript).
-          if (outcome.sent > 0) trimOutbox(item.file, outcome.sent);
+          if (outcome.sent > 0 || outcome.left !== undefined) trimOutbox(item.file, outcome.sent, outcome.left);
           if (outcome.ack) {
             ackOutbox(dir, item.file);
             sendFailures.delete(item.file);

@@ -115,17 +115,29 @@ export function ackOutbox(dir: string, file: string): void {
 }
 
 /**
- * Take the parts that already went out of the queue file, so a retry says only the rest.
- * A multi-part send that failed half-way used to be retried whole: the first parts went
- * out twice, and the transcript (written as each part went out) showed the duplication.
+ * Take what already went out of the queue file, so a retry says only the rest. A
+ * multi-part send that failed half-way used to be retried whole: the first parts went out
+ * twice, and the transcript (written as each part went out) showed the duplication.
+ *
+ * `left` is the upload side of the same fact: the files that did *not* go out, in the
+ * order they are still owed. Without it, a batch whose second file failed re-sent the
+ * first one on every retry (up to five) — the messages were trimmed, the files were not.
  */
-export function trimOutbox(file: string, sent: number): void {
-  if (sent <= 0) return;
+export function trimOutbox(
+  file: string,
+  sent: number,
+  left?: { files: string[]; attachments: { path: string; name: string }[] },
+): void {
+  if (sent <= 0 && left === undefined) return;
   const raw = readJson<Record<string, unknown> | null>(file, null);
   if (raw === null || !Array.isArray(raw.messages)) return;
-  const left = (raw.messages as unknown[]).slice(sent);
-  if (left.length === raw.messages.length) return;
-  writeJson(file, { ...raw, messages: left });
+  const messages = (raw.messages as unknown[]).slice(sent);
+  if (messages.length === raw.messages.length && left === undefined) return;
+  writeJson(file, {
+    ...raw,
+    messages,
+    ...(left === undefined ? {} : { files: left.files, attachments: left.attachments }),
+  });
 }
 
 export function ensureGatewayDirs(root: string): { ops: string } {

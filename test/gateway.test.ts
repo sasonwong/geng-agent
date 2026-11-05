@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { failedAttempt, knownPlaces, noteChat, readChats, route, targetChat } from "../internal/gateway.ts";
-import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
+import { failedAttempt, knownPlaces, noteChat, readChats, route, sendPlan, targetChat } from "../internal/gateway.ts";
+import { ackOutbox, isMuted, readMutes, readOutbox, trimOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/fs.ts";
 import { makePaths } from "../internal/paths.ts";
 
@@ -184,4 +184,51 @@ test("a failed send is retried a few times, then let go of with one line", () =>
   // and a success clears the count, so separate blips never add up
   failures.delete("1-x.json");
   assert.deepEqual(failedAttempt(failures, "1-x.json"), { n: 1, giveUp: false });
+});
+
+test("the upload plan refuses what it cannot send, and keeps the order", () => {
+  // `/etc/x` is not /work and `/work/gone` is not there: both are refused once, here, not
+  // once per retry. The plan is what the retry resumes from, so its order is the queue's.
+  const root = mkdtempSync(join(tmpdir(), "geng-plan-"));
+  const work = join(root, "work");
+  mkdirSync(work);
+  writeFileSync(join(work, "a.txt"), "a");
+  writeFileSync(join(work, "b.txt"), "b");
+
+  const { steps, refused } = sendPlan(work, ["/work/a.txt", "/etc/passwd", "/work/gone", "/work/b.txt"], [
+    { path: "/files/F1-x.bin", name: "x.bin" },
+  ]);
+  assert.deepEqual(refused, ["/etc/passwd", "/work/gone"]);
+  assert.deepEqual(
+    steps.map((s) => [s.kind, s.given, s.name]),
+    [
+      ["work", "/work/a.txt", "a.txt"],
+      ["work", "/work/b.txt", "b.txt"],
+      ["file", "/files/F1-x.bin", "x.bin"],
+    ],
+  );
+});
+
+test("a retry resends the files that did not go out, not the ones that did", () => {
+  // The words were trimmed; the files were not, and a batch whose second upload failed
+  // re-sent the first one on every retry (five of them). `left` is the upload half of the
+  // same trim: the failing one and everything after it.
+  const dir = mkdtempSync(join(tmpdir(), "geng-outbox-"));
+  const file = join(dir, "item.json");
+  writeJson(file, {
+    messages: ["one", "two"],
+    files: ["/work/a.txt", "/work/b.txt"],
+    attachments: [{ path: "/files/F1-x.bin", name: "x.bin" }],
+  });
+
+  trimOutbox(file, 1, { files: ["/work/b.txt"], attachments: [{ path: "/files/F1-x.bin", name: "x.bin" }] });
+
+  const left = JSON.parse(readFileSync(file, "utf8")) as {
+    messages: string[];
+    files: string[];
+    attachments: { path: string; name: string }[];
+  };
+  assert.deepEqual(left.messages, ["two"], "已经说出去的那句不再说一遍");
+  assert.deepEqual(left.files, ["/work/b.txt"], "已经发出去的那个文件不再发一遍");
+  assert.deepEqual(left.attachments, [{ path: "/files/F1-x.bin", name: "x.bin" }]);
 });
