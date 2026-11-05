@@ -150,3 +150,22 @@ test("an offset past the end is not the same thing as having no body", () => {
   writeFileSync(join(p.journal, "J20260302-2.md"), "");
   assert.match(openText(p, "J20260302-2", 0).text, /没有正文/);
 });
+
+test("limit counts the things it shows, not the lines, and never cuts one in half", () => {
+  const p = fixture();
+  mkdirSync(p.journal, { recursive: true });
+  // three entries that all match, each matching on two lines
+  for (const n of [1, 2, 3]) {
+    writeFileSync(join(p.journal, `J2026030${n}-1.md`), `有这个词 ${n} 上面\n中间\n下面还有这个词 ${n}\n`);
+  }
+  const one = recallText(p, { query: "这个词", limit: 1 });
+  // one item: its id line and both hit lines; a header with no hits is not an answer
+  assert.equal(one.split("\n").filter((l) => /^J/.test(l)).length, 1);
+  assert.match(one, /有这个词/);
+  assert.equal((one.match(/有这个词|下面还有这个词/g) ?? []).length, 2);
+  // two asked for means two things, even though each brings its own lines along
+  assert.equal(recallText(p, { query: "这个词", limit: 2 }).split("\n").filter((l) => /^J/.test(l)).length, 2);
+  // limit bigger than the matches shows all of them, and no-query still means items
+  assert.equal(recallText(p, { query: "这个词", limit: 50 }).split("\n").filter((l) => /^J/.test(l)).length, 3);
+  assert.equal(recallText(p, { limit: 2 }).split("\n").filter((l) => /^J/.test(l)).length, 2);
+});

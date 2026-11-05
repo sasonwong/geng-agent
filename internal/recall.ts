@@ -349,12 +349,17 @@ export function recallText(p: Paths, q: RecallQuery): string {
   }
 
   const out: string[] = [];
+  // `limit` is the number of things shown, in both branches — the listing above counts
+  // items, so a query must not count its own extra lines instead: asking for two and
+  // getting one because each match took three lines is the same word meaning two things.
+  let shown = 0;
   for (const item of items) {
     const found = hits(item, query);
     if (found.length === 0) continue;
     out.push(`${item.id}  ${item.source}  ${stamp(item.at)}`);
     for (const line of found) out.push(`  ${line}`);
-    if (out.length >= limit) break;
+    shown += 1;
+    if (shown >= limit) break;
   }
   return out.length === 0 ? `没有哪一处提到「${query}」。` : out.join("\n");
 }
