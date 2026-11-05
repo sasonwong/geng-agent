@@ -371,8 +371,14 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       const raw = (params as Record<string, unknown>).to;
       let chat: number | undefined;
       if (raw !== undefined && raw !== null) {
-        chat = typeof raw === "number" ? raw : Number(String(raw).trim());
-        if (!Number.isFinite(chat)) return { status: 400, body: { error: `to 要写 chat id（数字），收到的是 ${JSON.stringify(raw)}` } };
+        // An empty string is a field the caller filled with nothing, not chat 0: Number("")
+        // is 0, which is a number and therefore used to pass every check and become a
+        // queue entry addressed to nowhere.
+        const asked = typeof raw === "number" ? raw : String(raw).trim();
+        if (asked !== "") {
+          chat = Number(asked);
+          if (!Number.isFinite(chat)) return { status: 400, body: { error: `to 要写 chat id（数字），收到的是 ${JSON.stringify(raw)}` } };
+        }
       }
       // A quote names the conversation it belongs to, so it can stand in for `to`; with
       // neither, there is no default when there is more than one place — the fallback is

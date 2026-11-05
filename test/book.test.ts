@@ -240,6 +240,12 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   // and a quote it cannot parse is a refusal, not a message without one
   const quote = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], replyTo: "151" }));
   assert.equal(quote.status, 400);
+  // an empty `to` is a blank, not chat 0: the number it used to become passed every check
+  const blank = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], to: "" }));
+  assert.equal(blank.status, 200);
+  const blankId = (blank.body as { id: string }).id;
+  const blankWritten = JSON.parse(readText(join(paths.outbox, `${blankId}.json`)) ?? "{}");
+  assert.equal("chat" in blankWritten, false, "空 to 被当成 chat 0 写进了队列");
 });
 
 test("a chat the gateway learned after the daemon started can be spoken into", async () => {
