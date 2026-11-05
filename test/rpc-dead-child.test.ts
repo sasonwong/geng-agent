@@ -7,7 +7,6 @@ test("a child that dies before answering becomes a symptom, not a silent hang", 
   const r = await runWaking({
     command: { cmd: "sh", args: ["-c", "exit 1"], env: {}, cwd: "/tmp" },
     instance: "probe",
-    isDocker: false,
     timeoutMs: 30_000,
     prompt: "hi",
     repeatThreshold: 3,

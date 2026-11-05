@@ -34,8 +34,6 @@ export interface RpcResult {
   aborted: boolean;
   timedOut: boolean;
   startFailed: boolean;
-  code: number | null;
-  signal: NodeJS.Signals | null;
   toolCalls: ToolCall[];
   /** The action that had started and not finished when the round was killed. */
   openCall: { name: string; preview: string; atMs: number } | null;
@@ -49,15 +47,12 @@ export interface RpcResult {
   durationMs: number;
   /** Filled in by the daemon from the session file: the stream carries no such event,
    * so a result built anywhere else simply does not know. */
-  modelErrors?: number;
-  /** True when the round's last model request came back as an error. */
   endedOnModelError?: boolean;
 }
 
 export interface RpcOptions {
   command: Command;
   instance: string;
-  isDocker: boolean;
   timeoutMs: number;
   prompt: string;
   repeatThreshold: number;
@@ -267,8 +262,9 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   const kill = async () => {
     if (killed) return;
     killed = true;
-    if (o.isDocker) await killContainer(o.instance);
-    else child.kill("SIGTERM");
+    // A round is always a container, so a killed round has to die with it: the `docker run`
+    // client alone would leave the container running with nobody reading its output.
+    await killContainer(o.instance);
   };
 
   activeKill = () => {
@@ -368,8 +364,6 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     aborted,
     timedOut,
     startFailed,
-    code: child.exitCode,
-    signal: child.signalCode,
     toolCalls,
     openCall,
     repeat: watcher.repeat,

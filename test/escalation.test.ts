@@ -12,8 +12,6 @@ function rpc(over: Partial<RpcResult>): RpcResult {
     aborted: false,
     timedOut: false,
     startFailed: false,
-    code: 0,
-    signal: null,
     toolCalls: [],
     openCall: null,
     repeat: null,
@@ -150,18 +148,17 @@ test("a run of cuts says one thing until it parks, and the parked line says the 
 test("a round whose last request errored is not reported as an empty one", () => {
   // the same silence, two causes: pi retries a failed request, records an empty assistant
   // message, and settles normally — so without the count this round looks like a quiet one
-  assert.equal(classify(rpc({ endedOnModelError: true, modelErrors: 5 })), "model-error");
+  assert.equal(classify(rpc({ endedOnModelError: true })), "model-error");
   // even when it got some work done before the network went away
   assert.equal(
     classify(
       rpc({
         endedOnModelError: true,
-        modelErrors: 5,
         toolCalls: [{ name: "bash", key: "k", preview: "ls", atMs: 0, durationMs: 5, isError: false }],
       }),
     ),
     "model-error",
   );
   // an error it recovered from is not a failed round: the last thing it said was words
-  assert.equal(classify(rpc({ endedOnModelError: false, modelErrors: 2 })), "ok");
+  assert.equal(classify(rpc({ endedOnModelError: false })), "ok");
 });

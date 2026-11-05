@@ -175,7 +175,7 @@ function logLine(
   // messages only: a `[daemon@…]` notice has no file behind it, and saying it is not the
   // same act as handing over something a person wrote
   inj: { total: number; unread: number },
-  /** Model-key fetches: one per model request is normal, more is somebody else asking. */
+  /** Model requests: one per call is normal, more means something else used the socket. */
   keyFetches: number,
   /** Outbound connections through the proxy: the count of places it went. */
   netCalls: number,
@@ -244,15 +244,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   };
   let policy: Policy = loadPolicy(paths.policy);
 
-  // Every waking starts a fresh container from the image tag, so a rebuilt image is
-  // picked up by itself — but nothing would tell it that its world changed.
-  const currentEnv = {
-    imageId: await imageId(policy),
-    version: packageVersion(paths.root),
-    search: searchConfigured(paths.root),
-  };
-  const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);
-
   let releaseLock: (() => void) | null = null;
   if (!o.dry) {
     releaseLock = acquirePidLock(join(paths.data, "daemon.pid"));
@@ -287,8 +278,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // at any moment of a round, not only at its start. A daemon that cannot serve it still
   // runs rounds: the tools report the outage themselves and dying here would take the
   // instance down over a socket.
-  // Model-key fetches in the current round. The endpoint lives as long as the daemon, so
-  // the counter is reset when a round starts and read when it logs.
+  // Model requests in this round. The endpoint lives as long as the daemon, so the counter
+  // is reset when a round starts and read when it logs.
   let keyFetches = 0;
   let netCalls = 0;
   if (!o.dry) {
@@ -309,9 +300,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
             `${new Date().toISOString()} ${event.ok ? "出去" : "拒绝"} ${event.target}${event.why ? `（${event.why}）` : ""}`,
           );
         },
-        // pi asks for the key on every model request, so this should track the number of
-        // calls. A round whose count is higher fetched the key for something else — the
-        // socket is reachable from `bash` too, and this is the only way that shows up.
+        // One per model request: pi posts here for every model call, and the socket is
+        // reachable from `bash` too — a count above the number of calls is that, and it is
+        // the only way it shows up.
         onKeyFetch: () => {
           keyFetches += 1;
         },
@@ -343,6 +334,16 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       policy = reloaded;
       log(`policy.json 变了：${policySummary(policy)}`);
     }
+    // Recomputed every round, not once at startup: each waking starts a fresh container
+    // from the image tag, so a rebuild is picked up by itself — and this comparison is the
+    // only thing that tells it its world changed. Read once at startup, a rebuild while the
+    // daemon kept running was never reported, and `meta.env` kept claiming the old image.
+    const currentEnv = {
+      imageId: await imageId(policy),
+      version: packageVersion(paths.root),
+      search: searchConfigured(paths.root),
+    };
+    const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);
     // derived from the policy, so it is read after the reload above rather than once
     const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
     // Only while it is not running: a file vanishing under a read is the failure this
@@ -535,7 +536,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       },
       command: buildCommand(paths, policy, sessionId, systemPrompt),
       instance: paths.instance,
-      isDocker: true,
       timeoutMs: policy.cycle.timeoutSec * 1000,
       prompt: packet,
       repeatThreshold: policy.cycle.repeatThreshold,
@@ -546,7 +546,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // The ledger goes down before anything else is done with the round: it is the one
     // record of what actually happened, and every count on the next page is read out of
     // it. A crash after this line loses the bookkeeping, not the actions.
-    if (!o.dry) appendActs(paths.acts, actsFor(waking, result.toolCalls));
+    appendActs(paths.acts, actsFor(waking, result.toolCalls));
 
     // Every waking is its own session, so the session total *is* this cycle's cost.
     // (It was a difference while one session spanned many wakings.)
@@ -568,9 +568,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // file is the only place that failure was written down, so count it there.
     const sessionFile = listSessionFiles(paths.sessionDir).find((f) => f.endsWith(`${sessionId}.jsonl`));
     if (sessionFile !== undefined) {
-      const failures = modelFailures(sessionFile);
-      result.modelErrors = failures.count;
-      result.endedOnModelError = failures.last;
+      result.endedOnModelError = modelFailures(sessionFile).last;
     }
 
     const symptom = classify(result);
