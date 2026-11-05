@@ -460,7 +460,15 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // leaves the book, so `download` names a file by id and chooses where it lands.
     const url = req.url ?? "";
     if (req.method === "GET" && url.startsWith("/files/")) {
-      const wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      // A `%` that is not an escape is a client bug, not a reason to take the daemon (and
+      // the round it is serving) down with an uncaught URIError.
+      let wanted: string;
+      try {
+        wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      } catch {
+        reply(400, { error: `不是合法的 URL 编码：${url.slice("/files/".length)}` });
+        return;
+      }
       const hit = fileById(o.paths, wanted);
       if (hit === null) {
         reply(404, { error: `没有这个文件：${wanted}` });
@@ -471,10 +479,20 @@ export function startBookServer(o: BookOptions): Promise<Server> {
           "content-type": "application/octet-stream",
           "content-length": String(statSync(hit.path).size),
         });
-        createReadStream(hit.path).pipe(res);
       } catch (err) {
         reply(500, { error: `读不出来：${(err as Error).message}` });
+        return;
       }
+      // The read fails asynchronously, after the headers: a file pruned between the two
+      // stats, a directory that happens to be named like an id, a disk that stops
+      // answering. Without a handler the error event is uncaught and takes the daemon —
+      // and the round it is serving — with it.
+      createReadStream(hit.path)
+        .on("error", (err) => {
+          log(`读 ${hit.name} 出错：${err.message}`);
+          res.destroy();
+        })
+        .pipe(res);
       return;
     }
     // Model traffic comes through here, because the container has no key and must not
