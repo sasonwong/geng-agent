@@ -7,7 +7,7 @@ import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
 import { forwardPlain, handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
-import { keyCanMute } from "./mute.ts";
+import { keyCanMute, writeOps } from "./mute.ts";
 import { parseReplyTo } from "./quote.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -242,6 +242,13 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       const why = text(params, "why") ?? "";
       const current = readJson<Record<string, unknown>>(paths.mute, {});
       writeJson(paths.mute, { ...current, [target]: { until, why } });
+      // A person who has just been silenced is the one reader of this line: it is a surprise
+      // only they can explain, and the page (where the reason lives) is not theirs.
+      writeOps(
+        join(paths.root, "data", "_ops"),
+        `mute@${paths.instance}`,
+        `${target === "*" ? "所有群里的闲话" : target} 被静音到 ${until}${why === "" ? "" : `，理由：${why}`}。私聊、@ 和回复照样叫醒它。`,
+      );
       return { status: 200, body: { target, until, why } };
     }
 

@@ -254,9 +254,18 @@ test("the page stays bounded without being cut: nothing external is pasted", () 
 
 test("a mute is stated as state, and says plainly that it changes nothing", () => {
   const { input } = fixture();
-  const text = buildPacket(input({ mutes: { "chat:-1001234": { until: "2026-03-02T09:00:00Z" } } }));
-  assert.match(text, /你静音了 chat:-1001234（到 2026-03-02T09:00:00Z）/);
+  const text = buildPacket(
+    input({ mutes: { "chat:-1001234": { until: "2026-03-02T09:00:00Z", why: "群里的闲话" } } }),
+  );
+  // the reason is on the page: `mute` makes it say why, so a why nowhere is a sentence it
+  // was made to write for nothing
+  assert.match(text, /你静音了 chat:-1001234（到 2026-03-02T09:00:00Z，因为 群里的闲话）/);
   assert.match(text, /不改变投递/);
+  // a mute written by hand has no reason, and the line still reads
+  assert.match(
+    buildPacket(input({ mutes: { "chat:-1001234": { until: "2026-03-02T09:00:00Z" } } })),
+    /你静音了 chat:-1001234（到 2026-03-02T09:00:00Z）。/,
+  );
   assert.doesNotMatch(buildPacket(input({ mutes: {} })), /静音/);
 });
 

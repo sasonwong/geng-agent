@@ -171,6 +171,13 @@ test("mute, listen, forget and propose are written by the host, in the shape it 
   const muted = JSON.parse(readText(f.paths.mute) ?? "{}") as Record<string, { until: string; why: string }>;
   assert.equal(muted["chat:-1001234567890"]?.why, "群里的闲话");
   assert.ok(Date.parse(muted["chat:-1001234567890"]?.until ?? "") > Date.now());
+  // the person who was silenced is the one reader of this line, and the ops queue is how it
+  // reaches them: the page (where the reason lives) is not theirs
+  const ops = readdirSync(join(f.root, "data", "_ops", "outbox")).filter((n) => n.endsWith(".json"));
+  assert.equal(ops.length, 1, "静音没有写进 ops");
+  const line = JSON.stringify(JSON.parse(readText(join(f.root, "data", "_ops", "outbox", ops[0] as string)) ?? "{}"));
+  assert.match(line, /mute@alice/);
+  assert.match(line, /群里的闲话/);
   // a key the gateway never consults would be a silence in name only
   assert.equal((await f.call("/mute/set", { target: "dm", minutes: 5, why: "x" })).status, 400);
 

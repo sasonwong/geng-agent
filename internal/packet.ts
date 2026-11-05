@@ -33,7 +33,7 @@ export interface PacketInput {
   /** The ambient slice of `inbox`, so the two may be counted apart. */
   lowInbox: InboxMsg[];
   /** Mutes that are still in force, shown as state — they do not change delivery. */
-  mutes: Record<string, { until?: string | null }>;
+  mutes: Record<string, { until?: string | null; why?: string }>;
   /** How the round before this one ended, when it did not end on its own. */
   cut: CutRecord | null;
   /** A [观察] block explaining how the last waking ended, if it did not end well. */
@@ -163,7 +163,7 @@ function renderAttention(
 }
 
 function renderMutes(
-  mutes: Record<string, { until?: string | null }>,
+  mutes: Record<string, { until?: string | null; why?: string }>,
   places: { id: number; kind?: "private" | "group" }[],
 ): string | null {
   // a key that cannot bite is not a silence: printing it would make the page vouch for it.
@@ -174,7 +174,13 @@ function renderMutes(
     ([key]) => keyCanMute(key) && !(key.startsWith("chat:") && dms.has(Number(key.slice("chat:".length)))),
   );
   if (entries.length === 0) return null;
-  const parts = entries.map(([key, m]) => (m.until ? `${key}（到 ${m.until}）` : key));
+  // the reason it gave is on the page too: the tool makes it say why, and a why nobody
+  // reads is a sentence it was made to write for nothing
+  const parts = entries.map(([key, m]) => {
+    const since = m.until ? `到 ${m.until}` : "";
+    const why = m.why ? `${since === "" ? "" : "，" }因为 ${excerpt(m.why, 80)}` : "";
+    return `${key}（${since}${why}）`;
+  });
   return `你静音了 ${parts.join("、")}。这不改变投递：私聊和点名照样叫醒你。`;
 }
 
