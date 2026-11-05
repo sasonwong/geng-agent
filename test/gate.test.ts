@@ -1,7 +1,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CLEAN_GIT, cleanupRepos, cleanGitEnv, commit, gitIn, repo, scan } from "../tools/gate/fixture.ts";
 
@@ -16,6 +16,7 @@ import { CLEAN_GIT, cleanupRepos, cleanGitEnv, commit, gitIn, repo, scan } from 
 // /home/<谁>/ 会被门抓住——那说明门在工作，但也说明测试素材得运行时造。
 const ACCOUNT = ["hostname", "alice"].join("-");
 const HOST_HOME = ["", "home", ACCOUNT, "proj", "geng"].join("/");
+const TOKEN = ["gh", "p_", "A".repeat(24)].join("");
 
 after(cleanupRepos);
 
@@ -120,10 +121,83 @@ test("a commit identity that is not a noreply address is caught", () => {
   });
   const r = scan(dir);
   assert.equal(r.code, 1);
-  // 只断言「说了是哪一类、给了一处」，不断言那句话里印了什么：门要不要把身份值
-  // 打进公开日志，是门的事，不该被一条测试钉死。
+  // 说哪一类、哪一处就够。门自己的输出会进公开 CI 日志，把刚抓到的邮箱再抄一遍
+  // 等于多留一份拷贝——和文件头写着的「never the matched value」正好相反。
   assert.match(r.out, /提交身份: /);
   assert.match(r.out, /gate: 1 处/);
+  assert.equal(r.out.includes("dev@corp.example"), false, "公开日志里不能印身份值");
+});
+
+// 下面几条钉的是「门没看见」和「门说干净」长得一模一样的那几种形状。旧实现把
+// `git show :<path>` 的失败一律 `catch { continue }`，于是非 ASCII 文件名、读不到的
+// blob、二进制内容都能换来一行 gate: ok；从子目录跑则干脆只扫那一个目录。
+
+test("a non-ASCII filename is scanned, not silently skipped", () => {
+  const dir = repo();
+  const name = ["笔", "记.md"].join("");
+  commit(dir, { "README.md": "ok\n" });
+  writeFileSync(join(dir, name), `调用时带上 ${TOKEN}\n`);
+  gitIn(dir, "add", "-A"); // 门读的是 index，`git add` 就是它该看的那一刻
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /GitHub 令牌: /);
+  assert.equal(r.out.includes(TOKEN), false);
+});
+
+test("running the gate from a subdirectory still checks the whole tree", () => {
+  const dir = repo();
+  mkdirSync(join(dir, "sub"));
+  writeFileSync(join(dir, "README.md"), `调用时带上 ${TOKEN}\n`);
+  commit(dir, { "sub/ok.md": "ok\n" }); // add -A 会把上面那份 README 一起收进去
+  const r = scan(dir, join(dir, "sub"));
+  assert.equal(r.code, 1);
+  assert.match(r.out, /GitHub 令牌: README\.md:1/);
+  assert.equal(r.out.includes(TOKEN), false);
+});
+
+test("an index entry whose blob cannot be read is a failure, not a clean file", () => {
+  const dir = repo();
+  commit(dir, { "README.md": "ok\n" });
+  // 索引里能挂住一个不存在的 sha，cat-file 读不出来。旧写法把报错吞成「这个文件很干净」。
+  gitIn(dir, "update-index", "--add", "--cacheinfo", `100644,${"a".repeat(39)}1,ghost.txt`);
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /读不到索引内容: ghost\.txt/);
+});
+
+test("a credential saved as UTF-16 is still a credential", () => {
+  const dir = repo();
+  const line = `GENG_MAIL_TOKEN=${["Zm9vYmFy", "YmF6cXV4MTIzNDU2Nzg5MA"].join("")}\n`;
+  writeFileSync(join(dir, "u16.env"), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(line, "utf16le")]));
+  gitIn(dir, "add", "-A");
+  gitIn(dir, "commit", "-q", "-m", "fixture");
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /(?:密钥赋值|口令赋值): u16\.env:1/);
+});
+
+test("a blob the gate cannot decode is named, not waved through", () => {
+  const dir = repo();
+  writeFileSync(join(dir, "blob.bin"), Buffer.from([0x00, 0x01, 0x02, 0xff]));
+  gitIn(dir, "add", "-A");
+  gitIn(dir, "commit", "-q", "-m", "fixture");
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /无法检查: blob\.bin/);
+});
+
+test("an annotated tag's tagger is an identity the gate has to see", () => {
+  const dir = repo();
+  commit(dir, { "README.md": "ok\n" });
+  execFileSync("git", ["tag", "-a", "v1", "-m", "tag"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: { ...CLEAN_GIT, GIT_COMMITTER_NAME: "T", GIT_COMMITTER_EMAIL: "tag@corp.example" },
+  });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /refs\/tags\/v1 的 tagger/);
+  assert.equal(r.out.includes("tag@corp.example"), false);
 });
 
 test("the fixture does not inherit the machine's git config", () => {

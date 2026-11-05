@@ -117,7 +117,17 @@ export const RULES = [
   },
   { name: "快照 ID", noisy: true, sev: "medium", src: String.raw`\b[0-9a-f]{64}\b` },
   { name: "长数字 ID", noisy: true, sev: "low", src: String.raw`(?<![0-9A-Za-z_.\-])\d{9,11}(?![0-9])` },
-].map((r) => ({ ...r, re: new RegExp(r.src, `u${r.flags ?? ""}`) }));
+].map((r) => {
+  const flags = `u${r.flags ?? ""}`;
+  return {
+    ...r,
+    // `re` 留给外部对照用（test/doctor-keys-parity.test.ts 会拿它跑 `.test()`）。
+    // 带 `g` 的正则在 `.test()` 上是有状态的：同一条规则测两个样本，第二次会从
+    // 第一个样本的 lastIndex 开始。所以扫一行用的全局版另存一份，不碰 `re`。
+    re: new RegExp(r.src, flags),
+    all: new RegExp(r.src, `${flags}g`),
+  };
+});
 
 /** 一句话能说清楚的假值：项目自己写的示例、文档里的占位符。 */
 const SYNTHETIC = new Set([
@@ -128,7 +138,18 @@ const SYNTHETIC = new Set([
   "demo", "user", "host", "server", "example", "test",
 ]);
 
-/** 出现即忽略整行：这一行本来就在说「这里应该填什么」。 */
+/**
+ * 占位符只豁免**它所在的那一次命中**，不豁免一整行。
+ *
+ * 旧写法是「这一行里出现 localhost / ${ / your-key 就整行 return []」。那等于说：
+ * 只要把一枚真 token 和任意一个示例词放在同一行——注释、URL、一行 JSON、
+ * 压缩过的 env 导出都天然是这种形状——门就对它完全闭眼。这是一条自己写出来
+ * 的绕过，而且最难发现：门照样报 ok。
+ *
+ * 现在：身份类的「示例 IP / 示例 id」规则仍按整行看（文档里这类行本来就成片出现，
+ * 逐命中判会把每篇文档都变成警告）；凭据类规则绝不整行豁免，只压住匹配本身
+ * 含假值的那一次。
+ */
 const PLACEHOLDERS = [
   "example.com", "example.org", "example.net", "@example", "your-key", "YOUR_KEY",
   "your_key", "your-token", "YOUR_TOKEN", "<token>", "<your", "xxxx", "XXXX",
@@ -182,20 +203,30 @@ function suppressed(name, val, path) {
  * against it, while length and placeholder checks use the trimmed form. The audit
  * scanner does the same, and the two must agree or a report cannot be checked.
  */
+function hasPlaceholder(text) {
+  const low = text.toLowerCase();
+  return PLACEHOLDERS.some((p) => low.includes(p.toLowerCase()));
+}
+
 export function scanLine(path, content) {
   const text = content.trim();
   if (!text) return [];
   const long = text.length > MAX_LINE;
-  const low = text.toLowerCase();
-  if (PLACEHOLDERS.some((p) => low.includes(p.toLowerCase()))) return [];
+  // 只有身份类规则还吃「整行是示例」这个豁免；凭据类永不吃。
+  const lineIsExample = hasPlaceholder(text);
 
   const hits = [];
   for (const rule of RULES) {
     if (long && rule.noisy) continue;
-    const m = rule.re.exec(content);
-    if (!m) continue;
-    if (suppressed(rule.name, m[0], path)) continue;
-    hits.push({ name: rule.name, sev: rule.sev });
+    if (rule.noisy && lineIsExample) continue;
+    // 走遍每一处命中，而不是只看第一处：第一处是假值、第二处是真值时，旧写法
+    // 会连真值一起放过。一条规则一行仍只报一次——门报的是「破了哪条」，不是次数。
+    for (const m of content.matchAll(rule.all)) {
+      if (hasPlaceholder(m[0])) continue;
+      if (suppressed(rule.name, m[0], path)) continue;
+      hits.push({ name: rule.name, sev: rule.sev });
+      break;
+    }
   }
   return hits;
 }
