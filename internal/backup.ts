@@ -236,27 +236,18 @@ async function maybeForget(
 
 /**
  * Which build wrote a snapshot. Restoring a life against a newer binary has to be
- * visible, not mysterious.
+ * visible, not mysterious — and that is the only thing this file is for. The image id
+ * lives in `meta/state.json` (`env.imageId`, compared every cycle) and the policy's shape
+ * lives in the policy file itself; copies here would be fields nobody reads.
  */
 export function writeDeployMeta(paths: Paths): void {
   const file = join(paths.meta, "deploy.json");
   const pkg = readJson<{ version?: string }>(join(paths.root, "package.json"), {});
-  const policy = readJson<{ schema?: number }>(paths.policy, {});
-  const next = {
-    daemonVersion: pkg.version ?? null,
-    policySchema: policy.schema ?? null,
-    imageDigest: readImageDigest(paths),
-  };
+  const next = { daemonVersion: pkg.version ?? null };
   // No timestamp: this file describes the build, not the cycle. Rewriting identical
   // bytes every waking is pure waste.
   if (JSON.stringify(readJson<unknown>(file, null)) === JSON.stringify(next)) return;
   writeJson(file, next);
-}
-
-function readImageDigest(paths: Paths): string | null {
-  const file = join(paths.root, "deploy", "image.digest");
-  const text = readText(file);
-  return text ? text.trim() : null;
 }
 
 export interface RestoreOptions {

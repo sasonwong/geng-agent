@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths } from "../internal/paths.ts";
 import { defaultPolicy } from "../internal/policy.ts";
-import { maybeBackup, backupRepo, parseSnapshots, restore, restoredLooksWhole } from "../internal/backup.ts";
+import { maybeBackup, backupRepo, parseSnapshots, restore, restoredLooksWhole, writeDeployMeta } from "../internal/backup.ts";
 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -41,6 +41,18 @@ test("the repo lives outside the directory being backed up", () => {
   const paths = fixture();
   assert.equal(backupRepo(paths), join(paths.root, "backup", "alice"));
   assert.ok(!backupRepo(paths).startsWith(paths.data));
+});
+
+test("deploy.json says which build wrote the snapshot, and nothing else", () => {
+  // Three fields used to be written here: a version (read by doctor), a policy schema and
+  // an image digest (read by nobody, and the digest file was written by nothing). A field
+  // nobody reads is a promise that something keeps it current.
+  const paths = fixture();
+  writeFileSync(join(paths.root, "package.json"), JSON.stringify({ version: "1.2.3" }));
+  writeDeployMeta(paths);
+  assert.deepEqual(JSON.parse(readFileSync(join(paths.meta, "deploy.json"), "utf8")), {
+    daemonVersion: "1.2.3",
+  });
 });
 
 test("a restored tree is found even when rustic nests the absolute paths", () => {
