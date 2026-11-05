@@ -182,3 +182,44 @@ export function loadPolicy(file: string): Policy {
     },
   };
 }
+
+/** Every dotted key in a policy object, so two of them can be compared leaf by leaf. */
+function keysOf(value: unknown, prefix = ""): string[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return [prefix];
+  return Object.entries(value as Record<string, unknown>).flatMap(([k, v]) =>
+    keysOf(v, prefix === "" ? k : `${prefix}.${k}`),
+  );
+}
+
+const TRAILER = ".schema";
+
+/**
+ * What the template says that this copy does not, and what the copy carries that nothing
+ * reads any more.
+ *
+ * The copy is made once by `init` and never follows the template, so a new default (or a
+ * removed field) changes behaviour silently: the instance keeps working and means something
+ * else. This is the only place that can say so, because it is the only place holding both
+ * files.
+ */
+export function policyDrift(
+  template: Record<string, unknown>,
+  instance: Record<string, unknown>,
+): { missing: string[]; stale: string[] } {
+  const want = new Set(keysOf(template).filter((k) => !k.endsWith(TRAILER)));
+  const have = new Set(keysOf(instance).filter((k) => !k.endsWith(TRAILER)));
+  return {
+    missing: [...want].filter((k) => !have.has(k)).sort(),
+    stale: [...have].filter((k) => !want.has(k)).sort(),
+  };
+}
+
+/** The value a missing key would take, read from the template — the drift message's point. */
+export function templateValue(template: Record<string, unknown>, key: string): unknown {
+  let node: unknown = template;
+  for (const part of key.split(".")) {
+    if (node === null || typeof node !== "object") return undefined;
+    node = (node as Record<string, unknown>)[part];
+  }
+  return node;
+}

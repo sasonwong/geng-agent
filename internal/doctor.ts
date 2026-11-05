@@ -24,7 +24,7 @@ import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { socketPath } from "./book.ts";
 import { makePaths } from "./paths.ts";
-import { loadPolicy, type Policy } from "./policy.ts";
+import { loadPolicy, policyDrift, templateValue, type Policy } from "./policy.ts";
 import { repairTail } from "./session.ts";
 import { onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 
@@ -79,6 +79,34 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     checks.push({ name: "policy 解析", ok: false, detail: (err as Error).message });
     return checks;
   }
+
+  // The copy is frozen at `init`. A key the template has and this file lacks means the
+  // instance is running on a default nobody chose; a key the template dropped is dead
+  // weight that still reads like configuration.
+  const policyTemplate = readJson<Record<string, unknown>>(join(root, "deploy", "policy.json"), {});
+  const copy = readJson<Record<string, unknown>>(p.policy, {});
+  const drift = policyDrift(policyTemplate, copy);
+  const describe = (key: string): string => {
+    const value = templateValue(policyTemplate, key);
+    if (value === undefined) return key;
+    // a twelve-entry default printed in full is a wall of text in a one-line table
+    const shown = Array.isArray(value) ? `[${value.length} 项]` : JSON.stringify(value);
+    return `${key}=${shown}`;
+  };
+  checks.push({
+    name: "policy 跟模板",
+    ok: drift.missing.length === 0 && drift.stale.length === 0,
+    warnOnly: true,
+    detail:
+      drift.missing.length === 0 && drift.stale.length === 0
+        ? "一致"
+        : [
+            drift.missing.length > 0 ? `缺（正在用默认值）：${drift.missing.map(describe).join("、")}` : "",
+            drift.stale.length > 0 ? `多余（没人再读）：${drift.stale.join("、")}` : "",
+          ]
+            .filter((x) => x !== "")
+            .join("；"),
+  });
 
   const settings = readJson<{ defaultProvider?: string; defaultModel?: string; packages?: unknown }>(
     join(p.piDir, "settings.json"),

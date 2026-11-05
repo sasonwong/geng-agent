@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readSearchEnv, searchQuota, startSearchServer } from "../internal/search.ts";
@@ -157,6 +157,44 @@ test("a quota file left at zero by an earlier run is not a permanent verdict", a
     assert.deepEqual(searchQuota(f.root, instance), { limit: 200, left: 200 });
     writeFileSync(usage, JSON.stringify({ day, count: 0, limit: null }));
     assert.equal(searchQuota(f.root, instance)?.limit, 200); // NaN written as null = unset
+  } finally {
+    server?.close();
+    f.restore();
+  }
+});
+
+test("a call that fails upstream costs nothing: only an answer is charged", async () => {
+  const f = fixture();
+  let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
+  const usage = join(f.root, "data", "_ops", "usage", "search.json");
+  const env = readSearchEnv(f.root);
+  assert.ok(env);
+  try {
+    server = await startSearchServer({ root: f.root, env, log: () => {} });
+    const sent: Record<string, unknown>[] = [];
+    const realFetch = globalThis.fetch;
+    // a stand-in upstream that refuses: the quota must not move
+    globalThis.fetch = (async () => {
+      sent.push({});
+      return { ok: false, status: 401, text: async () => '{"error":"bad key"}' } as unknown as Response;
+    }) as typeof fetch;
+    try {
+      const reply = await postJson(f.sock, "/search", { query: "x" });
+      assert.equal(reply.status, 502);
+      assert.equal(JSON.parse(reply.body).remaining, env.dailyLimit, "失败的调用不扣次数");
+      assert.equal(sent.length, 1, "请求确实发出去了");
+      const spent = JSON.parse(readFileSync(usage, "utf8")) as { count?: number };
+      assert.equal(spent.count ?? 0, 0);
+      // and one that did come back is charged exactly once
+      globalThis.fetch = (async () =>
+        ({ ok: true, status: 200, text: async () => '{"results":[]}' }) as unknown as Response) as typeof fetch;
+      const good = await postJson(f.sock, "/search", { query: "y" });
+      assert.equal(good.status, 200);
+      assert.equal(JSON.parse(good.body).remaining, env.dailyLimit - 1);
+      assert.equal((JSON.parse(readFileSync(usage, "utf8")) as { count?: number }).count, 1);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   } finally {
     server?.close();
     f.restore();

@@ -26,7 +26,7 @@ test("the private ranges are excluded by the rules, not by a hardcoded idea of p
   for (const ip of ["10.1.2.3", "127.0.0.1", "169.254.169.254", "fd00::1"]) {
     assert.deepEqual(addrAllowed(ip, rule).ok, false, `${ip} 要被排除`);
   }
-  for (const ip of ["192.0.2.7", "140.82.112.3", "2606:50c0::1"]) {
+  for (const ip of ["192.0.2.7", "198.51.100.9", "2606:50c0::1"]) {
     assert.deepEqual(addrAllowed(ip, rule).ok, true, `${ip} 是公网`);
   }
   // a rule that says nothing allows nothing: silence is not permission

@@ -150,12 +150,22 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
     log(`search.env 重读了：每天 ${env.dailyLimit} 次`);
   };
 
-  const spend = (): { ok: boolean; remaining: number } => {
+  // Two halves, because a failed call costs nothing and used to cost a search: a wrong
+  // key burned the whole day's quota in one round, and the quota is the only limit here.
+  const allowance = (): { ok: boolean; remaining: number } => {
     const q = readJson<Quota>(quotaFile, {});
     const count = q.day === today() ? (q.count ?? 0) : 0;
-    if (count >= env.dailyLimit) return { ok: false, remaining: 0 };
-    writeJson(quotaFile, { day: today(), count: count + 1, limit: env.dailyLimit });
-    return { ok: true, remaining: env.dailyLimit - count - 1 };
+    const left = Math.max(0, env.dailyLimit - count);
+    return left === 0 ? { ok: false, remaining: 0 } : { ok: true, remaining: left };
+  };
+
+  /** Charge one search. Only called for an answer that actually came back. */
+  const charge = (): number => {
+    const q = readJson<Quota>(quotaFile, {});
+    const count = q.day === today() ? (q.count ?? 0) : 0;
+    const next = count + 1;
+    writeJson(quotaFile, { day: today(), count: next, limit: env.dailyLimit });
+    return Math.max(0, env.dailyLimit - next);
   };
 
   const remaining = (): number => {
@@ -200,7 +210,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
         if (params[key] !== undefined) forwarded[key] = params[key];
       }
 
-      const gate = spend();
+      const gate = allowance();
       if (!gate.ok) {
         return send(200, { error: "今天的搜索用完了", remaining: 0 });
       }
@@ -222,7 +232,7 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
             return send(502, { error: `上游 ${response.status}`, remaining: remaining() });
           }
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ data: JSON.parse(text), remaining: remaining() }));
+          res.end(JSON.stringify({ data: JSON.parse(text), remaining: charge() }));
         } catch (err) {
           log(`${operation} 出错：${(err as Error).message}`);
           send(502, { error: (err as Error).message, remaining: remaining() });

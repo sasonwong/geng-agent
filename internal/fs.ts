@@ -53,8 +53,36 @@ export function writeJson(file: string, value: unknown): void {
 }
 
 /** Append + fsync: an append-only log that loses its tail is a log with a hole. */
-export function appendLine(file: string, line: string): void {
+/**
+ * One previous copy, rotated by line count. These files only grow, and the two that grow
+ * fastest are the ones nobody reads in full: `net.log` gets a line per connection and
+ * `daemon.log` a line per round. Twenty thousand lines is roughly a year of rounds and a
+ * few days of a busy network log — small enough to keep, large enough not to worry about.
+ *
+ * The count is per process, seeded by reading the file once. Two processes appending to
+ * one file (the daemon and the gateway both write `ops.log`) can rotate a little early;
+ * that is the only cost, and a log that loses its oldest lines is not a correctness bug.
+ */
+const LINES = new Map<string, number>();
+
+export function appendLine(file: string, line: string, maxLines = 20_000): void {
   mkdirSync(dirname(file), { recursive: true });
+  let seen = LINES.get(file);
+  if (seen === undefined) {
+    try {
+      seen = readFileSync(file, "utf8").split("\n").length - 1;
+    } catch {
+      seen = 0;
+    }
+  }
+  if (seen >= maxLines) {
+    try {
+      renameSync(file, `${file}.1`);
+    } catch {
+      // first write of a process on a file that is gone: nothing to rotate
+    }
+    seen = 0;
+  }
   const fd = openSync(file, "a");
   try {
     writeSync(fd, line + "\n");
@@ -62,6 +90,7 @@ export function appendLine(file: string, line: string): void {
   } finally {
     closeSync(fd);
   }
+  LINES.set(file, seen + 1);
 }
 
 export function ensureDirs(dirs: string[]): void {

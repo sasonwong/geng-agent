@@ -56,8 +56,12 @@ export async function proxyModel(
 
   const controller = new AbortController();
   // A round that is killed takes the provider request with it, instead of leaving a
-  // half-open stream nobody reads until the provider gives up.
-  res.on("close", () => controller.abort());
+  // half-open stream nobody reads until the provider gives up. But a response that has
+  // already finished also closes, and aborting then cancels the next thing this socket
+  // would do for no reason — so only an unfinished one counts.
+  res.on("close", () => {
+    if (!res.writableFinished) controller.abort();
+  });
   const response = await fetchImpl(target, {
     method: req.method ?? "POST",
     headers,

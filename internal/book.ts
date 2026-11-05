@@ -435,6 +435,13 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     const guard = (err: unknown): void => {
       const why = err instanceof Error ? err.message : String(err);
       log(`book ${req.url ?? "?"} 出错：${why}`);
+      // A proxied response that failed halfway has already sent its headers. Writing an
+      // error over it throws ERR_HTTP_HEADERS_SENT, and an uncaught throw here takes the
+      // daemon down in the middle of the round it was serving.
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
       reply(500, { error: `宿主那边出错了：${why}` });
     };
     // The one route that is not JSON: bytes go out as bytes. It is the only way a file
