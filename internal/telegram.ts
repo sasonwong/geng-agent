@@ -1,6 +1,6 @@
 /** Thin Telegram Bot API client. No SDK: a handful of methods is not worth a dependency. */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 export interface BotConfig {
@@ -196,6 +196,14 @@ export async function sendMessage(
 /** Bots may download up to 20 MB; anything bigger is not ours to fetch. */
 export const FILE_LIMIT = 20 * 1024 * 1024;
 
+/**
+ * Bot API takes an upload up to 50 MB. Checked before the file is read, because
+ * `sendFile` below holds the whole thing in memory on the way to an API that would refuse
+ * it anyway: a gigabyte in `/work` (the container's own disk, so the container picks the
+ * size) was a gigabyte of the gateway's RSS, on a box that is also running the daemon.
+ */
+export const SEND_LIMIT = 50 * 1024 * 1024;
+
 export async function getFilePath(token: string, fileId: string): Promise<string> {
   const file = await call<{ file_path?: string }>(token, "getFile", { file_id: fileId });
   if (!file.file_path) throw new Error("getFile 没给 file_path");
@@ -222,6 +230,10 @@ const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
 
 /** Photos as photos, everything else as a document. `path` is a host path. */
 export async function sendFile(token: string, chat: number, path: string): Promise<void> {
+  const size = statSync(path).size;
+  if (size > SEND_LIMIT) {
+    throw new Error(`文件 ${Math.round(size / 1024 / 1024)} MB，超过发送上限 ${SEND_LIMIT / 1024 / 1024} MB`);
+  }
   const bytes = readFileSync(path);
   const name = basename(path);
   const form = new FormData();
