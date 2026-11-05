@@ -41,7 +41,7 @@ test("a message that is only a file still says something", () => {
     file: "9.json",
     text: "",
     from: "telegram:@x",
-    attachments: [{ kind: "document", path: "/files/9.md" }],
+    attachments: [{ kind: "document", id: "F9" }],
   });
   assert.equal(said, "[刚收到] telegram:@x：没写字，只带了 1个文件。");
 });

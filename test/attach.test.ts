@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { attachmentOf, attachmentWords, hostPathForWorkPath, placeholderFor, safeName } from "../internal/attach.ts";
+import { attachmentOf, attachmentWords, hostPathForWorkPath, placeholderFor } from "../internal/attach.ts";
 
 test("a photo uses its largest size, and a document keeps its own name", () => {
   const photo = attachmentOf({
@@ -37,11 +37,6 @@ test("voice is not fetched: there is nothing here that could make it words", () 
   // no file id means no download was ever attempted
   assert.equal(voice?.fileId, undefined);
   assert.equal(voice?.note, "没有转写");
-});
-
-test("a file name cannot climb out of the directory", () => {
-  assert.equal(safeName(1, 2, "../../etc/passwd"), "1-2-passwd");
-  assert.equal(safeName(-99, 7, "a b/c.txt"), "-99-7-c.txt");
 });
 
 test("only /work files can be sent out, and only if they exist", () => {

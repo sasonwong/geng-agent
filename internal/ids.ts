@@ -1,5 +1,5 @@
 import { readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { readJson, writeJson } from "./fs.ts";
 
@@ -76,6 +76,21 @@ export function allocate(paths: Paths, kind: IdKind): { id: string; n: number; d
   const n = Math.max(ids.journalDay === day ? (ids.journalN ?? 0) : 0, floor) + 1;
   writeJson(paths.ids, { ...ids, journalDay: day, journalN: n });
   return { id: `J${day}-${n}`, n, day };
+}
+
+/**
+ * A stored file is `<id>-<index>-<name>`: the index exists because one mail may carry two
+ * attachments with the same name, and the id is the handle `download` and `say` take. The
+ * writer lives here because `listFiles` and `fileById` — its two readers — already do.
+ *
+ * Every writer must come through here. A file named any other way is invisible to both
+ * readers: it sits on disk, `recall(sources:["files"])` does not list it, and no string the
+ * tool can be told resolves to it.
+ */
+export function newFile(paths: Paths, index: number, name: string): { id: string; file: string } {
+  const { id } = allocate(paths, "file");
+  const base = basename(name).replace(/[^\w.\-]+/g, "_").slice(-80);
+  return { id, file: join(paths.filesDir, `${id}-${index}-${base === "" ? "file" : base}`) };
 }
 
 /** `F12` → the file it names in this instance's `files/`, or null if there is none. */

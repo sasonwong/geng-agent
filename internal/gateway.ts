@@ -7,11 +7,12 @@ import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
 import { appendSaid } from "./people.ts";
-import { attachmentOf, hostPathForWorkPath, placeholderFor, safeName } from "./attach.ts";
+import { attachmentOf, hostPathForWorkPath, placeholderFor, type Attachment } from "./attach.ts";
 import { newestKnock, peekInbox } from "./inbox.ts";
 import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./mail.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
 import { readBots, type Bots } from "./bots.ts";
+import { newFile } from "./ids.ts";
 import { readJson, writeJson } from "./fs.ts";
 import {
   getMe,
@@ -126,6 +127,33 @@ export function knownPlaces(
     home: Number(id) === home,
     kind: c.kind,
   }));
+}
+
+/**
+ * Fetch what came with a message and give it an id.
+ *
+ * The two writers of `files/` — this one and the mail endpoint — must name a file the same
+ * way, or one of them produces files the other's readers cannot see: stored, backed up,
+ * counted as disk use, and unreachable by `download`, `say` or `recall`.
+ */
+export async function storeAttachment(
+  paths: Paths,
+  key: string,
+  token: string,
+  att: Attachment,
+  ops: string,
+): Promise<void> {
+  if (!att.fileId) return;
+  const { id, file } = newFile(paths, 0, att.name ?? "file");
+  try {
+    const filePath = await getFilePath(token, att.fileId);
+    const bytes = await downloadFile(token, filePath, file);
+    att.id = id;
+    att.bytes = bytes;
+  } catch (err) {
+    writeOps(ops, "gateway", `${key} 的文件没取到：${(err as Error).message}`);
+    att.note = "没取到";
+  }
 }
 
 /**
@@ -398,19 +426,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
 
     // fetch first, so the message is never announced without the thing it came with
-    if (att && att.fileId) {
-      const name = safeName(message.chat.id, message.message_id, att.name ?? "file");
-      const dest = join(p.filesDir, name);
-      try {
-        const filePath = await getFilePath(cfg.token, att.fileId);
-        const bytes = await downloadFile(cfg.token, filePath, dest);
-        att.path = `/files/${name}`;
-        att.bytes = bytes;
-      } catch (err) {
-        writeOps(ops, "gateway", `${key} 的文件没取到：${(err as Error).message}`);
-        att.note = "没取到";
-      }
-    }
+    if (att) await storeAttachment(p, key, cfg.token, att, ops);
 
     const dir = decision.high ? p.inbox : p.inboxLow;
     const quoted = quotedOf(message.chat.id, message.reply_to_message, nameOf);

@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { readdirSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import { makePaths, type Paths } from "./paths.ts";
-import { allocate } from "./ids.ts";
+import { allocate, newFile } from "./ids.ts";
 import { readEnvFile } from "./secret.ts";
 import { mtimeMs, readJson, writeJson } from "./fs.ts";
 
@@ -165,12 +165,6 @@ const BODY_LIMIT = 32_000;
 const ATTACHMENT_LIMIT = 5 * 1024 * 1024;
 const ATTACHMENT_TOTAL = 10 * 1024 * 1024;
 
-function fileName(id: string, index: number, name: string): string {
-  const base = basename(name).replace(/[^\w.\-]+/g, "_").slice(-80);
-  // the index is there because one mail may carry two files called screenshot.png
-  return `${id}-${index}-${base === "" ? "file" : base}`;
-}
-
 /**
  * The id a mail keeps. The file name carries the message hash so a replay lands on the
  * same file, and the id is read back out of it rather than allocated twice — an id that
@@ -248,8 +242,8 @@ export function accept(
       continue;
     }
     try {
-      const { id: fileId } = allocate(paths, "file");
-      writeFileSync(join(paths.filesDir, fileName(fileId, index, original)), stored);
+      const { id: fileId, file } = newFile(paths, index, original);
+      writeFileSync(file, stored);
       budget -= bytes;
       // the id, not a path: nothing is mounted, and `download`/`say` take the id
       attachments.push({ kind: "document", id: fileId, name: original, bytes });

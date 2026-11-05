@@ -11,7 +11,7 @@ export interface LiveMsg {
   text: string;
   from?: string;
   /** What came with it: a message may be nothing but a file. */
-  attachments?: { kind: string; path?: string; note?: string; bytes?: number }[];
+  attachments?: { kind: string; id?: string; name?: string; note?: string; bytes?: number }[];
 }
 
 /** How many messages may be pushed into one waking. Beyond this they wait. */

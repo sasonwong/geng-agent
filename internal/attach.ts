@@ -1,4 +1,3 @@
-import { basename } from "node:path";
 import { existsSync, statSync } from "node:fs";
 import type { TgMessage } from "./telegram.ts";
 
@@ -12,8 +11,8 @@ export interface Attachment {
   name?: string;
   mime?: string;
   bytes?: number;
-  /** container path once it is on disk; absent when we chose not to fetch it */
-  path?: string;
+  /** the file id once it is on disk (`F12`); absent when we chose not to fetch it */
+  id?: string;
   /** why it is not here, when it is not */
   note?: string;
 }
@@ -48,12 +47,6 @@ export function attachmentOf(m: TgMessage): Attachment | null {
     mime: one.mime_type,
     bytes: one.file_size,
   };
-}
-
-/** A file name that cannot escape the directory, and stays recognisable. */
-export function safeName(chatId: number, messageId: number, name: string): string {
-  const base = basename(name).replace(/[^\w.\-]+/g, "_").slice(-80);
-  return `${chatId}-${messageId}-${base === "" ? "file" : base}`;
 }
 
 /** How each kind is named on the page: counts, never contents. */
