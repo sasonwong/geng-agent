@@ -34,7 +34,7 @@
 |---|---|
 | docker 拉镜像 | `/etc/systemd/system/docker.service.d/proxy.conf`（`NO_PROXY` 要含 localhost 和私网段） |
 | 构建里的 apt / npm | `DOCKER_BUILD_PROXY=http://…:PORT deploy/build.sh`——构建容器在桥接网络里看不见 `127.0.0.1`，所以脚本只在设了它时才切 `--network=host` |
-| 网关连 Telegram | unit 里的 `NODE_USE_ENV_PROXY=1`（Node 的 `fetch` 默认不读 `HTTP(S)_PROXY`） |
+| 网关连 Telegram | `geng-gateway.service` 里的 `NODE_USE_ENV_PROXY=1`（Node 的 `fetch` 默认不读 `HTTP(S)_PROXY`）+ `secrets/gateway.env` 里的 `HTTP_PROXY`/`HTTPS_PROXY`；不写这个文件就是直连 |
 
 **agent 容器本身不需要配代理**：它没有网络，模型和搜索走 socket，其余 HTTPS 走容器里的 3128。
 
@@ -109,6 +109,11 @@ npx tsc --noEmit && npm test             # 十秒内应该全绿
 deploy/build.sh                          # 镜像：pi 的独立二进制 + gh + git（不含 node，也不含扩展）
 ```
 
+下文写成 `geng ...` 的地方，都是 `node cmd/geng/index.ts ...` 的简写。想真的敲 `geng`，
+得在这份 checkout 里跑一次 `npm link`（`package.json` 的 `bin` 指向的就是这个入口）；
+没跑过就照抄简写会 `command not found`。第 9 节的排错命令一律写全路径，因为它们要能
+直接跑、也要能直接失败。
+
 **什么时候需要重建镜像**：只有 `Dockerfile` 变了。只改 `internal/`、`cmd/` 不用重建——
 daemon 在宿主上跑，容器只装 pi 和它的工具链。
 
@@ -175,9 +180,14 @@ OPENCODE_API_KEY=sk-... node cmd/geng/index.ts init alice --model …
 可以问两个 provider，用一个文件就没法这么干：
 
 ```
-OPENCODE_API_KEY=...          # 变量名跟着 provider 换（OPENAI_API_KEY / ANTHROPIC_API_KEY …）
+# 变量名跟着 provider 换（OPENAI_API_KEY / ANTHROPIC_API_KEY …）
+OPENCODE_API_KEY=...
 GENG_MODEL_UPSTREAM=https://opencode.ai/inference/go/v1
 ```
+
+**注释要独占一行。** `readEnvFile()`、systemd 的 `EnvironmentFile=` 和 docker 的 `--env-file`
+都把 `=` 后面直到行尾整段当成值：`OPENCODE_API_KEY=...  # 说明` 里的说明会跟着进
+`Authorization` 头。下面所有 `.env` 示例的注释都写在上一行，照抄不会改变值。
 
 `GENG_MODEL_UPSTREAM` 是**转发的目的地**：pi 现在只知道 `http://127.0.0.1:11434/model`（容器里的
 `socat`），真实地址只有宿主知道。它要跟**模型所属的 API 家族**一致——同一家 provider 的模型可以
@@ -215,6 +225,7 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 | `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 只该放代价有上限的值；模型密钥写在这儿会进容器，`doctor` 会说 |
 | `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search`（这个文件只要 `DEEPSEEK_API_KEY`、socket 路径、每日限额） |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
+| `secrets/gateway.env`（可选，不是凭据） | 你 | `geng-gateway.service` 的 `EnvironmentFile=` | 只放 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`；不写就直连 Telegram，写了才配上 unit 里的 `NODE_USE_ENV_PROXY=1` |
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
 | `secrets/gh-app.pem` + `<inst>.env` 里的两个 id | 你 | daemon 换 installation token | `git push` 要求密码；**别的都不受影响**（见 5.3） |
@@ -259,12 +270,17 @@ node cmd/geng-dev/index.ts once   --instance alice   # 真的跑一轮（daemon 
 
 ## 4. 单元与开机
 
-`deploy/geng@.service` 是模板，装的时候换掉两个占位符：
+`deploy/` 里三个 unit 都是模板，装的时候都要换掉两个占位符、放进 user unit 的搜索路径。
+**现在只开 daemon**：gateway 没 bot、search 没上游 key 时都会立刻退出，`Restart=always` 会把
+它们变成每十秒一次的静默重启；所以另外两个在 §5 配好之后才 `enable --now`。
 
 ```bash
 cd ~/geng-agent
-sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
-  deploy/geng@.service > ~/.config/systemd/user/geng@.service
+mkdir -p ~/.config/systemd/user
+for unit in 'geng@.service' geng-gateway.service geng-search.service; do
+  sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
+    "deploy/$unit" > "$HOME/.config/systemd/user/$unit"
+done
 systemctl --user daemon-reload
 systemctl --user enable --now geng@alice
 loginctl enable-linger "$USER"
@@ -274,6 +290,10 @@ loginctl enable-linger "$USER"
 |---|---|
 | `@ROOT@` | 仓库路径 |
 | `@NODE@` | node 的**绝对路径** |
+
+三个模板都含 `@ROOT@`、`@NODE@`；少装一个的表现是那个 `systemctl --user enable --now`
+报 "Unit file ... does not exist"，或者即便手工拷进去也因为占位符没换而 `ExecStart` 失败。
+`deploy/update.sh` 重启的也是这三个 user unit，名字和这里一一对应。
 
 `@NODE@` 写错的表现是 unit 每十秒以 127 退出、`Restart=always` 把它变成一个看不见的循环，
 而 `systemctl status` 只写着 "Scheduled restart job"。`loginctl enable-linger` 忘了的表现是
@@ -383,7 +403,8 @@ node cmd/geng/index.ts gateway --check    # 只验 token，不进轮询
 systemctl --user enable --now geng-gateway
 ```
 
-验证：`geng gateway --check` 每个 bot 打印 `ok @username`；启动行打印 `allow=N 人`（`0 人` 和
+验证：`node cmd/geng/index.ts gateway --check` 每个 bot 打印 `ok @username`；
+`systemctl --user is-active geng-gateway` 是 `active`；启动行打印 `allow=N 人`（`0 人` 和
 `不限` 要能一眼看出来）；然后给 bot 发一句话，看 `data/alice/inbox/` 出现文件、`people/` 出现一行。
 
 最后一项只能拿**另一个 bot** 验：人说的话在 privacy 还生效时也会到，自己的账号测不出来。让群里
@@ -419,22 +440,34 @@ node cmd/geng/index.ts secrets init alice     # 生成 mail token，写进该写
 
 ```bash
 # secrets/search.env   chmod 600
-DEEPSEEK_API_KEY=sk-...                      # 搜索是单独计费的端点，chat 的 key 不一定能用
-GENG_SEARCH_SOCKET=/run/geng/search.sock     # 默认值就是这个，不写也行
-GENG_SEARCH_DAILY=200                        # 改了不用重启，下一次请求就是新额度
+# 搜索是单独计费的端点，chat 的 key 不一定能用
+DEEPSEEK_API_KEY=sk-...
+# 改了不用重启，下一次请求就是新额度
+GENG_SEARCH_DAILY=200
+```
 
-node cmd/geng/index.ts search                # 前台；常驻用 deploy/geng-search.service
+**socket 路径别手写。** 不写 `GENG_SEARCH_SOCKET` 时，宿主端点和 daemon 都取
+`defaultSearchSocket()`，也就是 `$XDG_RUNTIME_DIR/geng/search.sock`（通常是
+`/run/user/<uid>/geng/search.sock`）——这正是 user unit 的 `RuntimeDirectory=geng` 建出来的目录。
+写死 `/run/geng/search.sock` 是 system unit 的形状：普通用户的 user unit 既没权限在那儿建目录，
+daemon 找的也还是另一个路径。真要换就写一个**父目录已存在**的绝对路径；宿主端点和 daemon 读的是
+同一个 `secrets/search.env`，写一次两边就一致，但 `bind` 只在 listen 时读，改了要重启。
+
+```bash
+node cmd/geng/index.ts search                # 前台；它会自己建这个目录
+systemctl --user enable --now geng-search   # 常驻；unit 在 §4 已经装好
 ```
 
 **端点是 unix socket，不是端口。** 容器能连它是因为 daemon 把 socket 文件按同一个路径挂进去，
 不是因为网络上有一个地址能打——所以出口规则里不再有私网例外，`ss -ltnp` 上也看不到任何东西。
-`GENG_SEARCH_SOCKET` 由 daemon 在 `docker run` 时注入，**不要写进 `secrets/<实例>.env`**：
-写进去的值和宿主上的不一致时，容器里会有一个连不上的路径。
+`GENG_SEARCH_SOCKET` 由 daemon 在 `docker run` 时注入到容器里，**不要写进 `secrets/<实例>.env`**：
+写进那个文件的值和宿主上的不一致时，容器里会有一个连不上的路径。
 
 验证三点：
 
 ```bash
 node cmd/geng/index.ts doctor alice        # 「搜索接线」：没配是 warn，配了但 socket 不在是 FAIL
+systemctl --user is-active geng-search     # active
 ss -lx | grep search.sock                  # 有（socket 在听）；ss -ltn 里一个端口都不该有
 ```
 
@@ -482,8 +515,10 @@ git -C /work/geng remote -v                        # 在容器里：git pull 不
 { "geng-alice-bot@example.com": { "instance": "alice", "allow": ["you@example.org"] } }
 
 # secrets/mail.env
-GENG_MAIL_TOKEN=...                          # geng secrets init 生成的；Worker 和宿主共用
-GENG_MAIL_BIND=127.0.0.1:8788                # 只听 loopback，前面是 tunnel
+# token 是 geng secrets init 生成的；Worker 和宿主共用
+GENG_MAIL_TOKEN=...
+# 只听 loopback，前面是 tunnel
+GENG_MAIL_BIND=127.0.0.1:8788
 ```
 
 Worker 那边要同一个值，**不要手抄**：
@@ -581,7 +616,7 @@ git fetch origin && git reset --hard origin/main
 
 ## 9. 排错
 
-先看**产物**，不要看服务状态。`systemctl is-active` 说 active 而 `daemon.log` 不动，是这套系统里
+先看**产物**，不要看服务状态。`systemctl --user is-active` 说 active 而 `daemon.log` 不动，是这套系统里
 最常见的一种"看起来正常"。
 
 | 现象 | 先查 | 常见原因 |
@@ -591,14 +626,14 @@ git fetch origin && git reset --hard origin/main
 | 没有 `daemon.log` 这一行，但状态里有一轮 | `ls -l data/<inst>/daemon.log` | 它是**目录**：每次 append 都 EISDIR，所以症状是"日志不涨"而不是报错。删掉再跑一次 `init` |
 | unit 127，每十秒一次 | unit 里的 `@NODE@` | node 绝对路径错（nvm 不在 systemd 的 PATH 里） |
 | 容器压根没起来，日志里也没有一轮 | 手工跑一遍完整的 `docker run` | argv 里少了一个 `-e`（比如 `TZ=…` 没带 `-e`，docker 会把它当镜像名） |
-| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（`GENG_BOOK_SOCK` 缺了：`web_search` 干脆不注册自己，`journal`/`say` 这类在调用时回一句话） |
+| 工具不见了 | `node cmd/geng/index.ts doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入：`GENG_SEARCH_SOCKET` 没挂进来时 `web_search`/`web_fetch` 干脆不注册自己，`GENG_BOOK_SOCK` 缺了则 `journal`/`say` 这类只在调用时回一句话 |
 | 它不回复，但进程正常 | `docker ps`、`daemon.log` 最后一行的用时 | 一轮还在跑（一轮可以跑 30 分钟）；或者它**选择了不说**——只有 `say` 会送出去，正文不会 |
 | 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数；读靠 `recall`/`open` |
-| 搜不到东西 | `doctor` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |
-| 备份说 ok 但 `--list` 是空的 | `geng backup <inst> --list` | rustic 版本不同，成功信息在 stderr、JSON 形状也不同。看落下来的快照，不看成功那行 |
+| 搜不到东西 | `node cmd/geng/index.ts doctor <inst>` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |
+| 备份说 ok 但 `--list` 是空的 | `node cmd/geng/index.ts backup <inst> --list` | rustic 版本不同，成功信息在 stderr、JSON 形状也不同。看落下来的快照，不看成功那行 |
 | 某个 bot 突然不回消息，unit 还 active | `journalctl --user -u geng-gateway`（找「轮询断了」）、`ls data/_ops/outbox` | 401（token 被吊销）/ 409（有 webhook，或同一个 token 有第二个消费者）不会自愈：gateway 杀掉那个 poller，没有别的 bot 就退出、十秒后重试，还有别的 bot 就**要 `reload` 一次才回来**。429 / 5xx / 断网会原地重试。409 先 `deleteWebhook` |
 
-深入一层的顺序固定：`geng doctor <inst>` → `journalctl --user -u geng@<inst>` →
+深入一层的顺序固定：`node cmd/geng/index.ts doctor <inst>` → `journalctl --user -u geng@<inst>` →
 `data/<inst>/daemon.log` → `data/<inst>/usage/symptoms.log` → 最后才是 session JSONL
 （它是 pi 写的、只追加，任何一轮都能复原出它当时调了什么、说了什么）。
 
@@ -631,17 +666,22 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
 
-挂载是逐条论证过的，不是攒出来的，一共七条：
+挂载是逐条论证过的，不是攒出来的。**六条无条件，两条看 socket 在不在**；正常一轮两个
+socket 都由宿主端先起好，所以纸面上通常看到的是八条：
 
-| 宿主 | 容器 | 为什么 |
-|---|---|---|
-| `book/identity.md` | `/state/identity.md` | 唯一一个它直接写的文件 |
-| `workspace/` | `/work` | 干活的地方，可写 |
-| `pi/settings.json` | `~/.pi/agent/settings.json` | 只读：它不能换模型 |
-| `deploy/models.json` | `~/.pi/agent/models.json` | 只读：provider 指向容器里的 socat |
-| `session/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
-| `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 |
-| `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |
+| 宿主 | 容器 | 为什么 | 什么时候 |
+|---|---|---|---|
+| `book/identity.md` | `/state/identity.md` | 唯一一个它直接写的文件 | 每轮 |
+| `workspace/` | `/work` | 干活的地方，可写 | 每轮 |
+| `pi/settings.json` | `~/.pi/agent/settings.json` | 只读：它不能换模型 | 每轮 |
+| `deploy/models.json` | `~/.pi/agent/models.json` | 只读：provider 指向容器里的 socat | 每轮 |
+| `session/` | `~/.pi/agent/sessions` | pi 写它自己的会话 | 每轮 |
+| `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 | 每轮 |
+| `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） | book socket 存在时 |
+| `search.sock`（同一个路径挂进去） | 同一个路径 | 只读：搜索端点，上游 key 留在宿主 | 配了搜索且 socket 存在时 |
+
+后两条不是"少挂一条也无所谓"：docker 会把**缺失的宿主路径**顺手建成一个目录，之后连接失败的
+形状没人认得出来，所以 `buildCommand()` 宁可不挂，连环境变量一起不注入。
 
 书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`discard`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`/`say`，
@@ -655,6 +695,9 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 ```bash
 command -v node && node --version          # ≥ 22.18
 docker ps                                  # 不需要 sudo
+systemctl --user is-active geng@alice      # active
+systemctl --user is-active geng-gateway    # 配了 gateway 才是 active（§5.1）
+systemctl --user is-active geng-search     # 配了搜索才是 active（§5.2）
 node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
 # 其中五条是"漏配"的唯一出口：搜索接线 / 邮件接线 / bot 接线 / GitHub App / 备份
 #   配好且对 = ok，配了但不对 = FAIL，没配 = warn（模型密钥是 FAIL：没有它没有模型可用）

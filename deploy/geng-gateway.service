@@ -1,8 +1,8 @@
 [Unit]
 Description=geng gateway (message mover)
 # A single bot token has exactly one update consumer, so there is exactly one
-# gateway for every instance it serves.
-After=network-online.target
+# gateway for every instance it serves. A user manager has no network-online.target;
+# the long poll retries on its own, so there is no ordering dependency to declare.
 
 [Service]
 Type=simple
@@ -10,6 +10,8 @@ WorkingDirectory=@ROOT@
 # Telegram is not reachable from everywhere; node's fetch only honours
 # HTTP(S)_PROXY when this is set. Harmless when no proxy is configured.
 Environment=NODE_USE_ENV_PROXY=1
+# Optional, and not a credential: HTTP_PROXY / HTTPS_PROXY / NO_PROXY for the
+# Telegram API. Without the file the gateway goes out directly. See docs/install.md.
 EnvironmentFile=-@ROOT@/secrets/gateway.env
 ExecStart=@NODE@ @ROOT@/cmd/geng/index.ts gateway
 # SIGHUP re-reads secrets/bots.json and secrets/mail.json in place: the long polls stay

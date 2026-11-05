@@ -1,14 +1,18 @@
 [Unit]
 Description=geng search endpoint (quota lives here, not in the container)
-After=network-online.target
+# A user manager has no network-online.target; this endpoint only listens on a local
+# socket, so there is nothing to wait for.
 
 [Service]
 Type=simple
 WorkingDirectory=@ROOT@
 EnvironmentFile=-@ROOT@/secrets/search.env
-# The endpoint listens on a unix socket under /run/geng. systemd creates the directory,
-# gives it to this unit's user, and removes it on stop — which also removes a stale
-# socket, the failure that looks exactly like "the service is down".
+# RuntimeDirectory=geng is created by the *user* manager under $XDG_RUNTIME_DIR/geng
+# (normally /run/user/<uid>/geng), NOT /run/geng. defaultSearchSocket() in
+# internal/search.ts listens there, and the daemon — another user unit — reads the
+# same XDG_RUNTIME_DIR, so no uid has to be copied into any config file. Removing the
+# directory on stop also removes a stale socket, the failure that looks exactly like
+# "the service is down".
 RuntimeDirectory=geng
 RuntimeDirectoryMode=0700
 ExecStart=@NODE@ @ROOT@/cmd/geng/index.ts search

@@ -577,10 +577,11 @@ Telegram 给的消息号记成 `<chat>-<message_id>`，所以它想引用自己�
 
 ### 挂载表
 
-七条挂载，逐条理由在 `docs/install.md` §10；这里只记形状：`identity.md` 一个文件、
-`/work` 一个目录、`settings.json` 与 `models.json` 两个只读文件、`session/` 一个目录、
-扩展目录和 socket 目录各一个只读目录。书本身不挂：`/state`、`/inbox`、`/people`、`/mail`、
-`/outbox`、`/files` 都不在容器里，读写全是 id 加 socket。
+六条无条件挂载加两条按 socket 存在与否的挂载（正常一轮是八条），逐条理由在
+`docs/install.md` §10；这里只记形状：`identity.md` 一个文件、`/work` 一个目录、
+`settings.json` 与 `models.json` 两个只读文件、`session/` 一个目录、扩展目录一个只读目录，
+再加 book socket 目录与 `search.sock` 这两个只读的 socket 挂载。书本身不挂：`/state`、
+`/inbox`、`/people`、`/mail`、`/outbox`、`/files` 都不在容器里，读写全是 id 加 socket。
 
 **根文件系统是只读的**，容器能写的是四处：`identity.md`、`/work`、`~/.pi/agent` 和 `/tmp`。
 前两个是它的，后两个是 tmpfs——`~/.pi/agent` 每次醒来由镜像里的 `/opt/pi-npm` 重新填满（那是它

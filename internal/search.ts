@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
-import { chmodSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
 import { readJson, writeJson } from "./fs.ts";
@@ -20,18 +20,30 @@ export interface SearchEnv {
   dailyLimit: number;
 }
 
-/** Where the socket lives when nobody says otherwise: `RuntimeDirectory=geng` owns it. */
-export const DEFAULT_SEARCH_SOCKET = "/run/geng/search.sock";
+/**
+ * Where the socket lives when nobody says otherwise.
+ *
+ * `RuntimeDirectory=geng` is created by the **user** manager under `$XDG_RUNTIME_DIR`
+ * (normally `/run/user/<uid>/geng`), not at `/run/geng` — that is where a *system* unit
+ * would put it. Every unit in deploy/ is a user unit and update.sh restarts them with
+ * `systemctl --user`, so hard-coding `/run/geng` made the service listen on a path that
+ * did not exist and that a non-root process could not create. The daemon reads the same
+ * variable, so the two sides agree on the socket without copying a uid into config.
+ */
+export function defaultSearchSocket(): string {
+  const runtime = process.env.XDG_RUNTIME_DIR ?? "";
+  return join(runtime === "" ? "/run" : runtime, "geng", "search.sock");
+}
 
 /**
  * A line like `GENG_SEARCH_DAILY=` carries no number, and `Number("")` is 0 — which the
  * quota then reads as "no searches today", silently, forever. An empty value means the
  * file does not carry that key: fall through to the environment, then to the default.
  *
- * A trailing note goes too: `docs/install.md` itself writes `GENG_SEARCH_DAILY=200   # 改
- * 了不用重启`, and `EnvironmentFile=` hands that whole line over as the value. A number
- * that stops being a number falls back *silently*, so this is the one reading worth being
- * tolerant about; a mangled GENG_SEARCH_SOCKET fails loudly at listen time instead.
+ * A trailing note goes too: `EnvironmentFile=` hands the whole line over as the value,
+ * and an operator who adds `# 少搜点` after the number did not mean to lower the quota.
+ * A number that stops being a number falls back *silently*, so this is the one reading
+ * worth being tolerant about; a mangled GENG_SEARCH_SOCKET fails loudly at listen time.
  */
 function limitOf(file: Record<string, string>, key: string, fallback: number): number {
   for (const raw of [file[key], process.env[key]]) {
@@ -60,7 +72,7 @@ export function readSearchEnv(root: string): SearchEnv | null {
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const apiKey = file.DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? "";
   if (apiKey === "") return null;
-  const bind = file.GENG_SEARCH_SOCKET ?? process.env.GENG_SEARCH_SOCKET ?? DEFAULT_SEARCH_SOCKET;
+  const bind = file.GENG_SEARCH_SOCKET ?? process.env.GENG_SEARCH_SOCKET ?? defaultSearchSocket();
   return {
     apiKey,
     socket: bind,
@@ -257,6 +269,11 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
 
   return new Promise((resolve, reject) => {
     server.on("error", reject);
+    // RuntimeDirectory=geng is a systemd favour: the directory exists for the unit,
+    // but `node cmd/geng/index.ts search` (documented in docs/install.md §5.2) has no
+    // manager to make it. listen() does not create parent directories, so a foreground
+    // run used to die with ENOENT before it ever served a request.
+    mkdirSync(dirname(env.socket), { recursive: true, mode: 0o700 });
     // A socket left by an earlier run is a corpse that refuses connections, and the
     // error looks exactly like "the service is down" — remove it before binding.
     rmSync(env.socket, { force: true });
