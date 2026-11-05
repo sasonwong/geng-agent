@@ -193,6 +193,42 @@ export async function checkTarget(
 }
 
 /**
+ * `host:port` where the host may be an IPv6 literal, so the separator is the *last* colon.
+ * `o.then` is built as `${host}:${port}` and a literal host already contains colons.
+ */
+export function splitAuthority(authority: string): { host: string; port: number } | null {
+  const at = authority.lastIndexOf(":");
+  if (at <= 0) return null;
+  const port = Number(authority.slice(at + 1));
+  return Number.isInteger(port) && port >= 1 && port <= 65535
+    ? { host: authority.slice(0, at), port }
+    : null;
+}
+
+/**
+ * The SOCKS5 CONNECT request, address type and all.
+ *
+ * A liter is sent as an address: some servers reject ATYP=domain for "127.0.0.1", and
+ * sending what is already bytes through a resolver is how a name gets looked up twice.
+ */
+export function socksConnectBody(host: string, port: number): Buffer | null {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  const literal = bytesOf(host);
+  let head: Buffer;
+  let address: Buffer;
+  if (literal !== null) {
+    head = Buffer.from([literal.bits === 32 ? 1 : 4]);
+    address = literal.bytes;
+  } else {
+    const name = Buffer.from(host);
+    if (name.length === 0 || name.length > 255) return null;
+    head = Buffer.from([3, name.length]);
+    address = name;
+  }
+  return Buffer.concat([Buffer.from([5, 1, 0]), head, address, Buffer.from([port >> 8, port & 0xff])]);
+}
+
+/**
  * Answer `CONNECT host:port` — the request that carries every TLS connection a proxy ever
  * makes. Bytes are piped both ways afterwards; nothing here reads them.
  */
@@ -330,8 +366,7 @@ function socks5(
   report: (ok: boolean, why?: string) => void,
   by?: string,
 ): void {
-  const [host, portText] = o.then.split(":");
-  const port = Number(portText);
+  const target = splitAuthority(o.then);
   upstream.on("error", (err) => {
     log(`proxy ${o.connect} 连不上 ${chain.host}:${chain.port}：${err.message}`);
     report(false, err.message);
@@ -407,15 +442,13 @@ function socks5(
   };
 
   const askConnect = (): void => {
-    if (host === undefined || !Number.isFinite(port)) {
+    const body = target === null ? null : socksConnectBody(target.host, target.port);
+    if (body === null) {
       socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
       upstream.destroy();
       return;
     }
-    const name = Buffer.from(host);
-    upstream.write(
-      Buffer.concat([Buffer.from([5, 1, 0, 3, name.length]), name, Buffer.from([port >> 8, port & 0xff])]),
-    );
+    upstream.write(body);
   };
 
   upstream.on("data", (chunk: Buffer) => {

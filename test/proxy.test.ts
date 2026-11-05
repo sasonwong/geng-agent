@@ -8,7 +8,16 @@ import { startBookServer, socketPath } from "../internal/book.ts";
 import assert from "node:assert/strict";
 import { createServer as createHttp } from "node:http";
 import { connect, createServer as createTcp } from "node:net";
-import { addrAllowed, chainFrom, hostAllowed, inCidr, checkTarget, handleConnect } from "../internal/proxy.ts";
+import {
+  addrAllowed,
+  chainFrom,
+  hostAllowed,
+  inCidr,
+  checkTarget,
+  handleConnect,
+  socksConnectBody,
+  splitAuthority,
+} from "../internal/proxy.ts";
 
 test("a host is allowed by itself or as a subdomain, never as a suffix of something else", () => {
   const allow = ["github.com", "npmjs.org"];
@@ -128,6 +137,31 @@ test("a CONNECT to a name that resolves inside the host's own network is refused
     restore();
     await new Promise<void>((r) => target.close(() => r()));
   }
+});
+
+test("a SOCKS chain names an address as an address, and finds the host in an IPv6 target", () => {
+  // `o.then` is `${host}:${port}` and an IPv6 host contains colons: splitting on the first
+  // one turned `::1:443` into host "" and a 502. And a literal was always sent as ATYP=domain,
+  // so the chain resolved a string that was already an address.
+  assert.deepEqual(splitAuthority("127.0.0.1:443"), { host: "127.0.0.1", port: 443 });
+  assert.deepEqual(splitAuthority("::1:443"), { host: "::1", port: 443 });
+  assert.deepEqual(splitAuthority("localhost:80"), { host: "localhost", port: 80 });
+  assert.equal(splitAuthority("nonsense"), null);
+  assert.equal(splitAuthority(":443"), null);
+  assert.equal(splitAuthority("host:0"), null);
+
+  // VER=5, NMETHODS=1, METHOD=0, then ATYP and the address
+  assert.deepEqual([...socksConnectBody("127.0.0.1", 443)!], [5, 1, 0, 1, 127, 0, 0, 1, 1, 187]);
+  const v6 = socksConnectBody("::1", 443)!;
+  assert.equal(v6[3], 4, "IPv6 is ATYP 4");
+  assert.deepEqual([...v6.subarray(4, 20)], [...Buffer.from("00000000000000000000000000000001", "hex")]);
+  const name = socksConnectBody("localhost", 80)!;
+  assert.equal(name[3], 3, "a name is ATYP 3");
+  assert.equal(name[4], "localhost".length);
+  assert.equal(name.subarray(5, 14).toString(), "localhost");
+  // nothing is invented for what cannot be sent
+  assert.equal(socksConnectBody("localhost", 70000), null);
+  assert.equal(socksConnectBody("", 80), null);
 });
 
 test("when the host is itself behind a proxy, the tunnel goes through it", async () => {
