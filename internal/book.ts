@@ -321,7 +321,7 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         ? before.files.filter((f): f is string => typeof f === "string")
         : [];
       const all = [...new Set([...had, ...names])];
-      writeJson(paths.filesForget, { files: all, at: nowIso });
+      writeJson(paths.filesForget, { files: all });
       return { status: 200, body: { files: all, at: nowIso } };
     }
 

@@ -29,7 +29,7 @@ export function acquirePidLock(file: string): () => void {
   if (pidLockHeld(file)) {
     throw new ExpectedError(`另一个 daemon 正在跑（pid ${existing.pid}，${file}）`);
   }
-  writeJson(file, { pid: process.pid, startedAt: new Date().toISOString() });
+  writeJson(file, { pid: process.pid });
 
   const release = () => {
     const now = readJson<{ pid?: number }>(file, {});

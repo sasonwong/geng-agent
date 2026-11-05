@@ -414,7 +414,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
-| `inbox/*.json` | gateway | `{id, text, from, at, chat, attachments?[{kind,id?,name?,note?,bytes?}], quote?{id,from?,text?}}`（为什么投递只在 `daemon.log` 那一行） |
+| `inbox/*.json` | gateway | `{id, text, from, at, chat, attachments?[{kind,id?,name?,note?,bytes?}]}`（为什么投递只在 `daemon.log` 那一行；被引用的原文在 transcript 里） |
 | `outbox/*.json` | daemon（`say` 走 socket） | `{messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}}`；id 是文件名 |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
 | `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{wake,talkedTo[],touched}, knockHold?}` |
@@ -564,7 +564,8 @@ Telegram 给的消息号记成 `<chat>-<message_id>`，所以它想引用自己�
 
 **入站方向是同一件事的镜像，而且更亏**：人在 Telegram 里回复某条消息，是在主动说"我说的是
 这句"，而原来只读了 `reply_to_message.from.id` 一个字段（用来判"是不是在回我"），整条被引用
-的消息都丢了。现在 `quote: {id, from, text}` 进收件箱、进 transcript，纸上的对话块渲染成
+的消息都丢了。现在 `quote: {id, from, text}` 进 transcript（收件箱那条只留消息本身），
+纸上的对话块渲染成
 `对方：说的就是这句（回：原文在这）`。
 
 **为什么必须存原文而不能只存 id**：被引用的可能是它自己说过的话，而带 id 的出站行只有这版之后

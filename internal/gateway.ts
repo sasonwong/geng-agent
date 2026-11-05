@@ -530,6 +530,9 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
     const quoted = quotedOf(message.chat.id, message.reply_to_message, nameOf);
     const at = new Date().toISOString();
+    // The quote is not copied here: the transcript line below carries it, and that is what
+    // the page and `open("P…")` read. A second copy in a file no reader opens is a field
+    // somebody has to keep true for nothing.
     writeJson(file, {
       id,
       text: words,
@@ -537,7 +540,6 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       at,
       chat: message.chat.id,
       ...(att ? { attachments: [att] } : {}),
-      ...(quoted ? { quote: quoted } : {}),
     });
     // Only what was actually delivered: a message the policy chose not to forward must
     // not reappear later in the transcript. Guarded by the id, not by "first delivery":

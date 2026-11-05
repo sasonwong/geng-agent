@@ -202,6 +202,8 @@ test("mute, listen, forget and propose are written by the host, in the shape it 
   await f.call("/files/forget", { files: ["/files/b.jpg", "/files/a.jpg"] });
   const forget = JSON.parse(readText(f.paths.filesForget) ?? "{}") as { files: string[] };
   assert.deepEqual(forget.files, ["/files/a.jpg", "/files/b.jpg"]);
+  // the list is the whole file: `parseForget` reads `files` and nothing else
+  assert.deepEqual(Object.keys(forget).sort(), ["files"]);
 
   const proposal = await f.call("/proposal", { value: { cycle: { defaultWakeMinutes: 45 }, container: { timeoutSec: 9 } } });
   assert.equal(proposal.status, 200);
