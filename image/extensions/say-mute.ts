@@ -9,15 +9,11 @@
  *
  * None of it talks to Telegram. The container has no bot token, and must not have one.
  */
-import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tool } from "./lib/tool.ts";
 import { postJson } from "./lib/uds.ts";
 
-const STATE = process.env.GENG_STATE ?? "/state";
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
-// mounted at the top level on purpose: a mount nested under /state makes docker create
-// its mountpoint inside the bind, which lands in the agent's own book as a root-owned dir
 /** The endpoint's answer as a sentence, or the host's own refusal. */
 async function send(route: string, body: Record<string, unknown>): Promise<{ ok: boolean; reply: Record<string, unknown> }> {
   if (SOCKET === "") return { ok: false, reply: { error: "没有配置记忆端点：GENG_BOOK_SOCK 是空的。" } };
@@ -37,8 +33,8 @@ const sayTool = tool({
     "对一个人说话。一次调用里的几句一起送到（按顺序），分几次调用就是隔一阵说一句；没人问你的时候也可以说。\n" +
     "to: chat id（纯数字）。只有一个地方能说话时可以省略，两处以上必须写。\n" +
     "files: 一起发出去的文件，两种写法——别人发来的写 id（形如 \"F12\"，不用先 download），自己做的写 /work/… 路径。\n" +
-    "replyTo: 引用某一句话，写 {\"chat\": -1001234567890, \"messageId\": 151}；这两个数在" +
-    "recall 列出的消息 id（形如 M-1001234567890-151）和人的对话（每句后面的 #…）里。\n" +
+    "replyTo: 引用某一句话，写那条消息的 id（形如 M-1001234567890-151；对话里每句后面也有 #…），" +
+    "写了它就发到那条消息所在的会话，to 可以省。\n" +
     "返回 {id, count}：id 是这条排队记录的编号（不是 Telegram 的消息号，那要等发出去之后才有）。发不出去会明说哪一处不对。",
   parameters: {
     type: "object",
@@ -59,7 +55,8 @@ const sayTool = tool({
       },
       replyTo: {
         type: "string",
-        description: "引用哪一条：chat id-消息 id，形如 -1001234567890-151。写了它就发到那条消息所在的会话，to 可以省。",
+        description:
+          "引用哪一条：那条消息的 id，形如 M-1001234567890-151 或 -1001234567890-151（recall 和对话记录里都印着）。写了它就发到那条消息所在的会话，to 可以省。",
       },
     },
     required: ["messages"],
@@ -245,7 +242,6 @@ const proposeTool = tool({
 });
 
 export default function (pi: ExtensionAPI) {
-  if (!existsSync(STATE)) return;
   pi.registerTool(sayTool);
   pi.registerTool(listenTool);
   pi.registerTool(forgetTool);

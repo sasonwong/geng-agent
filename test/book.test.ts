@@ -221,7 +221,9 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   const id = (r.body as { id: string }).id;
   const written = JSON.parse(readText(join(paths.outbox, `${id}.json`)) ?? "{}");
   // the file is exactly what the gateway already read: same shape, one fewer writer
-  assert.deepEqual(written, { id, messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } });
+  // the quote names its conversation, so the item carries it too: the gateway sends
+  // where `chat` says, and a quote that only lived inside replyTo would go home instead
+  assert.deepEqual(written, { id, chat: -1001, messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } });
 
   // a chat the daemon does not know is refused before anything is queued
   const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], to: -999 }));
@@ -230,6 +232,31 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   // and a quote it cannot parse is a refusal, not a message without one
   const quote = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], replyTo: "151" }));
   assert.equal(quote.status, 400);
+});
+
+test("a quote is the id the listing printed, and it says which conversation", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const handle = bookHandler(paths, { places: [-1001, -2002] });
+  const say = async (body: unknown) =>
+    handle({ url: "/say", method: "POST" } as never, JSON.stringify(body));
+
+  // the shape `recall` prints: an inbox id, with or without its M
+  for (const id of ["M-1001-151", "-1001-151", "#-1001-151"]) {
+    const r = await say({ messages: ["看到了"], replyTo: id });
+    assert.equal(r.status, 200, `${id} 应该能引用`);
+    const queued = JSON.parse(readText(join(paths.outbox, `${(r.body as { id: string }).id}.json`)) ?? "{}");
+    assert.deepEqual(queued.replyTo, { chat: -1001, messageId: 151 });
+    // the quote names the conversation, so `to` may be left out — and the gateway needs
+    // the chat on the item, not only inside the quote
+    assert.equal(queued.chat, -1001);
+  }
+
+  // two places and neither a quote nor a `to`: the home chat is a guess, so it is refused
+  const nowhere = await say({ messages: ["喂"] });
+  assert.equal(nowhere.status, 400);
+  assert.match(String((nowhere.body as { error: string }).error), /要写 to/);
 });
 
 test("a file leaves the book as bytes over the same socket, and only by id", async () => {

@@ -1,5 +1,5 @@
-import { chmodSync, createReadStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { chmodSync, createReadStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { ATTENTION_MAX_MS } from "./attention.ts";
@@ -8,6 +8,7 @@ import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
 import { forwardPlain, handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
 import { keyCanMute } from "./mute.ts";
+import { parseInboxId } from "./quote.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
 import { parseAfter } from "./schedule.ts";
@@ -68,28 +69,6 @@ interface Reply {
   body: unknown;
 }
 
-function today(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10).replace(/-/g, "");
-}
-
-/** The highest number already used in these directories, or 0. */
-function highest(dirs: string[], pattern: RegExp): number {
-  let max = 0;
-  for (const dir of dirs) {
-    let names: string[];
-    try {
-      names = readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const name of names) {
-      const m = pattern.exec(name);
-      if (m?.[1] !== undefined) max = Math.max(max, Number(m[1]) || 0);
-    }
-  }
-  return max;
-}
-
 function text(body: unknown, key: string): string | null {
   if (typeof body !== "object" || body === null) return null;
   const value = (body as Record<string, unknown>)[key];
@@ -125,8 +104,18 @@ function flatKeys(obj: unknown, prefix = ""): string[] {
   );
 }
 
+/**
+ * Which line it is answering. Two spellings, one result: the id a listing prints
+ * (`-1001-151`, with the `M` an inbox item carries) is what the model actually has in
+ * front of it, and the object form is what an older tool description asked for. Both
+ * land in the outbox as `{chat, messageId}`, because the gateway reads one shape.
+ */
 function parseReplyTo(raw: unknown): { chat: number; messageId: number } | undefined | null {
   if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === "string") {
+    const text = raw.trim().replace(/^[M#]/, "");
+    return parseInboxId(text);
+  }
   if (typeof raw !== "object") return null;
   const o = raw as { chat?: unknown; messageId?: unknown };
   if (typeof o.chat !== "number" || typeof o.messageId !== "number") return null;
@@ -370,14 +359,31 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
     if (route === "/say") {
       const messages = list(params, "messages");
       if (messages === null) return { status: 400, body: { error: "messages 要是非空字符串数组" } };
+      const replyTo = parseReplyTo((params as Record<string, unknown>).replyTo);
+      if (replyTo === null) {
+        return {
+          status: 400,
+          body: { error: 'replyTo 写那条消息的 id（形如 M-1001234567890-151 或 -1001234567890-151）' },
+        };
+      }
       const raw = (params as Record<string, unknown>).to;
       let chat: number | undefined;
       if (raw !== undefined && raw !== null) {
         chat = typeof raw === "number" ? raw : Number(String(raw).trim());
         if (!Number.isFinite(chat)) return { status: 400, body: { error: `to 要写 chat id（数字），收到的是 ${JSON.stringify(raw)}` } };
-        if (places.length > 0 && !places.includes(chat)) {
-          return { status: 400, body: { error: `那个地方不在你能说话的地方里：${chat}。能发的是 ${places.join("、")}` } };
-        }
+      }
+      // A quote names the conversation it belongs to, so it can stand in for `to`; with
+      // neither, there is no default when there is more than one place — the fallback is
+      // a guess about who it is talking to, and it has been wrong before.
+      chat ??= replyTo?.chat;
+      if (chat === undefined && places.length > 1) {
+        return {
+          status: 400,
+          body: { error: `能说话的地方有 ${places.length} 处，要写 to：${places.join("、")}` },
+        };
+      }
+      if (chat !== undefined && places.length > 0 && !places.includes(chat)) {
+        return { status: 400, body: { error: `那个地方不在你能说话的地方里：${chat}。能发的是 ${places.join("、")}` } };
       }
       const files = list(params, "files") ?? [];
       // `F12` is an original the host already has; `/work/...` is something it made.
@@ -393,10 +399,6 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         const hit = fileById(paths, f);
         if (hit === null) return { status: 404, body: { error: `没有这个文件：${f}` } };
         originals.push({ id: f, path: hit.path, name: hit.name });
-      }
-      const replyTo = parseReplyTo((params as Record<string, unknown>).replyTo);
-      if (replyTo === null) {
-        return { status: 400, body: { error: 'replyTo 要写成 {"chat":-1001234567890,"messageId":151}' } };
       }
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       mkdirSync(paths.outbox, { recursive: true });
