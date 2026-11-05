@@ -64,5 +64,15 @@ export default {
       }),
     });
     if (!response.ok) throw new Error(`收信端点回 ${response.status}`);
+    // A 200 can also mean the host deliberately skipped the mail (sender not on the
+    // allow list, address not mapped). Throwing there would bounce a letter that the
+    // host chose not to deliver — but without a log line it vanishes from both sides.
+    try {
+      const body = await response.json();
+      if (body && body.skipped) console.log(`跳过：${body.skipped}`);
+    } catch {
+      // No JSON body (older endpoint / proxy in between): the delivery succeeded, and
+      // a missing log line is not a reason to bounce the mail.
+    }
   },
 };

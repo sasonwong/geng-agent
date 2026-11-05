@@ -12,9 +12,9 @@
 # Usage: ./deploy.sh https://geng-mail.example.com
 #        GENG_MAIL_TOKEN=… ./deploy.sh https://…
 #
-# The token must be the same string the receiving endpoint compares against. It is
-# read from this clone's own secrets/mail.env when that exists (`~/geng-agent` on the
-# machine that runs instances), otherwise from the environment — no second copy.
+# The token must be the same string the receiving endpoint compares against. An explicit
+# GENG_MAIL_TOKEN wins; only when it is unset do we fall back to this clone's own
+# secrets/mail.env (`~/geng-agent` on the machine that runs instances). No second copy.
 set -euo pipefail
 cd "$(dirname "$0")"
 
