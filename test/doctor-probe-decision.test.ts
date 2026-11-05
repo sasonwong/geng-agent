@@ -153,6 +153,8 @@ test("挂载整个缺了：目录不在时探针给的是 count=0 + `da39a3ee…
     const line = await f.run(`${PROBE_BASE} EXT_COUNT=0 EXT_DIGEST=da39a3ee5e6b4b0d3255bfef95601890afd80709`);
     assert.match(line, /^FAIL/);
     assert.match(line, /挂载缺了/);
+    // 这句为什么不能软化：容器里 0 个挂载时 pi 收到不存在的 -e 会 exit(1)，agent 起不来。
+    assert.match(line, /exit\(1\)/);
   } finally {
     f.cleanup();
   }
