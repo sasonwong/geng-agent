@@ -194,6 +194,10 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
       body += c;
       if (body.length > 64 * 1024) req.destroy();
     });
+    // A command inside the container that gives up (`curl --max-time 5`) resets the
+    // connection, and the error arrives on the request. Unhandled, it is an uncaught
+    // exception — the search endpoint dies and the tool the page promised is gone.
+    req.on("error", (err) => log(`请求断了：${err.message}`));
     req.on("end", () => {
       let params: Record<string, unknown>;
       try {
