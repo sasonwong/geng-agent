@@ -319,7 +319,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   }
 
   const { ops } = ensureGatewayDirs(paths.root);
-  // A preview computes the same note without touching the disk: --dry must not eat what
+  // A preview computes the same note without touching the disk: `dry` must not eat what
   // it is showing, but it must still say what a real start would say.
   const leftover = leftoverCut(paths, !o.dry);
   if (leftover && !o.dry) {

@@ -119,9 +119,9 @@ gate 脚本本身。
   不存在的目录。写的是目录还是 id 也一样：`/files` 这类目录不进容器，纸上是 id。
 - 要建的目录只有一份清单：`requiredDirs(p)`。`init` 和 daemon 都调它。两份列表会在加目录
   的时候悄悄分叉，症状是"init 建了、daemon 没建"。
-- **预览不能碰状态**：`--dry`、`geng-dev packet` 这类路径不写 `lastWakeMs`、不 append daemon.log、
-  不动收件箱（用 `peekInbox`，不用会搬文件的 `markSeen`）。预览不是一轮，这条靠代码路径保证，
-  不靠自觉。
+- **预览不能碰状态**：`geng-dev packet` 走的那条（`runDaemon({ dry: true })`）不写
+  `lastWakeMs`、不 append daemon.log、不动收件箱（用 `peekInbox`，不用会搬文件的 `markSeen`）。
+  预览不是一轮，这条靠代码路径保证，不靠自觉。
 
 ## policy 字段
 
