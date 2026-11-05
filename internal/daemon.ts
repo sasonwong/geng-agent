@@ -1,10 +1,9 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
-import { modelFailures } from "./session.ts";
 import { markSeen, peekInbox, quarantine } from "./inbox.ts";
 import { clockArmed, clockNotice, freshForSteer, handedOver, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
-import { buildPacket, reasonAfterInbox, type WakeReason } from "./packet.ts";
+import { buildPacket, reasonAfterInbox, systemFacts, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { pendingMail } from "./mail.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -21,7 +20,7 @@ import {
   type KnockHold,
   type WaitSpec,
 } from "./schedule.ts";
-import { repairTail } from "./session.ts";
+import { modelFailures, repairTail } from "./session.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./fs.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
@@ -42,7 +41,6 @@ import { knownPlaces } from "./gateway.ts";
 import { parseAttention } from "./attention.ts";
 import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
-import { systemFacts } from "./packet.ts";
 import { startBookServer } from "./book.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId } from "./env.ts";

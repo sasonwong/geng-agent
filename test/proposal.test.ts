@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyProposal } from "../internal/proposal.ts";
 import { makePaths } from "../internal/paths.ts";
-import { loadPolicy } from "../internal/policy.ts";
-import { defaultPolicy } from "../internal/policy.ts";
+import { defaultPolicy, loadPolicy } from "../internal/policy.ts";
 import { writeJson } from "../internal/fs.ts";
 
 function fixture(): ReturnType<typeof makePaths> {

@@ -1,11 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, utimesSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { buildPacket, reasonAfterInbox, type PacketInput } from "../internal/packet.ts";
 import { makePaths } from "../internal/paths.ts";
 import { writeText } from "../internal/fs.ts";
-import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 function fixture(): {

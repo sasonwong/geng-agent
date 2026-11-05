@@ -2,11 +2,10 @@ import { test } from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { request } from "node:http";
+import { createServer as createHttp, request } from "node:http";
 import { makePaths } from "../internal/paths.ts";
 import { startBookServer, socketPath } from "../internal/book.ts";
 import assert from "node:assert/strict";
-import { createServer as createHttp } from "node:http";
 import { connect, createServer as createTcp } from "node:net";
 import {
   addrAllowed,
