@@ -20,7 +20,10 @@ export interface Spend {
  * cannot disagree with the timeline a human reads.
  */
 export function spendSince(p: Paths, nowMs: number, windowMs = DAY_MS): Spend {
-  const text = readText(p.daemonLog) ?? "";
+  // `appendLine` rotates at 20 000 lines: after a rotation yesterday's rounds are in
+  // `daemon.log.1` and today's in `daemon.log`, and reading only the live one would report
+  // a cheaper day than the one that happened. Older first, so the order is unchanged.
+  const text = [readText(`${p.daemonLog}.1`) ?? "", readText(p.daemonLog) ?? ""].join("\n");
   const total: Spend = { cycles: 0, tokens: 0, cost: 0 };
   for (const line of text.split("\n")) {
     const at = Date.parse(line.slice(0, 24));
@@ -72,6 +75,8 @@ export async function printStatus(root: string, instance: string): Promise<void>
   const spend = spendSince(p, now);
   const snapshots = await listSnapshots(p);
   const latest = snapshots[snapshots.length - 1];
+  // one read, one answer: the list was fetched twice in the same expression
+  const places = knownPlaces(p.root, instance);
 
   const rows: string[] = [
     p.instance,
@@ -79,10 +84,9 @@ export async function printStatus(root: string, instance: string): Promise<void>
     `  第几次      ${meta.wakings ?? 0}（24 小时内 ${wakes.length} 次）`,
     `  下次醒来    ${wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) + " 后" : "未设定"}${wait?.why ? "  ·  " + wait.why : ""}`,
     `  收件        ${countJson(p.inbox)} 条待处理`,
-    ...(knownPlaces(p.root, instance).length > 0
+    ...(places.length > 0
       ? [
           `  说话到      ${(() => {
-            const places = knownPlaces(p.root, instance);
             const home = places.find((x) => x.home);
             return `${home ? home.label : "（没定）"}${places.length > 1 ? `，另有 ${places.length - 1} 个地方` : ""}`;
           })()}`,
