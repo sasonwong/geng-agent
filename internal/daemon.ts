@@ -44,7 +44,6 @@ import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
 import { systemFacts } from "./packet.ts";
 import { startBookServer } from "./book.ts";
-import { actsFor, appendActs } from "./acts.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
@@ -541,11 +540,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     });
 
     rmSync(paths.intent, { force: true });
-
-    // The ledger goes down before anything else is done with the round: it is the one
-    // record of what actually happened, and every count on the next page is read out of
-    // it. A crash after this line loses the bookkeeping, not the actions.
-    appendActs(paths.acts, actsFor(waking, result.toolCalls));
 
     // Every waking is its own session, so the session total *is* this cycle's cost.
     // (It was a difference while one session spanned many wakings.)

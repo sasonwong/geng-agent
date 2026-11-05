@@ -11,9 +11,6 @@ export interface Paths {
   workspace: string;
   usage: string;
   meta: string;
-  /** One line per tool call, appended when a round ends: the ledger the page counts from.
-   * Rebuildable from `session/` if it is ever lost — an index, not a fact. */
-  acts: string;
   /** The ceiling each id series has reached, so a deleted file cannot give an old entry's
    * name to a new one. The files are the floor, this is the memory. */
   ids: string;
@@ -87,7 +84,6 @@ export function makePaths(root: string, instance: string): Paths {
     workspace: join(data, "workspace"),
     usage: join(data, "usage"),
     meta: join(data, "meta"),
-    acts: join(data, "meta", "acts.jsonl"),
     ids: join(data, "meta", "ids.json"),
     run: join(data, "run"),
     inbox,
