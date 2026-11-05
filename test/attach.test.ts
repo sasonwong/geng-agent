@@ -60,11 +60,18 @@ test("a symlink in /work cannot point a send at a file outside the workspace", (
   // two dots in a name are not a path that climbs: check the resolved path, not the text
   assert.equal(hostPathForWorkPath(work, "/work/report..v2.pdf"), join(work, "report..v2.pdf"));
   assert.equal(hostPathForWorkPath(work, "/work/../note.txt"), null);
-  if (process.platform === "win32") return; // symlinks need a privileged account there
+  // The two path assertions above must run on every platform: an unconditional
+  // `if (win32) return` at the top of this test used to hide the whole file.
   try {
-    symlinkSync(join(outside, "note.txt"), join(work, "link.txt"));
-  } catch {
-    return; // a filesystem without symlinks cannot exercise this shape
+    // "file" lets Windows create the link when developer mode is on; without it even
+    // a privileged account gets EPERM.
+    symlinkSync(join(outside, "note.txt"), join(work, "link.txt"), "file");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // Only "this filesystem/account cannot make symlinks" is a reason to skip the
+    // link assertion. A bare catch here also swallowed a typo in the test itself.
+    if (code === "EPERM" || code === "EACCES" || code === "ENOSYS") return;
+    throw err;
   }
   // The container can create a link in /work. On the host the old code followed it and
   // would have sent a file the agent never had any right to read.

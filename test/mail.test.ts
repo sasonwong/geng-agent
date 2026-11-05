@@ -30,9 +30,9 @@ test("a malformed mail bind is an error, not a random port", () => {
   // listener, no error, and mail that never arrives. An empty environment variable
   // shadowing a good file is the same silent failure one level up.
   const root = mkdtempSync(join(tmpdir(), "geng-mail-bind-"));
-  const saved = {
-    token: process.env.GENG_MAIL_TOKEN,
-    bind: process.env.GENG_MAIL_BIND,
+  const saved: Record<string, string | undefined> = {
+    GENG_MAIL_TOKEN: process.env.GENG_MAIL_TOKEN,
+    GENG_MAIL_BIND: process.env.GENG_MAIL_BIND,
   };
   try {
     delete process.env.GENG_MAIL_TOKEN;
@@ -55,8 +55,7 @@ test("a malformed mail bind is an error, not a random port", () => {
     assert.equal(readMailEnv(root)?.token, "tok", "空的环境变量不该盖掉文件里的值");
     assert.equal(readMailEnv(root)?.bind.port, 8788);
   } finally {
-    for (const [key, value] of Object.entries(saved)) {
-      const name = key === "token" ? "GENG_MAIL_TOKEN" : "GENG_MAIL_BIND";
+    for (const [name, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
