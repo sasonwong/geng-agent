@@ -1,7 +1,8 @@
 import { connect as tcpConnect } from "node:net";
+import { connect as tlsConnect } from "node:tls";
 import { lookup } from "node:dns/promises";
+import { request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
-import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 /**
@@ -33,6 +34,12 @@ function bytesOf(ip: string): { bytes: Buffer; bits: number } | null {
     return { bytes: Buffer.from(parts as number[]), bits: 32 };
   }
   if (!ip.includes(":")) return null;
+  // `::ffff:127.0.0.1` is the same loopback address wearing a v6 spelling. Parsed as
+  // 128 bits it matches `::/0` and misses every `!127.0.0.0/8`, so a CONNECT to the
+  // host's own services walked straight through the address rules. Collapse the two
+  // spellings to the v4 bytes before anything compares a prefix.
+  const mappedText = /^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/i.exec(ip);
+  if (mappedText) return bytesOf(mappedText.slice(1).join("."));
   const [head, tail] = ip.split("::");
   const left = head ? head.split(":") : [];
   const right = tail === undefined ? [] : tail ? tail.split(":") : [];
@@ -45,6 +52,16 @@ function bytesOf(ip: string): { bytes: Buffer; bits: number } | null {
     if (!Number.isFinite(value) || value > 0xffff) return null;
     bytes[i * 2] = value >> 8;
     bytes[i * 2 + 1] = value & 0xff;
+  }
+  // The same mapping in the hex spelling (`::ffff:7f00:1`): ten zero bytes, then
+  // 0xffff, then the four v4 bytes. It has to collapse here too or the dotted form
+  // above is a rule with one spelling and a hole in the other.
+  if (
+    bytes.subarray(0, 10).every((b) => b === 0) &&
+    bytes[10] === 0xff &&
+    bytes[11] === 0xff
+  ) {
+    return { bytes: Buffer.from(bytes.subarray(12)), bits: 32 };
   }
   return { bytes, bits: 128 };
 }
@@ -96,7 +113,7 @@ export function addrAllowed(ip: string, rule: string[]): { ok: boolean; by?: str
 }
 
 export type Chain =
-  | { kind: "http"; host: string; port: number; auth?: string }
+  | { kind: "http"; host: string; port: number; auth?: string; tls?: boolean }
   | { kind: "socks5"; host: string; port: number; auth?: { user: string; pass: string } };
 
 /**
@@ -122,16 +139,40 @@ export function chainFrom(value: string): Chain | null {
   } catch {
     return null;
   }
-  const port = url.port === "" ? (url.protocol === "socks5:" || url.protocol === "socks5h:" ? 1080 : 80) : Number(url.port);
+  const port =
+    url.port === ""
+      ? url.protocol === "socks5:" || url.protocol === "socks5h:"
+        ? 1080
+        : url.protocol === "https:"
+          ? 443
+          : 80
+      : Number(url.port);
   if (url.hostname === "") return null;
-  const user = decodeURIComponent(url.username);
-  const pass = decodeURIComponent(url.password);
+  // A URL with a broken `%` escape is a config typo. `decodeURIComponent` throws on it,
+  // and this getter runs on every proxied request — an uncaught throw there takes the
+  // daemon down, not just the connection.
+  let user = "";
+  let pass = "";
+  try {
+    user = decodeURIComponent(url.username);
+    pass = decodeURIComponent(url.password);
+  } catch {
+    return null;
+  }
   if (url.protocol === "socks5:" || url.protocol === "socks5h:") {
     return { kind: "socks5", host: url.hostname, port, ...(user === "" ? {} : { auth: { user, pass } }) };
   }
   if (url.protocol === "http:" || url.protocol === "https:") {
     const auth = user === "" ? undefined : `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
-    return { kind: "http", host: url.hostname, port, ...(auth === undefined ? {} : { auth }) };
+    return {
+      kind: "http",
+      host: url.hostname,
+      port,
+      ...(auth === undefined ? {} : { auth }),
+      // An `https://` upstream needs a TLS socket before the CONNECT line. Sending a
+      // plaintext CONNECT to port 443 used to be the whole support for that spelling.
+      ...(url.protocol === "https:" ? { tls: true } : {}),
+    };
   }
   return null;
 }
@@ -316,7 +357,9 @@ function tunnel(
 ): void {
   const host = chain.host;
   const port = chain.port;
-  const upstream = tcpConnect(port, host);
+  const upstream = chain.kind === "http" && chain.tls === true
+    ? tlsConnect(port, host, { servername: host })
+    : tcpConnect(port, host);
   if (chain.kind === "socks5") {
     socks5(upstream, socket, head, chain, o, log, report, by);
     return;
@@ -327,11 +370,26 @@ function tunnel(
     report(false, err.message);
     socket.destroy();
   });
+  // A CONNECT response is not guaranteed to arrive in one chunk. Reading each chunk on
+  // its own and looking for `\r\n\r\n` there meant a header split across two reads was
+  // silently dropped and the tunnel never opened. Accumulate until the terminator.
+  let header = Buffer.alloc(0);
   upstream.on("data", function first(chunk: Buffer) {
     if (ready) return;
-    const text = chunk.toString("latin1");
-    if (!text.includes("\r\n\r\n")) return;
+    header = Buffer.concat([header, chunk]);
+    const at = header.indexOf("\r\n\r\n");
+    if (at === -1) {
+      if (header.length > 64 * 1024) {
+        upstream.removeListener("data", first);
+        log(`proxy 上游的 CONNECT 应答没有结束：${o.then}`);
+        report(false, "上游代理的 CONNECT 应答没有结束");
+        socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+        upstream.destroy();
+      }
+      return;
+    }
     upstream.removeListener("data", first);
+    const text = header.subarray(0, at + 4).toString("latin1");
     if (!/^HTTP\/1\.[01] 2\d\d/.test(text)) {
       const line = text.split("\r\n")[0] ?? "?";
       log(`proxy 上游拒绝了 ${o.then}：${line}`);
@@ -342,7 +400,7 @@ function tunnel(
     }
     ready = true;
     // the upstream may have sent bytes of the tunnel in the same chunk
-    const rest = chunk.subarray(text.indexOf("\r\n\r\n") + 4);
+    const rest = header.subarray(at + 4);
     tunnelDone(socket, upstream, head, report, by);
     if (rest.length > 0) upstream.unshift(rest);
   });
@@ -394,6 +452,10 @@ function socks5(
       }
       if (method === 2) {
         if (chain.auth === undefined) {
+          // A refusal has to be reported like every other refusal: without this the
+          // round says net=0 and the log has a dead tunnel with no line explaining it.
+          log("proxy 上游要 SOCKS 认证，但没配用户名口令");
+          report(false, "上游代理要 SOCKS 认证，但没配用户名口令");
           socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
           upstream.destroy();
           return;
@@ -444,6 +506,8 @@ function socks5(
   const askConnect = (): void => {
     const body = target === null ? null : socksConnectBody(target.host, target.port);
     if (body === null) {
+      log(`proxy 上游的目标写不成 SOCKS 请求：${o.then}`);
+      report(false, "上游目标写不成 SOCKS 请求");
       socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
       upstream.destroy();
       return;
@@ -464,14 +528,27 @@ function socks5(
  * explanation — a silent hole in the middle of a proxy that is supposed to be the only way
  * out.
  */
+/** Headers that describe this hop, not the request. Passing them on corrupts framing. */
+const HOP_BY_HOP = new Set([
+  "host", "connection", "content-length", "transfer-encoding", "proxy-authorization",
+  "proxy-authenticate", "proxy-connection", "keep-alive", "te", "trailer", "upgrade",
+]);
+
 export async function forwardPlain(
-  req: import("node:http").IncomingMessage,
-  res: import("node:http").ServerResponse,
+  req: IncomingMessage,
+  res: ServerResponse,
   body: Buffer,
   rule: ProxyRule,
   chain: Chain | null,
   report: (ok: boolean, why?: string) => void,
 ): Promise<void> {
+  // One connection is one line in net.log, including a connection that broke halfway.
+  let reported = false;
+  const once = (ok: boolean, why?: string): void => {
+    if (reported) return;
+    reported = true;
+    report(ok, why);
+  };
   const raw = req.url ?? "";
   let url: URL;
   try {
@@ -479,13 +556,13 @@ export async function forwardPlain(
   } catch {
     res.writeHead(400, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: `看不懂的地址：${raw}` }));
-    report(false, "看不懂的地址");
+    once(false, "看不懂的地址");
     return;
   }
   if (url.protocol !== "http:") {
     res.writeHead(400, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "只有 http:// 走这条路；https 用 CONNECT" }));
-    report(false, "非 http 的绝对地址");
+    once(false, "非 http 的绝对地址");
     return;
   }
   // A chain proxy that speaks HTTP wants the same absolute-form request, but piping a
@@ -493,33 +570,70 @@ export async function forwardPlain(
   if (chain !== null) {
     res.writeHead(502, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "配了链式代理时不代理明文 HTTP：请用 https" }));
-    report(false, "链式代理下的明文 HTTP");
+    once(false, "链式代理下的明文 HTTP");
     return;
   }
   const decision = await checkTarget(`${url.hostname}:${url.port === "" ? "80" : url.port}`, rule);
   if (!decision.ok) {
     res.writeHead(403, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: decision.why ?? "拒绝" }));
-    report(false, decision.why);
+    once(false, decision.why);
     return;
   }
   const headers: Record<string, string> = {};
   for (const [name, value] of Object.entries(req.headers)) {
     const lower = name.toLowerCase();
-    if (typeof value !== "string" || lower === "host" || lower === "connection" || lower === "content-length") continue;
+    if (typeof value !== "string" || HOP_BY_HOP.has(lower)) continue;
     headers[lower] = value;
   }
-  const upstream = await fetch(url.toString(), {
-    method: req.method ?? "GET",
-    headers,
-    body: body.length === 0 ? undefined : new Uint8Array(body),
+  // The socket goes to the address that was vetted; the Host header keeps the name the
+  // server expects. `fetch(url)` resolved the name a *second* time (a rebinding window)
+  // and followed a 302 on its own — straight to an address no rule had ever looked at.
+  // Node's http.request follows no redirect: the client's next request is a new proxy
+  // request, so it passes through checkTarget again.
+  headers.host = url.host;
+  if (body.length > 0) headers["content-length"] = String(body.length);
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const done = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const fail = (why: string): void => {
+      once(false, why);
+      if (!res.headersSent) {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: `代理请求失败：${why}` }));
+      } else {
+        res.destroy();
+      }
+      done();
+    };
+    const upstream = httpRequest(
+      {
+        hostname: decision.addr as string,
+        port: decision.port,
+        path: `${url.pathname}${url.search}`,
+        method: req.method ?? "GET",
+        headers,
+        agent: false,
+      },
+      (answer) => {
+        once(true, decision.by);
+        const type = answer.headers["content-type"];
+        res.writeHead(answer.statusCode ?? 502, {
+          "content-type": Array.isArray(type)
+            ? (type[0] ?? "application/octet-stream")
+            : (type ?? "application/octet-stream"),
+        });
+        pipeline(answer, res).then(done, () => done());
+      },
+    );
+    upstream.setTimeout(30_000, () => upstream.destroy(new Error("上游 30 秒没有应答")));
+    upstream.on("error", (err: Error) => fail(err.message));
+    if (body.length > 0) upstream.write(body);
+    upstream.end();
   });
-  report(true, decision.by);
-  const out: Record<string, string> = { "content-type": upstream.headers.get("content-type") ?? "application/octet-stream" };
-  res.writeHead(upstream.status, out);
-  if (upstream.body === null) {
-    res.end();
-    return;
-  }
-  await pipeline(Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]), res);
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { attachmentOf, attachmentWords, hostPathForWorkPath, placeholderFor } from "../internal/attach.ts";
@@ -50,6 +50,25 @@ test("only /work files can be sent out, and only if they exist", () => {
   assert.equal(hostPathForWorkPath(root, "/state/identity.md"), null);
   assert.equal(hostPathForWorkPath(root, "/work/../policy.json"), null);
   assert.equal(hostPathForWorkPath(root, "/work/missing.txt"), null);
+});
+
+test("a symlink in /work cannot point a send at a file outside the workspace", () => {
+  const outside = mkdtempSync(join(tmpdir(), "geng-outside-"));
+  const work = mkdtempSync(join(tmpdir(), "geng-work-"));
+  writeFileSync(join(outside, "note.txt"), "not for sending");
+  writeFileSync(join(work, "report..v2.pdf"), "ok");
+  // two dots in a name are not a path that climbs: check the resolved path, not the text
+  assert.equal(hostPathForWorkPath(work, "/work/report..v2.pdf"), join(work, "report..v2.pdf"));
+  assert.equal(hostPathForWorkPath(work, "/work/../note.txt"), null);
+  if (process.platform === "win32") return; // symlinks need a privileged account there
+  try {
+    symlinkSync(join(outside, "note.txt"), join(work, "link.txt"));
+  } catch {
+    return; // a filesystem without symlinks cannot exercise this shape
+  }
+  // The container can create a link in /work. On the host the old code followed it and
+  // would have sent a file the agent never had any right to read.
+  assert.equal(hostPathForWorkPath(work, "/work/link.txt"), null);
 });
 
 test("an attachment is said in words, and an unknown kind does not become undefined", () => {

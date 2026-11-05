@@ -2,7 +2,8 @@ import { test } from "node:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createServer as createHttp, request } from "node:http";
+import { createServer as createHttp, request, type IncomingMessage, type ServerResponse } from "node:http";
+import { PassThrough } from "node:stream";
 import { makePaths } from "../internal/paths.ts";
 import { startBookServer, socketPath } from "../internal/book.ts";
 import assert from "node:assert/strict";
@@ -16,6 +17,7 @@ import {
   handleConnect,
   socksConnectBody,
   splitAuthority,
+  forwardPlain,
 } from "../internal/proxy.ts";
 
 test("a host is allowed by itself or as a subdomain, never as a suffix of something else", () => {
@@ -453,4 +455,147 @@ test("a refused direct connection is a refusal, not an uncaught error", async ()
   // And it is a refusal, said once: `net=N` counts places it went.
   assert.deepEqual(reports.map((r) => r[0]), [false], JSON.stringify(reports));
   assert.match(reports[0]?.[1] ?? "", /ECONNREFUSED/);
+});
+
+test("an IPv4 address in a v6 spelling is refused by the v4 exclusions", () => {
+  // The default policy allows ::/0 and excludes 127.0.0.0/8. Parsed as 128 bits,
+  // ::ffff:127.0.0.1 matched the allow and missed every v4 exclusion — a CONNECT to
+  // the host's own services walked straight through the address half of the two keys.
+  const rule = ["0.0.0.0/0", "::/0", "!127.0.0.0/8", "!10.0.0.0/8"];
+  assert.equal(inCidr("::ffff:127.0.0.1", "127.0.0.0/8"), true);
+  assert.equal(inCidr("::ffff:7f00:1", "10.0.0.0/8"), false, "hex spelling collapses to v4 too");
+  assert.equal(addrAllowed("::ffff:127.0.0.1", rule).ok, false);
+  assert.equal(addrAllowed("::ffff:7f00:1", rule).ok, false);
+  assert.equal(addrAllowed("::ffff:192.0.2.7", rule).ok, true, "a public one still gets out");
+});
+
+test("an https chain gets port 443 and TLS, and a broken escape stays a config error", () => {
+  assert.deepEqual(chainFrom("https://proxy.example.com:9443"), {
+    kind: "http", host: "proxy.example.com", port: 9443, tls: true,
+  });
+  assert.equal(chainFrom("https://proxy.example.com")?.port, 443);
+  // chainFrom is a getter called on every proxied request; a throw here used to take
+  // the daemon down rather than leave one chain unset.
+  assert.equal(chainFrom("http://me%ZZ:pw@proxy.example.com"), null);
+});
+
+/**
+ * Drive forwardPlain without a unix socket: a writable stand-in with the one method
+ * of ServerResponse it uses. Lets the redirect and failure paths be tested anywhere.
+ */
+function plainHarness(rawUrl: string) {
+  const out = new PassThrough();
+  let status = 0;
+  let text = "";
+  out.setEncoding("utf8");
+  out.on("data", (c: string) => {
+    text += c;
+  });
+  const shaped = out as PassThrough & {
+    writeHead: (s: number, h?: Record<string, string>) => PassThrough;
+    headersSent: boolean;
+  };
+  shaped.headersSent = false;
+  shaped.writeHead = (s) => {
+    status = s;
+    shaped.headersSent = true;
+    return shaped;
+  };
+  return {
+    req: { url: rawUrl, method: "GET", headers: {} } as unknown as IncomingMessage,
+    res: shaped as unknown as ServerResponse,
+    state: () => ({ status, text }),
+  };
+}
+
+test("plain http hands a redirect back instead of following it out of the vetted address", async () => {
+  const target = createHttp((req, res) => {
+    if (req.url === "/redir") {
+      res.writeHead(302, { location: "/secret", "content-type": "text/plain" });
+      res.end("go");
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(`host=${req.headers.host ?? ""} path=${req.url ?? ""}`);
+  });
+  await new Promise<void>((r) => target.listen(0, "127.0.0.1", () => r()));
+  const port = (target.address() as { port: number }).port;
+  const open = { allow: ["*"], cidrs: ["0.0.0.0/0"] };
+  try {
+    const redir = plainHarness(`http://127.0.0.1:${port}/redir`);
+    const reports: boolean[] = [];
+    await forwardPlain(redir.req, redir.res, Buffer.alloc(0), open, null, (ok) => reports.push(ok));
+    // fetch() follows the 302 on the host, so the second address is one no rule saw.
+    assert.equal(redir.state().status, 302, "the client decides where to go next");
+    assert.doesNotMatch(redir.state().text, /secret/);
+    assert.deepEqual(reports, [true]);
+
+    const ok = plainHarness(`http://127.0.0.1:${port}/ok?q=1`);
+    await forwardPlain(ok.req, ok.res, Buffer.alloc(0), open, null, () => {});
+    assert.equal(ok.state().status, 200);
+    assert.match(ok.state().text, /path=\/ok\?q=1/);
+    assert.match(ok.state().text, /host=127\.0\.0\.1:/, "the original Host survives the pinned IP");
+  } finally {
+    target.close();
+  }
+});
+
+test("a failed plain http request is a report, not a hole in net.log", async () => {
+  const probe = createTcp(() => {});
+  await new Promise<void>((r) => probe.listen(0, "127.0.0.1", () => r()));
+  const port = (probe.address() as { port: number }).port;
+  await new Promise<void>((r) => probe.close(() => r()));
+
+  const h = plainHarness(`http://127.0.0.1:${port}/x`);
+  const reports: boolean[] = [];
+  await forwardPlain(
+    h.req, h.res, Buffer.alloc(0), { allow: ["*"], cidrs: ["0.0.0.0/0"] }, null,
+    (ok) => reports.push(ok),
+  );
+  assert.equal(h.state().status, 502);
+  assert.deepEqual(reports, [false], "a refused connection has to be said once");
+});
+
+test("a CONNECT answer split across two reads still opens the tunnel", async () => {
+  const upstream = createTcp((socket) => {
+    let greeted = false;
+    socket.on("data", () => {
+      if (greeted) return;
+      greeted = true;
+      socket.write("HTTP/1.1 200 Connection Estab");
+      setTimeout(() => socket.write("lished\r\n\r\n"), 40);
+    });
+  });
+  await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", () => r()));
+  const restore = clearProxyEnv();
+  process.env.HTTPS_PROXY = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
+  const chain = chainFrom("auto");
+  const front = createTcp((socket) => {
+    // localhost may resolve to ::1 on some machines; both spellings have to be allowed
+    // or the address check refuses this test before a single byte reaches the stub.
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
+  });
+  await new Promise<void>((r) => front.listen(0, "127.0.0.1", () => r()));
+  try {
+    const out = await new Promise<string>((resolve) => {
+      const c = connect((front.address() as { port: number }).port, "127.0.0.1");
+      let text = "";
+      let timer: ReturnType<typeof setTimeout>;
+      const finish = (): void => {
+        clearTimeout(timer);
+        c.destroy();
+        resolve(text);
+      };
+      c.on("data", (d) => {
+        text += String(d);
+        if (text.includes("200 Connection Established")) finish();
+      });
+      timer = setTimeout(finish, 2000);
+    });
+    assert.match(out, /200 Connection Established/);
+  } finally {
+    restore();
+    front.close();
+    upstream.close();
+  }
 });

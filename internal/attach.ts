@@ -1,4 +1,5 @@
-import { existsSync, statSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import type { TgMessage } from "./telegram.ts";
 
 /**
@@ -80,7 +81,26 @@ export function placeholderFor(atts: { kind: string; note?: string }[]): string 
 export function hostPathForWorkPath(workRoot: string, given: string): string | null {
   if (!given.startsWith("/work/")) return null;
   const rel = given.slice("/work/".length);
-  if (rel === "" || rel.includes("..")) return null;
-  const abs = `${workRoot}/${rel}`;
-  return existsSync(abs) && statSync(abs).isFile() ? abs : null;
+  if (rel === "" || rel.startsWith("/") || rel.includes("\0")) return null;
+  // Resolve against the host's own root, with the host's own separator: a hard-coded
+  // `${workRoot}/${rel}` produced a mixed path on Windows. Checking the resolved path
+  // (not the raw string) is what makes `/work/a/../b` and `/work/../secrets` fail, while
+  // an ordinary name like `report..v2.pdf` still works.
+  const base = resolve(workRoot);
+  const abs = resolve(base, rel);
+  if (abs !== base && !abs.startsWith(base + sep)) return null;
+  try {
+    // A symlink inside /work is a pointer the container created. On the host it may
+    // resolve outside the workspace (…/secrets/bots.json), and `say` would then send a
+    // credential as if it were a file it had made. Refuse the link itself, and double
+    // check the real path against the real workspace root.
+    const st = lstatSync(abs);
+    if (st.isSymbolicLink() || !st.isFile()) return null;
+    const real = realpathSync(abs);
+    const realBase = realpathSync(base);
+    if (real !== realBase && !real.startsWith(realBase + sep)) return null;
+    return abs;
+  } catch {
+    return null;
+  }
 }
