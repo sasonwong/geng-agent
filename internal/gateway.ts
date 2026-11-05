@@ -364,7 +364,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         continue;
       }
       try {
-        ids.push((await sendMessage(cfg.token, chat, text, undefined, reply))[0]);
+        ids.push((await sendMessage(cfg.token, chat, text, reply))[0]);
       } catch {
         // a deleted message must not take the words down with it
         ids.push((await sendMessage(cfg.token, chat, text))[0]);

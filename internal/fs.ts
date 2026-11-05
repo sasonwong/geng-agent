@@ -1,6 +1,5 @@
 import {
   closeSync,
-  existsSync,
   fsyncSync,
   mkdirSync,
   openSync,
@@ -102,10 +101,6 @@ export function mtimeMs(file: string): number | null {
   } catch {
     return null;
   }
-}
-
-export function exists(file: string): boolean {
-  return existsSync(file);
 }
 
 export function excerpt(text: string | null, maxChars: number): string {

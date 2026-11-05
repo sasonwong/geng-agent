@@ -60,7 +60,6 @@ export interface TgMessage {
     text?: string;
     caption?: string;
   };
-  message_thread_id?: number;
 }
 
 export interface TgUpdate {
@@ -180,7 +179,6 @@ export async function sendMessage(
   token: string,
   chat: number,
   text: string,
-  threadId?: number,
   replyTo?: number,
 ): Promise<number[]> {
   const sent: number[] = [];
@@ -188,7 +186,6 @@ export async function sendMessage(
     const message = await call<{ message_id: number }>(token, "sendMessage", {
       chat_id: chat,
       text: part,
-      ...(threadId ? { message_thread_id: threadId } : {}),
       ...(replyTo ? { reply_parameters: { message_id: replyTo, allow_sending_without_reply: true } } : {}),
     });
     sent.push(message.message_id);

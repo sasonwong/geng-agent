@@ -115,11 +115,11 @@ export function ackOutbox(dir: string, file: string): void {
 }
 
 export function ensureGatewayDirs(root: string): { ops: string } {
+  // `_gateway` holds chats.json and offsets.json, written by the gateway itself; the ops
+  // outbox is the only queue under `_ops`. Two more directories (a gateway outbox and a
+  // gateway usage dir) were created here on every start and never written to.
   const ops = join(root, "data", "_ops");
-  const gateway = join(root, "data", "_gateway");
-  for (const d of [join(ops, "outbox"), join(gateway, "outbox"), join(gateway, "usage")]) {
-    mkdirSync(d, { recursive: true });
-  }
+  mkdirSync(join(ops, "outbox"), { recursive: true });
   return { ops };
 }
 

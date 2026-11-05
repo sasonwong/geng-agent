@@ -3,13 +3,6 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-/** The file a mail with this id lives in: the name carries the message hash too. */
-function mailFile(dir: string, id: string): string {
-  const name = readdirSync(dir).find((n) => n.startsWith(`${id}-`));
-  if (name === undefined) throw new Error(`没有 ${id} 这封信`);
-  return join(dir, name);
-}
 import { makePaths } from "../internal/paths.ts";
 import {
   accept,
@@ -21,6 +14,13 @@ import {
   type MailConfig,
 } from "../internal/mail.ts";
 import { writeJson } from "../internal/fs.ts";
+
+/** The file a mail with this id lives in: the name carries the message hash too. */
+function mailFile(dir: string, id: string): string {
+  const name = readdirSync(dir).find((n) => n.startsWith(`${id}-`));
+  if (name === undefined) throw new Error(`没有 ${id} 这封信`);
+  return join(dir, name);
+}
 
 const FROM = "someone@example.org";
 

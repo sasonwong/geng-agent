@@ -641,9 +641,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     appendLine(paths.daemonLog, line);
     log(line);
 
-    if (result.finalText.trim() !== "") {
-      writeText(join(paths.data, "last-output.txt"), result.finalText);
-    }
     if (result.stderrTail.trim() !== "") {
       appendLine(join(paths.data, "last-stderr.log"), `${new Date().toISOString()} ${result.stderrTail.trim()}`);
     }
