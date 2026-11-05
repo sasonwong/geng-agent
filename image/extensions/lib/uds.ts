@@ -82,6 +82,17 @@ export function getToFile(
         return;
       }
       const out = createWriteStream(dest);
+      // A body that stops halfway — the daemon restarted, the file was pruned while it
+      // was being read — arrives as an event on the response, and `pipe` forwards neither
+      // errors nor a premature close: without these two handlers the tool dies with an
+      // uncaught exception and leaves a half-written file that looks whole. The file that
+      // lands in /work is then sent out as if it were the document it is not.
+      const cut = (why: string) => (err?: Error) => {
+        out.destroy();
+        reject(new Error(`${why}：${err?.message ?? "连接断了"}`));
+      };
+      res.on("error", cut(`取到一半就断了（${dest}）`));
+      res.on("aborted", cut(`取到一半就断了（${dest}）`));
       res.pipe(out);
       out.on("finish", () => resolve({ status: 200, bytes: out.bytesWritten }));
       out.on("error", reject);
