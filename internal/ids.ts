@@ -153,7 +153,9 @@ export function fileById(paths: Paths, id: string): { name: string; path: string
 }
 
 /** Every file that has an id, newest first, for `recall`. */
-export function listFiles(paths: Paths): { id: string; name: string; bytes: number }[] {
+export function listFiles(
+  paths: Paths,
+): { id: string; name: string; bytes: number; mtimeMs: number }[] {
   let names: string[];
   try {
     names = readdirSync(paths.filesDir);
@@ -166,13 +168,17 @@ export function listFiles(paths: Paths): { id: string; name: string; bytes: numb
       // mail may carry two files with the same name
       const m = /^(F\d+)-\d+-(.*)$/.exec(name);
       if (!m) return null;
-      let bytes = 0;
+      let st;
       try {
-        bytes = statSync(join(paths.filesDir, name)).size;
+        st = statSync(join(paths.filesDir, name));
       } catch {
         return null;
       }
-      return { id: m[1] as string, name: m[2] as string, bytes };
+      // The mtime comes back with the entry because this is where the only `statSync`
+      // on it happens. A caller that wants "when did this arrive" had to walk the whole
+      // directory again per file to find the name it was already holding, which is n
+      // scans of n names — and a name it then could not find came back as 1970.
+      return { id: m[1] as string, name: m[2] as string, bytes: st.size, mtimeMs: st.mtimeMs };
     })
-    .filter((f): f is { id: string; name: string; bytes: number } => f !== null);
+    .filter((f): f is { id: string; name: string; bytes: number; mtimeMs: number } => f !== null);
 }
