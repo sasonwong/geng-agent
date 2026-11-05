@@ -206,8 +206,6 @@ function keysOf(value: unknown, prefix = ""): string[] {
   );
 }
 
-const TRAILER = ".schema";
-
 /**
  * What the template says that this copy does not, and what the copy carries that nothing
  * reads any more.
@@ -221,8 +219,8 @@ export function policyDrift(
   template: Record<string, unknown>,
   instance: Record<string, unknown>,
 ): { missing: string[]; stale: string[] } {
-  const want = new Set(keysOf(template).filter((k) => !k.endsWith(TRAILER)));
-  const have = new Set(keysOf(instance).filter((k) => !k.endsWith(TRAILER)));
+  const want = new Set(keysOf(template));
+  const have = new Set(keysOf(instance));
   return {
     missing: [...want].filter((k) => !have.has(k)).sort(),
     stale: [...have].filter((k) => !want.has(k)).sort(),

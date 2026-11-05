@@ -92,3 +92,11 @@ test("a policy from a newer build is refused, not quietly rewritten", () => {
   writeJson(file, unstamped);
   assert.equal(loadPolicy(file).cycle.timeoutSec, 1800);
 });
+
+test("a key that merely ends in .schema is a key, not a version stamp", () => {
+  // `policyDrift` used to drop every leaf whose name ended in `.schema`, a filter left over
+  // from a nested version field no policy has ever had. Filtering by spelling means a real
+  // key can be hidden from the only check that reports it.
+  const drift = policyDrift({ cycle: { schema: 1, defaultWakeMinutes: 30 } }, {});
+  assert.deepEqual(drift.missing, ["cycle.defaultWakeMinutes", "cycle.schema"]);
+});
