@@ -48,7 +48,7 @@ import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
-import { advance, loadEscalation, parkNotice, planFor, saveEscalation, timeoutNotice, type Escalation, type Plan } from "./escalation.ts";
+import { advance, loadEscalation, parkNotice, planFor, saveEscalation, slowDownNotice, timeoutNotice, type Escalation, type Plan } from "./escalation.ts";
 
 const POLL_MS = 5_000;
 const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
@@ -653,16 +653,14 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         `${new Date().toISOString()} ${symptom} lvl=${escalation.level} ${escalation.detail}`,
       );
     }
-    // the timer just stopped for good: say it once, where a person looks
-    const notice = parkNotice(before, escalation);
-    if (notice) {
-      writeOps(ops, `daemon@${paths.instance}`, notice);
-    } else {
-      // a cut round is just as invisible from the outside; on the fourth in a row the
-      // parked line above already says more, so only the first one gets its own
-      const cut = timeoutNotice(before, escalation);
-      if (cut) writeOps(ops, `daemon@${paths.instance}`, cut);
-    }
+    // One line per crossing, in the order a person needs it: the timer stopping says more
+    // than the wait tripling, which says more than the first cut. A round can cross only
+    // one rung, so at most one of these fires — and each of them only on the crossing.
+    const notice =
+      parkNotice(before, escalation) ??
+      slowDownNotice(before, escalation) ??
+      timeoutNotice(before, escalation);
+    if (notice) writeOps(ops, `daemon@${paths.instance}`, notice);
     if (escalation.level >= 3) {
       log(`  → 下一轮按第 ${escalation.level} 档（${escalation.symptom ? SYMPTOM_LABEL[escalation.symptom] : "?"}，连续 ${escalation.streak} 次）`);
     }

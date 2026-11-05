@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advance, parkNotice, planFor, timeoutNotice, type Escalation } from "../internal/escalation.ts";
+import { advance, parkNotice, planFor, slowDownNotice, timeoutNotice, type Escalation } from "../internal/escalation.ts";
 import { classify } from "../internal/symptoms.ts";
 import type { RpcResult } from "../internal/rpc.ts";
 
@@ -114,6 +114,26 @@ test("levels below the parked rung, and getting well again, are not announced", 
   const ok = advance(e, "ok");
   assert.equal(parkNotice(e, ok), null);
   assert.equal(ok.streak, 0);
+});
+
+test("the rung where the wait triples is said once, where a person looks", () => {
+  // design §5 promises a line at level 3, and until now the code only logged it: the first
+  // thing ops ever heard was "the timer stopped", one rung too late to act on
+  const esc = (level: number, symptom: Escalation["symptom"] = "empty"): Escalation => ({
+    level,
+    streak: level,
+    symptom,
+    detail: "没有动作，也没有话",
+    updatedAt: null,
+  });
+  assert.match(slowDownNotice(esc(2), esc(3)) ?? "", /放慢到 3 倍/);
+  // only the crossing: level 3 repeats for as long as the streak lasts
+  assert.equal(slowDownNotice(esc(3), esc(3)), null);
+  // level 4 has its own message and its own backoff (0); it must not also say this one
+  assert.equal(slowDownNotice(esc(3), esc(4)), null);
+  // a clean round resets the ladder, so there is no crossing to announce
+  assert.equal(slowDownNotice(esc(3), FRESH), null);
+  assert.equal(slowDownNotice(FRESH, advance(FRESH, "timeout")), null);
 });
 
 test("a round cut at the wall is said once per run, not once per cut", () => {

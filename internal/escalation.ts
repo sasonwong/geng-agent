@@ -84,6 +84,24 @@ export function parkNotice(prev: Escalation, next: Escalation): string | null {
 }
 
 /**
+ * The rung before parked. From here the wait is three times the default, which is the first
+ * time a person would notice something without being told to look — and until this existed
+ * the only line ops ever got was "the timer stopped for good", one rung too late to be
+ * useful. Design §5 promised this line; the code only wrote the log.
+ *
+ * Once per run of failures, like the others: level 3 repeats for as long as the streak
+ * lasts, and a line per failure is noise for the only reader who can act on it.
+ */
+export function slowDownNotice(prev: Escalation, next: Escalation): string | null {
+  const before = planFor(prev).backoff;
+  const after = planFor(next).backoff;
+  // the crossing into 3, and only that: level 4 has its own message and backoff 0
+  if (after !== 3 || before >= 3) return null;
+  const label = next.symptom ? SYMPTOM_LABEL[next.symptom] : "上一轮";
+  return `连着 ${next.streak} 轮没有结果（${next.detail || label}），定时唤醒的间隔放慢到 3 倍了。`;
+}
+
+/**
  * The other line a person needs: the first round cut at the wall in a run. Its cut record
  * only reaches the agent itself, on the next page (packet.ts cutLine) — from the outside,
  * a round killed mid-sentence looks exactly like one that finished and had nothing to say,
