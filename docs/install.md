@@ -631,7 +631,8 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
 
-挂载是逐条论证过的，不是攒出来的，一共七条：
+挂载是逐条论证过的，不是攒出来的：常驻七条，配了搜索的实例还多一条 socket 文件
+（按同一个路径只读挂入，见「搜索接线」那一节）：
 
 | 宿主 | 容器 | 为什么 |
 |---|---|---|
@@ -642,6 +643,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 | `session/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
 | `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 |
 | `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |
+| `run/search.sock` | `/run/geng/search.sock` | 只读：搜索端点——配了搜索才有这一条 |
 
 书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`discard`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`/`say`，

@@ -577,8 +577,9 @@ Telegram 给的消息号记成 `<chat>-<message_id>`，所以它想引用自己�
 
 ### 挂载表
 
-七条挂载，逐条理由在 `docs/install.md` §10；这里只记形状：`identity.md` 一个文件、
-`/work` 一个目录、`settings.json` 与 `models.json` 两个只读文件、`session/` 一个目录、
+常驻七条挂载（配了搜索的实例还有第八条：search socket 文件按同一路径只读挂入），逐条理由在
+`docs/install.md` §10；这里只记形状：`identity.md` 一个文件、`/work` 一个目录、
+`settings.json` 与 `models.json` 两个只读文件、`session/` 一个目录、
 扩展目录和 socket 目录各一个只读目录。书本身不挂：`/state`、`/inbox`、`/people`、`/mail`、
 `/outbox`、`/files` 都不在容器里，读写全是 id 加 socket。
 
