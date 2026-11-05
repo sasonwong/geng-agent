@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { readJson, writeJson } from "./fs.ts";
+import { parseReplyTo } from "./quote.ts";
 
 export interface MuteEntry {
   until?: string | null;
@@ -24,16 +25,13 @@ export function readMutes(file: string, nowMs: number): MuteMap {
 }
 
 /**
- * `*` silences everything ambient; `dm` and `chat:<id>` are narrower — but `route()`
- * settles dm / mention / reply before it ever reads this, so only `*` and a group's
- * `chat:<id>` can bite (see `keyCanMute`).
+ * The ambient rule, and only that. `route()` settles dm / mention / reply before it asks,
+ * so a `dm` entry in mute.json is state that looks like a silence and is not one: it was
+ * read here, thrown away by the caller, and shown on the page as if it did something. Only
+ * `*` and `chat:<id>` are considered — the same two keys `keyCanMute` lets anything write.
  */
-export function isMuted(
-  mutes: MuteMap,
-  opts: { chatId: number; isDm: boolean },
-): { muted: boolean; key: string | null } {
-  const keys = ["*", ...(opts.isDm ? ["dm"] : []), `chat:${opts.chatId}`];
-  for (const key of keys) {
+export function isMuted(mutes: MuteMap, chatId: number): { muted: boolean; key: string | null } {
+  for (const key of ["*", `chat:${chatId}`]) {
     if (mutes[key]) return { muted: true, key };
   }
   return { muted: false, key: null };
@@ -65,15 +63,6 @@ export interface OutboxItem {
 
 export function outboxDir(data: string): string {
   return join(data, "outbox");
-}
-
-/** An item written by an older or broken sender simply has no quote. */
-function parseReplyTo(raw: unknown): { chat: number; messageId: number } | undefined {
-  if (!raw || typeof raw !== "object") return undefined;
-  const o = raw as { chat?: unknown; messageId?: unknown };
-  if (typeof o.chat !== "number" || typeof o.messageId !== "number") return undefined;
-  if (!Number.isSafeInteger(o.chat) || !Number.isSafeInteger(o.messageId)) return undefined;
-  return { chat: o.chat, messageId: o.messageId };
 }
 
 export function readOutbox(dir: string): OutboxItem[] {
@@ -113,7 +102,8 @@ export function readOutbox(dir: string): OutboxItem[] {
         : [],
       messages,
       chat: typeof raw.chat === "number" ? raw.chat : undefined,
-      replyTo: parseReplyTo(raw.replyTo),
+      // an item written by an older or broken sender simply has no quote
+      replyTo: parseReplyTo(raw.replyTo) ?? undefined,
     });
   }
   return items;

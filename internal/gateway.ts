@@ -129,6 +129,28 @@ export function knownPlaces(
 }
 
 /**
+ * A failed send is not a lost message and not an infinite retry.
+ *
+ * The sweep hands every outbox item back every two seconds, so acknowledging a failed one
+ * (the old behaviour) made a two-second network blip unrecoverable: the words were gone and
+ * the only trace was a line in the ops queue the agent cannot read. Retrying forever is the
+ * other wrong answer — a chat the bot was thrown out of would keep the whole bot's outbox
+ * stuck and, via the tripwire, mute it. Five attempts, then one line, and the file is moved
+ * to `outbox/sent/` with its words intact.
+ */
+export const SEND_ATTEMPTS = 5;
+
+export function failedAttempt(
+  failures: Map<string, number>,
+  file: string,
+  max = SEND_ATTEMPTS,
+): { n: number; giveUp: boolean } {
+  const n = (failures.get(file) ?? 0) + 1;
+  failures.set(file, n);
+  return { n, giveUp: n >= max };
+}
+
+/**
  * The brake's numbers. The window/limit/pause live here; the recording lives in
  * internal/tripwire.ts, because the order of "look at the pause" vs "record an attempt"
  * is the whole difference between a brake and a lockup.
@@ -358,7 +380,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const listen = cfg.listen ?? "all";
     const mutes = readMutes(join(p.book, "mute.json"), Date.now());
     const attention = parseAttention(readJson(p.attention, null));
-    const muted = isMuted(mutes, { chatId: message.chat.id, isDm: message.chat.type === "private" });
+    const muted = isMuted(mutes, message.chat.id);
 
     const decision = route({
       allowed,
@@ -624,6 +646,9 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
   };
 
+  // One count per outbox item, in memory on purpose: a restart is a fresh set of attempts.
+  const sendFailures = new Map<string, number>();
+
   const sweep = async (): Promise<void> => {
     for (;;) {
       // read per pass: a reload may have added or removed a bot since the last one
@@ -642,10 +667,20 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
           try {
             if (await deliver(key, item.messages, item.chat, item.files, item.replyTo, item.attachments)) {
               ackOutbox(dir, item.file);
+              sendFailures.delete(item.file);
             }
           } catch (err) {
-            writeOps(ops, "gateway", `发给 ${key} 失败：${(err as Error).message}`);
+            // Left in the queue until the attempts run out: acknowledging here is what
+            // made a two-second blip lose words for good.
+            const { n, giveUp } = failedAttempt(sendFailures, item.file);
+            if (!giveUp) continue;
+            writeOps(
+              ops,
+              "gateway",
+              `发给 ${key} 失败 ${n} 次，放弃了：${(err as Error).message}。那条消息在 outbox/sent/ 里，没送到。`,
+            );
             ackOutbox(dir, item.file);
+            sendFailures.delete(item.file);
           }
         }
       }

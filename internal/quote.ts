@@ -21,6 +21,24 @@ export function parseInboxId(s: string): Quote | null {
   return { chat, messageId };
 }
 
+/**
+ * A quote on the way in: the id a listing prints (`M-1001-151`, `-1001-151`, `#-1001-151`),
+ * or the `{chat, messageId}` object an older tool description asked for. One reader, because
+ * the tool writes a string and the outbox stores an object, and two parsers with different
+ * rules is how a quote works on one path and 400s on the other.
+ *
+ * `undefined` is "no quote", `null` is "a quote that cannot be read" — the caller decides
+ * whether that is a refusal or just an item from an older writer.
+ */
+export function parseReplyTo(raw: unknown): Quote | undefined | null {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw === "string") return parseInboxId(raw.trim().replace(/^[M#]/, ""));
+  if (typeof raw !== "object") return null;
+  const o = raw as { chat?: unknown; messageId?: unknown };
+  if (typeof o.chat !== "number" || typeof o.messageId !== "number") return null;
+  return { chat: o.chat, messageId: o.messageId };
+}
+
 /** The message someone answered, as far as it can be reconstructed from the update. */
 export interface Quoted {
   id: string;

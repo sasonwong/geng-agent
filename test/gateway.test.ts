@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { knownPlaces, noteChat, readChats, route } from "../internal/gateway.ts";
+import { failedAttempt, knownPlaces, noteChat, readChats, route } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/fs.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -61,7 +61,7 @@ test("expired mutes stop counting, wildcard beats specific", () => {
   });
   const mutes = readMutes(file, now);
   assert.equal(mutes.dm, undefined);
-  assert.deepEqual(isMuted(mutes, { chatId: -1, isDm: true }), { muted: true, key: "*" });
+  assert.deepEqual(isMuted(mutes, -1), { muted: true, key: "*" });
 });
 
 test("outbox items keep message order and are acked into sent/", () => {
@@ -157,4 +157,18 @@ test("a pure whitelist drops a stranger before anything is kept", () => {
       JSON.stringify(shape),
     );
   }
+});
+
+test("a failed send is retried a few times, then let go of with one line", () => {
+  const failures = new Map<string, number>();
+  const verdicts = [1, 2, 3, 4, 5].map(() => failedAttempt(failures, "1-x.json"));
+  assert.deepEqual(verdicts.map((v) => v.n), [1, 2, 3, 4, 5]);
+  // four retries: a blip heals, a chat the bot was thrown out of does not keep the whole
+  // outbox stuck (and, through the tripwire, mute the bot)
+  assert.deepEqual(verdicts.map((v) => v.giveUp), [false, false, false, false, true]);
+  // per item: one stuck message must not spend another one's attempts
+  assert.equal(failedAttempt(failures, "2-y.json").n, 1);
+  // and a success clears the count, so separate blips never add up
+  failures.delete("1-x.json");
+  assert.deepEqual(failedAttempt(failures, "1-x.json"), { n: 1, giveUp: false });
 });
