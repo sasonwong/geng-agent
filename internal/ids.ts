@@ -1,7 +1,7 @@
-import { readdirSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { closeSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import type { Paths } from "./paths.ts";
-import { readJson, writeJson } from "./fs.ts";
+import { mtimeMs, readJson, writeJson } from "./fs.ts";
 
 /**
  * Every id in the book, handed out from one place.
@@ -23,6 +23,48 @@ interface Ids {
 
 function today(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10).replace(/-/g, "");
+}
+
+const sleep = (ms: number): void => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+/**
+ * The ids file is read-modify-write, and three processes do it at once: the daemon
+ * (journal, loop), the gateway (a file that came with a telegram message) and the mail
+ * endpoint (mail, and its attachments). Two allocations interleaving used to hand the
+ * same number to both — two files with one prefix, `fileById` answering with whichever
+ * it listed first — and a `{...ids, fileN}` write could also flatten a counter another
+ * process had just raised.
+ *
+ * The lock is a file created with O_EXCL, the one operation the filesystem makes atomic.
+ * A holder that died without removing it is reclaimed by age, so a crash cannot wedge
+ * every id forever; the wait is bounded, so a wedged lock is an error and not a hang.
+ */
+function withIdsLock<T>(paths: Paths, run: () => T): T {
+  const lock = `${paths.ids}.lock`;
+  mkdirSync(dirname(lock), { recursive: true });
+  const waited = Date.now();
+  for (;;) {
+    try {
+      closeSync(openSync(lock, "wx"));
+      break;
+    } catch {
+      if (Date.now() - (mtimeMs(lock) ?? 0) > 10_000) {
+        rmSync(lock, { force: true }); // its holder is gone: take it over
+        continue;
+      }
+      if (Date.now() - waited > 5_000) {
+        throw new Error(`ids.json 的锁 5 秒拿不到（${lock}）`);
+      }
+      sleep(50);
+    }
+  }
+  try {
+    return run();
+  } finally {
+    rmSync(lock, { force: true });
+  }
 }
 
 /** The highest number already used in these directories, or 0. */
@@ -52,30 +94,32 @@ function highest(dirs: string[], pattern: RegExp): number {
  * snapshot has ids the counter has not seen) but not lower it.
  */
 export function allocate(paths: Paths, kind: IdKind): { id: string; n: number; day: string } {
-  const ids = readJson<Ids>(paths.ids, {});
-  const day = today(Date.now());
-  if (kind === "loop") {
-    const floor = highest([paths.openLoops, join(paths.openLoops, "closed")], /^L(\d+)\.md$/);
-    const n = Math.max(ids.loopN ?? 0, floor) + 1;
-    writeJson(paths.ids, { ...ids, loopN: n });
-    return { id: `L${n}`, n, day };
-  }
-  if (kind === "mail") {
-    const floor = highest([paths.mail], /^E(\d+)-/);
-    const n = Math.max(ids.mailN ?? 0, floor) + 1;
-    writeJson(paths.ids, { ...ids, mailN: n });
-    return { id: `E${n}`, n, day };
-  }
-  if (kind === "file") {
-    const floor = highest([paths.filesDir], /^F(\d+)-/);
-    const n = Math.max(ids.fileN ?? 0, floor) + 1;
-    writeJson(paths.ids, { ...ids, fileN: n });
-    return { id: `F${n}`, n, day };
-  }
-  const floor = highest([paths.journal, paths.journalDiscarded], new RegExp(`^J${day}-(\\d+)\\.md$`));
-  const n = Math.max(ids.journalDay === day ? (ids.journalN ?? 0) : 0, floor) + 1;
-  writeJson(paths.ids, { ...ids, journalDay: day, journalN: n });
-  return { id: `J${day}-${n}`, n, day };
+  return withIdsLock(paths, () => {
+    const ids = readJson<Ids>(paths.ids, {});
+    const day = today(Date.now());
+    if (kind === "loop") {
+      const floor = highest([paths.openLoops, join(paths.openLoops, "closed")], /^L(\d+)\.md$/);
+      const n = Math.max(ids.loopN ?? 0, floor) + 1;
+      writeJson(paths.ids, { ...ids, loopN: n });
+      return { id: `L${n}`, n, day };
+    }
+    if (kind === "mail") {
+      const floor = highest([paths.mail], /^E(\d+)-/);
+      const n = Math.max(ids.mailN ?? 0, floor) + 1;
+      writeJson(paths.ids, { ...ids, mailN: n });
+      return { id: `E${n}`, n, day };
+    }
+    if (kind === "file") {
+      const floor = highest([paths.filesDir], /^F(\d+)-/);
+      const n = Math.max(ids.fileN ?? 0, floor) + 1;
+      writeJson(paths.ids, { ...ids, fileN: n });
+      return { id: `F${n}`, n, day };
+    }
+    const floor = highest([paths.journal, paths.journalDiscarded], new RegExp(`^J${day}-(\\d+)\\.md$`));
+    const n = Math.max(ids.journalDay === day ? (ids.journalN ?? 0) : 0, floor) + 1;
+    writeJson(paths.ids, { ...ids, journalDay: day, journalN: n });
+    return { id: `J${day}-${n}`, n, day };
+  });
 }
 
 /**
