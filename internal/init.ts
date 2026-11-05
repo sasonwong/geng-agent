@@ -3,6 +3,8 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "n
 import { dirname, join } from "node:path";
 import { makePaths, requiredDirs } from "./paths.ts";
 import { readJson } from "./fs.ts";
+import { MODEL_KEY_VARS } from "./model.ts";
+import { readEnvFile, writeEnvValue } from "./secret.ts";
 
 // Everything in this file is `--env-file` into the container, so nothing secret goes here.
 // It holds only what the container is allowed to see: the two GitHub App ids.
@@ -89,6 +91,21 @@ export function initInstance(root: string, instance: string, opts: InitOptions =
     writeFileSync(modelEnv, modelEnvText(opts.modelKey ?? "", opts.upstream ?? DEFAULT_UPSTREAM), {
       mode: 0o600,
     });
+  } else if (opts.modelKey !== undefined || opts.upstream !== undefined) {
+    // "export 后重跑 init" is the promise the CLI prints for a wrong key or a wrong
+    // upstream. It has to reach the file that already exists: creating it once and never
+    // touching it again meant a rerun reported success over a key nothing ever read.
+    const env = readEnvFile(modelEnv);
+    // the name the file already carries, so a rerun replaces the key instead of growing
+    // a second one beside it (readModelKey takes the first name it finds)
+    const current = MODEL_KEY_VARS.find((n) => (env[n] ?? "").trim() !== "") ?? "OPENCODE_API_KEY";
+    if (opts.upstream !== undefined) writeEnvValue(modelEnv, "GENG_MODEL_UPSTREAM", opts.upstream);
+    if (opts.modelKey !== undefined && opts.modelKey !== "") {
+      for (const name of MODEL_KEY_VARS) {
+        if (name !== current && (env[name] ?? "") !== "") writeEnvValue(modelEnv, name, "");
+      }
+      writeEnvValue(modelEnv, current, opts.modelKey);
+    }
   }
   chmodSync(modelEnv, 0o600);
 

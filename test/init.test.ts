@@ -58,3 +58,22 @@ test("without flags the template's values survive, and the key file is still cre
   assert.equal(readModelKey(p), null, "空模板不该算配好了");
   assert.equal(modelUpstream(p), "https://opencode.ai/inference/go/v1");
 });
+
+test("a rerun with a key or an upstream reaches the file that already exists", () => {
+  // the CLI prints "把 key 写进这里，或 export 后重跑 init"; the rerun used to be a no-op
+  // over an existing file, reporting success while the wrong key stayed in place
+  const r = root();
+  initInstance(r, "carol", { modelKey: "first" });
+  const p = makePaths(r, "carol");
+  assert.equal(readModelKey(p)?.key, "first");
+
+  initInstance(r, "carol", { modelKey: "second", upstream: "https://other.invalid/v1" });
+  assert.equal(readModelKey(p)?.key, "second", "重跑要换掉旧 key");
+  assert.equal(readModelKey(p)?.name, "OPENCODE_API_KEY", "沿用文件里已有的名字，不再长出第二个");
+  assert.equal(modelUpstream(p), "https://other.invalid/v1", "重跑要换掉旧地址");
+
+  // a rerun without a key does not blank what is there
+  initInstance(r, "carol", {});
+  assert.equal(readModelKey(p)?.key, "second");
+  assert.equal(modelUpstream(p), "https://other.invalid/v1");
+});

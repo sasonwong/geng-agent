@@ -38,6 +38,20 @@ test("reading an env file ignores comments, blank lines and lines with no equals
   assert.deepEqual(readEnvFile(join(d, "missing.env")), {});
 });
 
+test("a name written twice collapses to one line, and the written value wins", () => {
+  const d = dir();
+  const file = join(d, "x.env");
+  // readEnvFile is last-wins, so a writer that replaced only the first occurrence left
+  // the *old* value winning after its own write
+  writeFileSync(file, "TOKEN=old\nOTHER=1\nTOKEN=older\n");
+
+  writeEnvValue(file, "TOKEN", "new");
+
+  assert.equal(readEnvFile(file).TOKEN, "new");
+  assert.equal(readEnvFile(file).OTHER, "1");
+  assert.equal(readFileSync(file, "utf8").split("\n").filter((l) => l.startsWith("TOKEN=")).length, 1);
+});
+
 
 test("a mailbox with only half of its wiring is reported, because neither half complains", () => {
   const mail = { "a@example.com": { instance: "alice", allow: ["you@example.org"] } };
