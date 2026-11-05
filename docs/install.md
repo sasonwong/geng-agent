@@ -608,8 +608,9 @@ git fetch origin && git reset --hard origin/main
 
 ```
 data/<instance>/
-  book/   它的书：identity.md  open-loops/  journal/
-                几个只有宿主读的 json：policy.proposal / mute / attention / intent / mail.read（打开过的邮件 id）
+  book/   它的书：identity.md  open-loops/  journal/  journal/discarded/
+                只有宿主读的 json：waiting（闹钟）/ waiting.consumed（用过的，改名留在这儿）/
+                policy.proposal / mute / attention / intent / mail.read（打开过的邮件 id）/ files.forget（要删的附件）
                 只有 identity.md 挂进容器，可写
   policy.json   它活在什么规矩下——在书外面，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）——容器里除了它和 identity.md 只有 tmpfs
