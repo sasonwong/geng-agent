@@ -8,10 +8,9 @@ import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
 import { appendSaid } from "./people.ts";
 import { attachmentOf, hostPathForWorkPath, placeholderFor, safeName } from "./attach.ts";
-import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
+import { newestKnock, peekInbox } from "./inbox.ts";
 import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./mail.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
-import { loadPolicy } from "./policy.ts";
 import { readBots, type Bots } from "./bots.ts";
 import { readJson, writeJson } from "./fs.ts";
 import {
@@ -28,7 +27,6 @@ import {
   nameOf,
   type BotConfig,
   type BotIdentity,
-  type TgMessage,
   type TgUpdate,
 } from "./telegram.ts";
 

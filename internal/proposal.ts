@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -6,8 +6,8 @@ import { readJson } from "./fs.ts";
 
 /**
  * What the agent may change about its own running conditions — and nothing else.
- * Runner, container limits, network and the cycle timeout are not on the table:
- * those are the frame, not the settings.
+ * Container limits, network and the cycle timeout are not on the table: those are the
+ * frame, not the settings.
  */
 export const NEGOTIABLE: Record<string, { min: number; max: number; integer: boolean }> = {
   "cycle.defaultWakeMinutes": { min: 1, max: 720, integer: true },

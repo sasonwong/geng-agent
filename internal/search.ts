@@ -3,7 +3,7 @@ import { chmodSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
-import { readJson, readText, writeJson } from "./fs.ts";
+import { readJson, writeJson } from "./fs.ts";
 
 /**
  * The search key must not live in the container, so the container only gets a socket
@@ -88,7 +88,7 @@ const UPSTREAM = "https://api.deepseek.com/v1/tools";
  * exists. If either is missing the tool is simply not there — and the page must not
  * promise a quota it cannot spend.
  */
-export function searchReady(root: string, instanceEnvFile: string): SearchEnv | null {
+export function searchReady(root: string): SearchEnv | null {
   const host = readSearchEnv(root);
   if (host === null || !existsSync(host.socket)) return null;
   return host;
@@ -96,13 +96,13 @@ export function searchReady(root: string, instanceEnvFile: string): SearchEnv | 
 
 /** Whether *this container* has the tool. One predicate, so the page and the daemon
  * cannot disagree about it. */
-export function searchConfigured(root: string, instanceEnvFile: string): boolean {
-  return searchReady(root, instanceEnvFile) !== null;
+export function searchConfigured(root: string): boolean {
+  return searchReady(root) !== null;
 }
 
 /** How much searching is left today — the agent has to know to weigh it. */
-export function searchQuota(root: string, instanceEnvFile: string): { limit: number; left: number } | null {
-  if (searchReady(root, instanceEnvFile) === null) return null;
+export function searchQuota(root: string): { limit: number; left: number } | null {
+  if (searchReady(root) === null) return null;
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const q = readJson<Quota>(join(root, "data", "_ops", "usage", "search.json"), {});
   const limit = q.limit ?? limitOf(file, "GENG_SEARCH_DAILY", 200);

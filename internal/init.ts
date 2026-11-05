@@ -5,7 +5,7 @@ import { makePaths, requiredDirs } from "./paths.ts";
 import { readJson } from "./fs.ts";
 
 // Everything in this file is `--env-file` into the container, so nothing secret goes here.
-// It holds only tokens whose damage is bounded: a search token that can search, a chat id.
+// It holds only what the container is allowed to see: a GitHub app id, a bot chat id.
 const SECRETS_TEMPLATE = `# geng: things the container is allowed to see.
 # Injected with \`docker run --env-file\` — never mounted, never in data/, never in backups.
 # The model key does NOT belong here: it goes in secrets/<instance>.model.env, which the container

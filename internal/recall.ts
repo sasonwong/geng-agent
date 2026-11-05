@@ -361,10 +361,6 @@ export function recallText(p: Paths, q: RecallQuery): string {
 }
 
 /**
- * `open` guesses the source from the id's shape. A mail id is opaque, so it is tried
- * last for the prefixes and first for everything else; `chat:<n>` is a person.
- */
-/**
  * One letter decides where an id lives: J journal, L loop, P person, M message,
  * E email, R round, F file. Nothing has to guess by trying four places first, and
  * the letter is visible in every listing so the model can read it off.

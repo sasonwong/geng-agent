@@ -17,7 +17,7 @@ export interface Paths {
   /** The ceiling each id series has reached, so a deleted file cannot give an old entry's
    * name to a new one. The files are the floor, this is the memory. */
   ids: string;
-  /** Sockets, mounted into the container at /run/geng. Under `data/` so every runner has
+  /** Sockets, mounted into the container at /run/geng. Under `data/` so the daemon owns
    * one; a socket is not a file anyone can back up, and it never survives a restart. */
   run: string;
   inbox: string;

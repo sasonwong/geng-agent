@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { chmodSync, existsSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, renameSync, writeFileSync } from "node:fs";
 import { readJson } from "./fs.ts";
 import type { BotConfig } from "./telegram.ts";
 
@@ -99,11 +99,3 @@ export function describeBot(cfg: BotConfig | undefined): string {
   return `listen=${cfg.listen ?? "all"} allow=${allow}${cfg.chat === undefined ? "" : " 有默认 chat"}`;
 }
 
-/** 600 or the token is one `cat` away from anybody who can read the directory. */
-export function modeOf(path: string): number | null {
-  try {
-    return statSync(path).mode & 0o777;
-  } catch {
-    return null;
-  }
-}

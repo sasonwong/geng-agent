@@ -7,9 +7,9 @@ import { readEnvFile } from "./secret.ts";
  * The model key lives on the host, in a file the container never sees.
  *
  * It used to ride in `secrets/<inst>.env`, which is `--env-file` into the container: one
- * round ran `env` and could have read it. Now pi asks for it at request time —
- * `models.json` carries `apiKey: "!curl … /model/key"` — so the key exists on the host,
- * on the wire to the provider, and nowhere the agent can look.
+ * round ran `env` and could have read it. Now pi posts to `127.0.0.1:11434/model` and the
+ * daemon adds the credential on the way out, so the key exists on the host, on the wire
+ * to the provider, and nowhere the agent can look.
  */
 export const MODEL_KEY_VARS = ["GENG_MODEL_KEY", "OPENCODE_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 

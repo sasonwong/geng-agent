@@ -92,10 +92,10 @@ test("the quota the agent is shown uses the same reading of an empty line", () =
   const instance = join(f.root, "instance.env");
     try {
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY="));
-    assert.equal(searchQuota(f.root, instance)?.limit, 111);
-    assert.equal(searchQuota(f.root, instance)?.left, 111);
+    assert.equal(searchQuota(f.root)?.limit, 111);
+    assert.equal(searchQuota(f.root)?.left, 111);
     delete process.env.GENG_SEARCH_DAILY;
-    assert.equal(searchQuota(f.root, instance)?.limit, 200);
+    assert.equal(searchQuota(f.root)?.limit, 200);
   } finally {
     f.restore();
   }
@@ -108,13 +108,13 @@ test("no socket, no quota: the page must not promise what the container cannot s
   const f = fixture();
   const instance = join(f.root, "instance.env");
   try {
-    assert.notEqual(searchQuota(f.root, instance), null);
+    assert.notEqual(searchQuota(f.root), null);
     // a socket path nothing created: the endpoint is configured, the service is not up
     writeFileSync(join(f.root, "secrets", "search.env"), envText(join(f.root, "gone.sock")));
-    assert.equal(searchQuota(f.root, instance), null);
+    assert.equal(searchQuota(f.root), null);
     // and without the provider key there is nothing to spend either
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "", "DEEPSEEK_API_KEY="));
-    assert.equal(searchQuota(f.root, instance), null);
+    assert.equal(searchQuota(f.root), null);
   } finally {
     f.restore();
   }
@@ -150,13 +150,13 @@ test("a quota file left at zero by an earlier run is not a permanent verdict", a
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY="));
     delete process.env.GENG_SEARCH_DAILY;
         writeFileSync(usage, JSON.stringify({ day, count: 0, limit: 0 }));
-    assert.equal(searchQuota(f.root, instance)?.left, 0); // before: the old zero wins
+    assert.equal(searchQuota(f.root)?.left, 0); // before: the old zero wins
     const env = readSearchEnv(f.root);
     assert.ok(env);
     server = await startSearchServer({ root: f.root, env, log: () => {} });
-    assert.deepEqual(searchQuota(f.root, instance), { limit: 200, left: 200 });
+    assert.deepEqual(searchQuota(f.root), { limit: 200, left: 200 });
     writeFileSync(usage, JSON.stringify({ day, count: 0, limit: null }));
-    assert.equal(searchQuota(f.root, instance)?.limit, 200); // NaN written as null = unset
+    assert.equal(searchQuota(f.root)?.limit, 200); // NaN written as null = unset
   } finally {
     server?.close();
     f.restore();

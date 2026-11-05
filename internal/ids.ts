@@ -13,8 +13,6 @@ import { readJson, writeJson } from "./fs.ts";
  */
 export type IdKind = "journal" | "loop" | "mail" | "file";
 
-const LETTER: Record<IdKind, string> = { journal: "J", loop: "L", mail: "E", file: "F" };
-
 interface Ids {
   journalDay?: string;
   journalN?: number;

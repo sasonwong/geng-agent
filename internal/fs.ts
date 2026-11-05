@@ -7,7 +7,6 @@ import {
   readFileSync,
   renameSync,
   statSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
 import { dirname } from "node:path";
@@ -52,9 +51,9 @@ export function writeJson(file: string, value: unknown): void {
   writeText(file, JSON.stringify(value, null, 2) + "\n");
 }
 
-/** Append + fsync: an append-only log that loses its tail is a log with a hole. */
 /**
- * One previous copy, rotated by line count. These files only grow, and the two that grow
+ * Append + fsync (a log that loses its tail is a log with a hole), keeping one previous
+ * copy rotated by line count. These files only grow, and the two that grow
  * fastest are the ones nobody reads in full: `net.log` gets a line per connection and
  * `daemon.log` a line per round. Twenty thousand lines is roughly a year of rounds and a
  * few days of a busy network log — small enough to keep, large enough not to worry about.

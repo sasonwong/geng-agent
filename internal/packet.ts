@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { CutRecord } from "./meta.ts";
 import type { InboxMsg } from "./inbox.ts";
 import type { Paths } from "./paths.ts";
-import { excerpt, mtimeMs, readJson, readText } from "./fs.ts";
+import { excerpt, mtimeMs } from "./fs.ts";
 import { KIND_WORD } from "./attach.ts";
 import { localClock } from "./time.ts";
 import { formatDuration } from "./schedule.ts";
@@ -28,15 +28,12 @@ export interface PacketInput {
   statePath: string;
   /** What arrived by mail and was never opened. Mail never knocks: it waits. */
   mailPending: { count: number; senders: string[]; oldestMs: number | null };
-  /** Where the mailbox appears inside the container. */
-  /** Where the read-only auxiliary mounts appear inside the container. */
   /** Every message handed over this waking: the knock first, then the ambient. */
   inbox: InboxMsg[];
   /** The ambient slice of `inbox`, so the two may be counted apart. */
   lowInbox: InboxMsg[];
   /** Mutes that are still in force, shown as state — they do not change delivery. */
   mutes: Record<string, { until?: string | null }>;
-  /** The previous waking died mid-flight. */
   /** How the round before this one ended, when it did not end on its own. */
   cut: CutRecord | null;
   /** A [观察] block explaining how the last waking ended, if it did not end well. */
@@ -49,8 +46,8 @@ export interface PacketInput {
   lowPending: number;
   /** The timezone its container runs in, so the page and its own `date` agree. */
   timezone: string;
-  /** Where it may speak, so a window can be rendered with the names it knows. */
-  /** `kind` is what knownPlaces() read from chats.json: a dm can never be muted. */
+  /** Where it may speak, so a window can be rendered with the names it knows; `kind`
+   *  comes from knownPlaces(): a dm can never be muted. */
   places: { id: number; label: string; home: boolean; kind?: "private" | "group" }[];
   /** A window it opened itself with `listen`; past its end it is not shown at all. */
   attention: { chats: (number | "*")[]; untilMs: number; why?: string } | null;
@@ -60,7 +57,6 @@ export interface PacketInput {
   filesOldestPrunedMs: number | null;
   filesUsedBytes: number;
   filesCapMb: number;
-  /** The settings it is allowed to renegotiate, shown so it can renegotiate them. */
   /** Searches left today; null when no search endpoint is configured. */
   searchLeft: number | null;
   /** Set when the image or the program changed since the last waking. */
@@ -75,8 +71,6 @@ export interface PacketInput {
     inbox: number;
     talkedTo: string[];
     touched: number;
-    /** Actions whose arguments mentioned the book this round: memory traffic with no name
-     * yet. Written by the daemon, shown so the number can go down when the tools land. */
   } | null;
   /** The last thing said on the address that last spoke, whoever said it. */
   lastWords: { dir: "in" | "out"; text: string; at: string; who: string } | null;
@@ -421,8 +415,6 @@ export function buildPacket(input: PacketInput): string {
   if (searchLeft !== null) {
     out.push("", searchLeft === 0 ? "今天的搜索用完了。" : `今天还能搜 ${searchLeft} 次。`);
   }
-
-
 
   // No truncation: nothing that grows with the outside world is pasted any more,
   // so the page is bounded by construction rather than by cutting it in half.

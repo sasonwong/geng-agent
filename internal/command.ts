@@ -56,10 +56,6 @@ export function buildCommand(
   sessionId: string,
   /** The constant half of waking up, with the identity it wrote appended. */
   systemPrompt: string,
-  /** Where it may speak, as chat ids: `say` refuses a chat that is not one of them, and
-   *  with two or more it must be told which one. The count goes out next to them, for an
-   *  extension older than this daemon — it reads the count and nothing else. */
-  places: { id: number }[],
   /** Replace the in-container command; used by the doctor probe. */
   tail?: string[],
 ): Command {
@@ -114,8 +110,8 @@ export function buildCommand(
       `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
       "-v",
       `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
-      // The model key is fetched from the book socket at request time (`apiKey: "!curl …"`),
-      // so no provider credential is in this container's environment at all.
+      // pi posts model requests to the socat port below; the daemon adds the credential
+      // on the way out, so no provider key is in this container's environment at all.
       "-v",
       `${join(paths.root, "deploy", "models.json")}:/home/agent/.pi/agent/models.json:ro`,
       // The book is not mounted at all. Every read and every write goes through the
@@ -165,16 +161,20 @@ export function buildCommand(
     if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
     args.push(
       policy.container.image,
-      ...(tail ?? [
-        "geng-pi",
-        "--mode",
-        "rpc",
-        "--session-id",
-        sessionId,
-        "--system-prompt",
-        systemPrompt,
-        ...extensionArgs(paths.extensions),
-      ]),
+      // an empty replacement is not a command: only the probe passes one, and it passes
+      // a real one
+      ...(tail !== undefined && tail.length > 0
+        ? tail
+        : [
+            "geng-pi",
+            "--mode",
+            "rpc",
+            "--session-id",
+            sessionId,
+            "--system-prompt",
+            systemPrompt,
+            ...extensionArgs(paths.extensions),
+          ]),
     );
     return { cmd: "docker", args, env: process.env, cwd: paths.workspace };
 }

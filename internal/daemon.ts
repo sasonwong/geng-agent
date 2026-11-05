@@ -10,7 +10,7 @@ import { pendingMail } from "./mail.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { chainFrom } from "./proxy.ts";
 import { ExpectedError } from "./errors.ts";
-import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
+import { ensurePolicyLocation, onDiskSchema, schemaConflict } from "./schema.ts";
 import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
 import {
   alarmSpent,
@@ -27,14 +27,13 @@ import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
 import {
   clearCut,
-  DAY_MS,
   readCut,
   readMeta,
+  readWakes,
   recordWake,
   writeCut,
   writeMeta,
   type CutRecord,
-  type Meta,
 } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
@@ -250,7 +249,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   const currentEnv = {
     imageId: await imageId(policy),
     version: packageVersion(paths.root),
-    search: searchConfigured(paths.root, paths.secrets),
+    search: searchConfigured(paths.root),
   };
   const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);
 
@@ -425,9 +424,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       systemFacts(places, policySummary(policy), capMinutes),
     );
     const longGap = typeof meta.lastWakeMs === "number" && nowMs - meta.lastWakeMs > longGapMs;
-    const wakes24h = readJson<number[]>(join(paths.meta, "wakes.json"), []).filter(
-      (t) => nowMs - t < DAY_MS,
-    ).length;
+    // one reader: the same window is what `status` prints, and two copies of the cutoff
+    // disagree exactly when someone changes one of them
+    const wakes24h = readWakes(paths, nowMs).length;
 
     const packet = buildPacket({
       envChanged,
@@ -478,7 +477,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       wakes24h: wakes24h + 1,
       parked: plan.parked,
 
-      searchLeft: searchQuota(paths.root, paths.secrets)?.left ?? null,
+      searchLeft: searchQuota(paths.root)?.left ?? null,
       waiting: waitingOn(paths.data),
       identity: readText(paths.identity),
     });
@@ -534,7 +533,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         }
         return [...clock, ...fresh.map(injectionText)];
       },
-      command: buildCommand(paths, policy, sessionId, systemPrompt, places),
+      command: buildCommand(paths, policy, sessionId, systemPrompt),
       instance: paths.instance,
       isDocker: true,
       timeoutMs: policy.cycle.timeoutSec * 1000,
@@ -624,10 +623,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         talkedTo: activeSince(paths.data, startedMs).map((a) => a.who),
         // both halves: a cycle that only wrote a journal entry did something, and a
         // count that only watches /work would quietly teach it to touch files instead
-        touched:
-          countTouched(paths.workspace, startedMs) + countTouched(paths.book, startedMs),
-        // how much memory traffic has no name yet; the page states it so the number has
-        // somewhere to go down to when the tools exist
+        touched: countTouched(paths.workspace, startedMs) + countTouched(paths.book, startedMs),
       },
     };
     writeMeta(paths, meta);

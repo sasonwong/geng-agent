@@ -3,7 +3,6 @@ import { join } from "node:path";
 import { knownPlaces } from "./gateway.ts";
 import { listSessionFiles } from "./command.ts";
 import { makePaths, type Paths } from "./paths.ts";
-import { loadPolicy } from "./policy.ts";
 import { formatDuration, readWaiting } from "./schedule.ts";
 import { readText } from "./fs.ts";
 import { countLoops } from "./packet.ts";
@@ -51,7 +50,6 @@ export function statusLine(root: string, instance: string): string {
   const p = makePaths(root, instance);
   const meta = readMeta(p);
   const wait = readWaiting(p.waiting);
-  const policy = loadPolicy(p.policy);
   const now = Date.now();
   const sinceLast = typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) : "从未";
   const next = wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) : "未设定";
@@ -61,7 +59,6 @@ export function statusLine(root: string, instance: string): string {
 
 export async function printStatus(root: string, instance: string): Promise<void> {
   const p = makePaths(root, instance);
-  const policy = loadPolicy(p.policy);
   const now = Date.now();
   const meta = readMeta(p);
   const wakes = readWakes(p, now);

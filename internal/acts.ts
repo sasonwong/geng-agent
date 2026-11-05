@@ -41,13 +41,3 @@ export function actsFor(waking: number, calls: ToolCall[]): ActLine[] {
 export function appendActs(file: string, lines: ActLine[]): void {
   for (const line of lines) appendLine(file, JSON.stringify(line));
 }
-
-/**
- * How many actions mentioned the book at all.
- *
- * Lower bound on purpose: `preview` is the arguments cut at 120 characters, so a path
- * late in a long argument is invisible here. That is acceptable for the number it is
- * used for — "how much memory traffic has no name yet" — because a tool call carries
- * what it is in its *name*, so the count only has to be big enough to make the point,
- * not exact.
- */

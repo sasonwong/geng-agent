@@ -246,7 +246,6 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   });
 
   // 一个填错或漏填的值不会报错，只会让某件事安静地不发生。这几条是它唯一的出口。
-  const instEnv = readEnvFile(p.secrets);
 
   // 可选能力的三态：配好且对 = ok，配了但不对 = FAIL，没配 = warn。
   // 只有区分这三态，"漏配"才看得见——否则"没配"和"配好且安静"长得一样。
@@ -279,7 +278,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       searchHost !== null,
       socketMissing,
       "没配：容器里没有 web_search",
-      `socket 在 ${searchHost?.socket ?? "?"}，今天还剩 ${searchQuota(root, p.secrets)?.left ?? "?"} 次`,
+      `socket 在 ${searchHost?.socket ?? "?"}，今天还剩 ${searchQuota(root)?.left ?? "?"} 次`,
     ),
   );
 
@@ -597,7 +596,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     return checks;
   }
 
-  const command = buildCommand(o, policy, "geng-doctor-probe", "probe", [], PROBE);
+  const command = buildCommand(o, policy, "geng-doctor-probe", "probe", PROBE);
   const onHost = existsSync(o.extensions)
     ? readdirSync(o.extensions).filter((f) => f.endsWith(".ts")).length
     : 0;
@@ -660,13 +659,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   return checks;
 }
 
-export function runDoctor(
-  root: string,
-  instance: string,
-  fix: boolean,
-  withProbe: boolean,
-  extra: Check[] = [],
-): number {
+export function runDoctor(root: string, instance: string, fix: boolean, extra: Check[] = []): number {
   const checks = [...checkInstance(root, instance, fix), ...extra];
   let failed = 0;
   for (const c of checks) {
@@ -688,7 +681,7 @@ export interface DoctorOptions {
 export async function runDoctorWithProbe(o: DoctorOptions): Promise<number> {
   const extra: Check[] = o.probe ? await probe(o.root, o.instance) : [];
   extra.push(...(await backupChecks(o.root, o.instance, o.restoreTest)));
-  return runDoctor(o.root, o.instance, o.fix, o.probe, extra);
+  return runDoctor(o.root, o.instance, o.fix, extra);
 }
 
 async function backupChecks(root: string, instance: string, restoreTest: boolean): Promise<Check[]> {
