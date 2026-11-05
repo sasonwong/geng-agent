@@ -359,6 +359,12 @@ export async function startMailServer(o: MailServerOptions): Promise<Server> {
       size += chunk.length;
       if (size <= maxBytes) chunks.push(chunk);
     });
+    // A Worker that dies mid-upload takes its socket down, and the error arrives on the
+    // request. Unhandled, it is an uncaught exception in the gateway — one dropped mail
+    // would restart the process that delivers every bot's messages.
+    req.on("error", (err) => {
+      o.log(`mail ← 上传断了：${err.message}`);
+    });
     req.on("end", () => {
       if (size > maxBytes) {
         send(413, { ok: false, error: "too big" });
