@@ -59,6 +59,25 @@ test("a prefix is a byte comparison, not a string one", () => {
   assert.equal(inCidr("2001:db8::5", "2001:db8::/32"), true);
   assert.equal(inCidr("2001:db9::5", "2001:db8::/32"), false);
   assert.equal(inCidr("2001:db8::5", "10.0.0.0/8"), false);
+  // an IPv6 address written with its IPv4 tail is one shape, not a parser guess
+  assert.equal(inCidr("::ffff:192.0.2.9", "::ffff:192.0.2.0/121"), true);
+  assert.equal(inCidr("::ffff:192.0.2.9", "::ffff:192.0.2.0/125"), false);
+  // a malformed rule is not a rule
+  assert.equal(inCidr("2001:db8::5", "2001:db8:::32"), false);
+  assert.equal(inCidr("2001:db8::5", "2001:db8::/32/8"), false);
+});
+
+test("an IPv4 address in IPv6 clothes is refused by the IPv4 rule", () => {
+  // Node connects `::ffff:127.0.0.1` (and the older `::127.0.0.1`) to 127.0.0.1, so a
+  // rule that only sees the 128-bit spelling is decoration. The default is what matters:
+  // the address has to be denied through its embedded v4 form.
+  const rule = ["0.0.0.0/0", "::/0", "!127.0.0.0/8", "!10.0.0.0/8", "!169.254.0.0/16"];
+  for (const ip of ["::ffff:127.0.0.1", "::ffff:10.0.0.7", "::ffff:169.254.169.254", "::127.0.0.1"]) {
+    assert.equal(addrAllowed(ip, rule).ok, false, `${ip} 要被当成内网地址`);
+  }
+  // an explicit v4-only rule governs the embedded form too
+  assert.equal(addrAllowed("::ffff:192.0.2.7", ["192.0.2.0/24"]).ok, true);
+  assert.equal(addrAllowed("::ffff:192.0.2.7", ["192.0.2.1/32"]).ok, false);
 });
 
 test("a target has to be both named and public before it is opened", async () => {
@@ -90,6 +109,13 @@ test("the chain is a setting with three meanings, and `off` is one of them", () 
     // a proxy URL with credentials sends them as a header, never in the request line
     const http = chainFrom("http://me:pw@10.0.0.9:3128");
     assert.match(String((http as { auth?: string }).auth), /^Basic /);
+    // an https chain is TLS, not HTTP spoken to a TLS port; and brackets are not the host
+    assert.deepEqual(chainFrom("https://proxy.example:3129"), { kind: "https", host: "proxy.example", port: 3129 });
+    assert.equal(chainFrom("https://[2001:db8::1]:3129")?.host, "2001:db8::1");
+    // a URL that does not parse is no chain at all, and must not become "direct"
+    assert.equal(chainFrom("http://"), null);
+    assert.equal(chainFrom("http://proxy.example:not-a-port"), null);
+    assert.equal(chainFrom("http://%zz@proxy.example"), null);
   } finally {
     if (saved === undefined) delete process.env.HTTPS_PROXY;
     else process.env.HTTPS_PROXY = saved;
@@ -182,7 +208,7 @@ test("when the host is itself behind a proxy, the tunnel goes through it", async
   const chain = chainFrom("auto");
   // `localhost` resolves without a network; the chain stub never looks at the name
   const clientSide = createTcp((socket) => {
-    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
   });
   await new Promise<void>((r) => clientSide.listen(0, "127.0.0.1", () => r()));
   try {
@@ -205,6 +231,44 @@ test("when the host is itself behind a proxy, the tunnel goes through it", async
     assert.match(out, /echo:ping/);
   } finally {
     restore();
+    clientSide.close();
+    upstream.close();
+  }
+});
+
+test("a CONNECT answer that arrives in pieces is still a CONNECT answer", async () => {
+  // The old tunnel checked each TCP chunk for `\r\n\r\n` on its own. A proxy that split
+  // `HTTP/1.1 200\r\n\r\n` in the middle was read as a hang or a 502; HTTP does not
+  // promise one write per header, so the reader has to accumulate.
+  const upstream = createTcp((socket) => {
+    socket.once("data", () => {
+      socket.write("HTTP/1.1 200 Con");
+      setTimeout(() => socket.write("nection Established\r\n\r\ntunnel-ready"), 10);
+    });
+  });
+  await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", () => r()));
+  const chain = chainFrom(`http://127.0.0.1:${(upstream.address() as { port: number }).port}`);
+  const clientSide = createTcp((socket) => {
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
+  });
+  await new Promise<void>((r) => clientSide.listen(0, "127.0.0.1", () => r()));
+  try {
+    const out = await new Promise<string>((resolve) => {
+      const c = connect((clientSide.address() as { port: number }).port, "127.0.0.1", () => c.write("ping"));
+      let text = "";
+      const finish = (): void => {
+        c.destroy();
+        resolve(text);
+      };
+      c.on("data", (d) => {
+        text += String(d);
+        if (text.includes("tunnel-ready")) finish();
+      });
+      setTimeout(finish, 2000);
+    });
+    assert.match(out, /200 Connection Established/);
+    assert.match(out, /tunnel-ready/);
+  } finally {
     clientSide.close();
     upstream.close();
   }
@@ -262,7 +326,7 @@ test("a SOCKS5 chain does the handshake before it pipes anything", async () => {
   await new Promise<void>((r) => socks.listen(0, "127.0.0.1", () => r()));
   const chain = chainFrom(`socks5://me:secret@127.0.0.1:${(socks.address() as { port: number }).port}`);
   const front = createTcp((socket) => {
-    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
   });
   await new Promise<void>((r) => front.listen(0, "127.0.0.1", () => r()));
   try {
@@ -402,7 +466,7 @@ test("one connection is one report, and it is said only once the tunnel is up", 
     `127.0.0.1:${port}`,
     peer,
     Buffer.alloc(0),
-    { allow: ["*"], cidrs: ["127.0.0.0/8"] },
+    { allow: ["*"], cidrs: ["127.0.0.0/8", "::1/128"] },
     () => {},
     null,
     (ok, why) => reports.push([ok, why]),
@@ -440,7 +504,7 @@ test("a refused direct connection is a refusal, not an uncaught error", async ()
       `127.0.0.1:${port}`,
       fake as never,
       Buffer.alloc(0),
-      { allow: ["*"], cidrs: ["127.0.0.0/8"] },
+      { allow: ["*"], cidrs: ["127.0.0.0/8", "::1/128"] },
       () => {},
       null,
       (ok, why) => reports.push([ok, why]),

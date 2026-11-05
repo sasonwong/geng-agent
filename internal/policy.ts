@@ -1,5 +1,6 @@
 import { ExpectedError } from "./errors.ts";
 import { readText } from "./fs.ts";
+import { chainFrom, validCidr } from "./proxy.ts";
 
 export interface Policy {
   schema: number;
@@ -87,6 +88,12 @@ function num(v: unknown, path: string, min: number): number {
   return v;
 }
 
+function int(v: unknown, path: string, min: number): number {
+  const n = num(v, path, min);
+  if (!Number.isInteger(n)) throw new ExpectedError(`policy: ${path} must be an integer`);
+  return n;
+}
+
 function str(v: unknown, path: string): string {
   if (typeof v !== "string" || v.length === 0) {
     throw new ExpectedError(`policy: ${path} must be a non-empty string`);
@@ -118,7 +125,7 @@ export function loadPolicy(file: string): Policy {
       timeoutSec: num(cycle.timeoutSec, "cycle.timeoutSec", 10),
       defaultWakeMinutes: num(cycle.defaultWakeMinutes, "cycle.defaultWakeMinutes", 1),
       minWakeMinutes: num(cycle.minWakeMinutes, "cycle.minWakeMinutes", 1),
-      repeatThreshold: num(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
+      repeatThreshold: int(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
     backup: { enabled: p.backup?.enabled !== false },
     timezone: str(p.timezone ?? d.timezone, "timezone"),
@@ -130,12 +137,15 @@ export function loadPolicy(file: string): Policy {
       image: str(container.image, "container.image"),
       memory: str(container.memory, "container.memory"),
       cpus: str(container.cpus, "container.cpus"),
-      pidsLimit: num(container.pidsLimit, "container.pidsLimit", 16),
+      pidsLimit: int(container.pidsLimit, "container.pidsLimit", 16),
       proxyChain: (() => {
         const raw = typeof container.proxyChain === "string" ? container.proxyChain.trim() : d.container.proxyChain;
         if (raw === "" || raw === "auto" || raw === "off") return raw === "" ? "auto" : raw;
-        if (!/^(https?|socks5h?):\/\//.test(raw)) {
-          throw new ExpectedError(`policy: container.proxyChain 要是 auto、off 或 http(s)/socks5 URL，收到 ${raw}`);
+        // A URL that does not parse (an empty host, a port that is not a number) used to
+        // fall through to `chainFrom() === null`, which reads as "direct" — a proxy the
+        // operator wrote down became a connection that ignored it.
+        if (!/^(https?|socks5h?):\/\//.test(raw) || chainFrom(raw) === null) {
+          throw new ExpectedError(`policy: container.proxyChain 要是 auto、off 或可解析的 http(s)/socks5 URL，收到 ${raw}`);
         }
         return raw;
       })(),
@@ -164,9 +174,7 @@ export function loadPolicy(file: string): Policy {
                   const body = entry.startsWith("!") ? entry.slice(1) : entry;
                   // A name here would never match an address, and the silence would look
                   // like the proxy ignoring the rule.
-                  // a bare word (no slash, no dot, no colon) is a host name, not an address
-                  const bare = !body.includes("/") && !body.includes(".") && !body.includes(":");
-                  if (bare || !/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(body)) {
+                  if (!validCidr(body)) {
                     throw new ExpectedError(`policy: container.proxyAllowCidrs 只收网段或地址，收到 ${entry}`);
                   }
                   return entry;
