@@ -41,9 +41,9 @@ test("a subcommand is not an instance name", async () => {
 
 test("a non-numeric allow or chat is an error, not a silent 0 or null", async () => {
   const r = root();
-  const token = "1:not-a-bot\n";
+  const botLine = "1:not-a-bot\n";
   const add = (extra: string[]) =>
-    run(["bots", "add", "alice", "--root", r, "--token-stdin", ...extra], token);
+    run(["bots", "add", "alice", "--root", r, "--token-stdin", ...extra], botLine);
 
   const letter = await add(["--allow", "123,abc"]);
   assert.equal(letter.code, 2, letter.out);
