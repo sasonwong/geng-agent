@@ -2,6 +2,7 @@ import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readdirSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync, spawn } from "node:child_process";
+import { connect } from "node:net";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
 import { readJson, readText } from "./fs.ts";
@@ -20,6 +21,7 @@ import { readSearchEnv, searchQuota } from "./search.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
 import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
+import { socketPath } from "./book.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { repairTail } from "./session.ts";
@@ -499,8 +501,9 @@ const PROBE = [
   [
     // the entrypoint starts these; the probe bypasses it, so it has to do the same or it
     // measures a container with no way out at all
-    'socat TCP-LISTEN:11434,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &',
-    'socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &',
+    // a subshell, because these are joined with `; ` and `&;` is a syntax error
+    '(socat TCP-LISTEN:11434,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &)',
+    '(socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &)',
     'sleep 0.3',
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
     'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
@@ -519,6 +522,20 @@ const PROBE = [
     "true",
   ].join("; "),
 ];
+
+/** Whether anything is listening on the book socket right now. */
+function socketAlive(path: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect(path);
+    const done = (ok: boolean): void => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.on("connect", () => done(true));
+    socket.on("error", () => done(false));
+    setTimeout(() => done(false), 300);
+  });
+}
 
 /** What the container can actually do — the only honest way to test mounts and egress. */
 async function probe(root: string, instance: string): Promise<Check[]> {
@@ -555,14 +572,20 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   });
   const inContainer = Number(/EXT_COUNT=(\d+)/.exec(out)?.[1] ?? -1);
 
+  // Without a running daemon there is no proxy to test: the socket exists but nothing
+  // answers, which is indistinguishable from a broken proxy unless it is said out loud.
+  const daemonUp = await socketAlive(socketPath(o));
   checks.push({
     name: "只有代理能出去",
     ok: out.includes("PROXY_OK") && out.includes("NET_DIRECT_BLOCKED"),
+    warnOnly: !daemonUp,
     detail: out.includes("NET_DIRECT_OK")
       ? "容器能直连 github.com —— --network none 没生效，代理只是装饰"
-      : out.includes("PROXY_DEAD")
-        ? "代理不通：容器拿不到任何出口（socat 没起来，或 socket 不在）"
-        : "直连断开，代理通",
+      : !daemonUp
+        ? "daemon 没在跑，代理无从验证（先起 daemon 再跑 --probe）"
+        : out.includes("PROXY_DEAD")
+          ? "代理不通：容器拿不到任何出口（socat 没起来，或 socket 不在）"
+          : "直连断开，代理通",
   });
   checks.push({
     name: "policy.json 不可见",

@@ -19,7 +19,7 @@ test("a proxy that can reach the host's own network is worse than no proxy", () 
   for (const ip of ["127.0.0.1", "10.1.2.3", "172.17.0.1", "192.168.1.1", "169.254.169.254", "::1", "fd00::1"]) {
     assert.equal(isPublicAddress(ip), false, `${ip} 是内网地址`);
   }
-  assert.equal(isPublicAddress("140.82.112.3"), true);
+  assert.equal(isPublicAddress("192.0.2.7"), true, "文档段是公网段，只是不能路由");
   // an IPv4-mapped loopback is still loopback
   assert.equal(isPublicAddress("::ffff:127.0.0.1"), false);
 });
