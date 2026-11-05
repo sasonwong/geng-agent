@@ -31,14 +31,7 @@ test("splitter tolerates CRLF and drops malformed lines", () => {
 
 test("RepeatWatcher reports the threshold crossing once per level", () => {
   const w = new RepeatWatcher(3);
-  const call: ToolCall = {
-    name: "read",
-    key: "k1",
-    preview: '{"path":"a"}',
-    atMs: 0,
-    durationMs: null,
-    isError: false,
-  };
+  const call: ToolCall = { name: "read", key: "k1", preview: '{"path":"a"}' };
   assert.equal(w.observe(call), null);
   assert.equal(w.observe(call), null);
   const first = w.observe(call);
@@ -49,7 +42,7 @@ test("RepeatWatcher reports the threshold crossing once per level", () => {
 test("RepeatWatcher ignores a different key", () => {
   const w = new RepeatWatcher(3);
   for (let i = 0; i < 5; i++) {
-    w.observe({ name: "read", key: `k${i}`, preview: "", atMs: 0, durationMs: null, isError: false });
+    w.observe({ name: "read", key: `k${i}`, preview: "" });
   }
   assert.equal(w.repeat, null);
 });

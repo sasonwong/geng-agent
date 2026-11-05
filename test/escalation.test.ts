@@ -177,7 +177,7 @@ test("a round whose last request errored is not reported as an empty one", () =>
     classify(
       rpc({
         endedOnModelError: true,
-        toolCalls: [{ name: "bash", key: "k", preview: "ls", atMs: 0, durationMs: 5, isError: false }],
+        toolCalls: [{ name: "bash", key: "k", preview: "ls" }],
       }),
     ),
     "model-error",

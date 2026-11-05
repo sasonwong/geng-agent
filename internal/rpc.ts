@@ -3,15 +3,11 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { Command } from "./command.ts";
 import { killContainer } from "./command.ts";
 
+/** What a round did, in order. Only the name and the arguments: what a caller can use. */
 export interface ToolCall {
   name: string;
   key: string;
   preview: string;
-  /** When it started, so the ledger can order actions inside one round. */
-  atMs: number;
-  /** How long it ran; null when no end was ever reported (killed mid-action). */
-  durationMs: number | null;
-  isError: boolean;
 }
 
 export interface Repeat {
@@ -108,7 +104,7 @@ export class RepeatWatcher {
     this.threshold = threshold;
   }
 
-  observe(call: ToolCall): Repeat | null {
+  observe(call: Pick<ToolCall, "name" | "key" | "preview">): Repeat | null {
     const n = (this.counts.get(call.key) ?? 0) + 1;
     this.counts.set(call.key, n);
     if (n >= this.threshold && (this.repeat === null || n > this.repeat.count)) {
@@ -134,8 +130,6 @@ export function abortActive(): void {
 export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   const started = Date.now();
   const toolCalls: ToolCall[] = [];
-  // toolCallId → the record it opens, so the end event can close the same one
-  const callsById = new Map<string, ToolCall>();
   // Set when an action starts, cleared when it finishes: it stays set only if the round
   // was killed with that action still running, which is exactly the thing worth naming.
   let openCall: { name: string; preview: string; atMs: number } | null = null;
@@ -194,16 +188,8 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     if (type === "tool_execution_start") {
       const name = String(rec.toolName ?? "?");
       const args = rec.args;
-      const call: ToolCall = {
-        name,
-        key: callKey(name, args),
-        preview: callPreview(args),
-        atMs: Date.now(),
-        durationMs: null,
-        isError: false,
-      };
+      const call: ToolCall = { name, key: callKey(name, args), preview: callPreview(args) };
       toolCalls.push(call);
-      if (typeof rec.toolCallId === "string") callsById.set(rec.toolCallId, call);
       openCall = { name, preview: call.preview, atMs: Date.now() };
       const repeat = watcher.observe(call);
       if (repeat && !steered) {
@@ -223,13 +209,9 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
       return;
     }
 
+    // the only thing an end buys: an action that finished is not the open one
     if (type === "tool_execution_end") {
       openCall = null;
-      const ended = typeof rec.toolCallId === "string" ? callsById.get(rec.toolCallId) : undefined;
-      if (ended) {
-        ended.durationMs = typeof rec.durationMs === "number" ? rec.durationMs : null;
-        ended.isError = rec.isError === true;
-      }
       return;
     }
 
