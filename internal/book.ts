@@ -490,16 +490,24 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       o.onModelRequest?.();
       const chunks: Buffer[] = [];
       let size = 0;
+      // A destroyed socket with no answer is indistinguishable from a daemon that died, so
+      // the refusal is written first; `refused` stops the body from growing after it, and
+      // draining the rest lets the 413 reach the caller instead of being cut by an RST.
+      let refused = false;
       req.on("data", (c: Buffer) => {
+        if (refused) return;
         size += c.length;
         if (size > MAX_MODEL_BODY) {
-          req.destroy();
+          refused = true;
+          chunks.length = 0;
           reply(413, { error: "请求体太大" });
+          req.resume();
           return;
         }
         chunks.push(c);
       });
       req.on("end", () => {
+        if (refused) return;
         proxyModel(o.paths, req, res, Buffer.concat(chunks)).catch(guard);
       });
       req.on("error", guard);
@@ -511,16 +519,21 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     if (/^http:\/\//i.test(url)) {
       const chunks: Buffer[] = [];
       let size = 0;
+      let refused = false;
       req.on("data", (c: Buffer) => {
+        if (refused) return;
         size += c.length;
         if (size > MAX_MODEL_BODY) {
-          req.destroy();
+          refused = true;
+          chunks.length = 0;
           reply(413, { error: "请求体太大" });
+          req.resume();
           return;
         }
         chunks.push(c);
       });
       req.on("end", () => {
+        if (refused) return;
         forwardPlain(req, res, Buffer.concat(chunks), rule(), chain(), (ok, why) =>
           o.onNetwork?.({ target: url, ok, why }),
         ).catch(guard);
@@ -550,12 +563,19 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       return;
     }
     let body = "";
+    let refused = false;
     req.setEncoding("utf8");
     req.on("data", (c: string) => {
+      if (refused) return;
       body += c;
-      if (body.length > MAX_BODY) req.destroy();
+      if (body.length > MAX_BODY) {
+        refused = true;
+        reply(413, { error: "请求体太大" });
+        req.resume();
+      }
     });
     req.on("end", () => {
+      if (refused) return;
       handle(req, body).then((r) => reply(r.status, r.body)).catch(guard);
     });
     req.on("error", guard);
