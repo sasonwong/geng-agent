@@ -824,7 +824,6 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   };
 
   if (mailbox !== null) {
-    const mailEnv = readMailEnv(root);
     // a mailbox is a second transport: a field missing here must not take Telegram down
     // with it, and it must not be quiet either — ops is the only place a person looks
     const broken = (why: string): void => {
@@ -832,8 +831,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       log(line);
       writeOps(ops, "gateway", line);
     };
+    // readMailEnv refuses a malformed bind loudly; that refusal belongs in `broken`,
+    // not in an exception that kills the long poll on its way out.
+    let mailEnv: ReturnType<typeof readMailEnv> = null;
+    let envProblem: string | null = null;
+    try {
+      mailEnv = readMailEnv(root);
+    } catch (err) {
+      envProblem = (err as Error).message;
+    }
     if (mailEnv === null) {
-      broken(`有 ${join("secrets", "mail.json")} 但没有 token（secrets/mail.env 的 GENG_MAIL_TOKEN）`);
+      broken(envProblem ?? `有 ${join("secrets", "mail.json")} 但没有 token（secrets/mail.env 的 GENG_MAIL_TOKEN）`);
     } else {
       try {
         await startMailServer({ root, getCfg: () => mailbox.cfg, env: mailEnv, log });

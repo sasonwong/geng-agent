@@ -283,12 +283,20 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   );
 
   const mailCfg = loadMailConfig(root);
-  const mailEnv = readMailEnv(root);
+  let mailEnv: ReturnType<typeof readMailEnv> = null;
+  let mailBindProblem: string | null = null;
+  try {
+    mailEnv = readMailEnv(root);
+  } catch (err) {
+    // a bind that parses to port 0 is worse than a missing mailbox: the listener is
+    // healthy and unreachable. That has to be a FAIL, not a "没配" warning.
+    mailBindProblem = (err as Error).message;
+  }
   checks.push(
     optional(
       "邮件接线",
-      mailCfg !== null || mailEnv !== null,
-      mailWiringProblem(instance, mailCfg, mailEnv),
+      mailCfg !== null || mailEnv !== null || mailBindProblem !== null,
+      mailBindProblem ?? mailWiringProblem(instance, mailCfg, mailEnv),
       "没配：信收不进来",
       "地址与 token 都在",
     ),
