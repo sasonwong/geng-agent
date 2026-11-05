@@ -12,7 +12,7 @@ import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
 import { addrAllowed, chainFrom } from "./proxy.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
-import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
+import { MODEL_KEY_VARS, modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { socketPath } from "./book.ts";
 import { makePaths } from "./paths.ts";
@@ -146,9 +146,9 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   // and a round that runs `env` would read it. This is the migration check, not a nicety.
   const key = readModelKey(p);
   const envVars = readEnvFile(p.secrets);
-  const leakedKey = ["OPENCODE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GENG_MODEL_KEY"].filter(
-    (name) => (envVars[name] ?? "") !== "",
-  );
+  // The list readModelKey would accept, not a copy of it: a sixth spelling added there and
+  // not here leaves the migration check silently blind to exactly the name it is for.
+  const leakedKey = MODEL_KEY_VARS.filter((name) => (envVars[name] ?? "") !== "");
   // Both halves are needed now that the daemon is the data plane: without an upstream the
   // proxy answers 503 and every model request fails with what looks like a network error.
   const upstream = modelUpstream(p);
