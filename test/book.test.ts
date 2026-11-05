@@ -519,3 +519,25 @@ test("a malformed file id is a refusal, not a crash", { timeout: 10_000 }, async
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+
+test("a body that stops arriving is an error, and leaves no file half written", { timeout: 15_000 }, async () => {
+  // The socket is the only route for a file's bytes, and the host can die mid-body. Without
+  // a handler for the cut the promise never settled: the tool call and the round hung with
+  // it, and what sat on disk read as a whole file.
+  const root = mkdtempSync(join(tmpdir(), "geng-kink-"));
+  const sock = join(root, "kink.sock");
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { "content-length": "10" });
+    res.write("ab");
+    setTimeout(() => res.socket?.destroy(), 30);
+  });
+  await new Promise<void>((r) => server.listen(sock, r));
+  const dest = join(root, "half.bin");
+  try {
+    await assert.rejects(() => getToFile(sock, "/files/F1", dest), /断|ECONNRESET|aborted/);
+    assert.equal(existsSync(dest), false, "半截文件不能出现在目的地");
+    assert.deepEqual(readdirSync(root).filter((f) => f.startsWith("half.bin")), [], "临时文件也要清掉");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
