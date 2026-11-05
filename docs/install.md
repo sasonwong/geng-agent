@@ -488,7 +488,7 @@ JSON 形状不一样，只有真的读回来一次才知道。
 
 ```bash
 node cmd/geng/index.ts init bob
-# 改 policy（runner=docker、network=agent-net）
+# 改 policy（runner=docker）
 # 填 secrets/bob.env
 sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
   deploy/geng@.service > ~/.config/systemd/user/geng@bob.service

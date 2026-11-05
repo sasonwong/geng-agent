@@ -56,7 +56,7 @@ node cmd/geng/index.ts doctor alice    # 检查不变量
 node cmd/geng/index.ts daemon --instance alice
 ```
 
-宿主前置（docker、`agent-net` 的出口规则、systemd 单元、可选能力）见
+宿主前置（docker、systemd 单元、可选能力）见
 **[`docs/install.md`](docs/install.md)**——那里每节都以一条验证命令收尾。
 
 第一次醒来时 `identity.md` 是空的，书里没有一行。**那个空白就是它的出生。**
