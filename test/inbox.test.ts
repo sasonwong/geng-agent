@@ -110,3 +110,15 @@ test("a file with neither words nor attachments is set aside, and never knocks",
   assert.equal(existsSync(join(seen, "-100-10.json.bad")), true);
   assert.equal(existsSync(join(inbox, "-100-10.json")), false);
 });
+
+test("a dry quarantine names the broken file but leaves it where it is", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const inbox = join(root, "inbox");
+  const seen = join(root, "seen");
+  mkdirSync(inbox, { recursive: true });
+  mkdirSync(seen, { recursive: true });
+  writeFileSync(join(inbox, "-100-11.json"), JSON.stringify({ id: "-100-11", text: "" }));
+  assert.deepEqual(quarantine(inbox, seen, true), ["-100-11.json"]);
+  assert.equal(existsSync(join(inbox, "-100-11.json")), true, "预览不能把消息挪走");
+  assert.equal(existsSync(join(seen, "-100-11.json.bad")), false);
+});
