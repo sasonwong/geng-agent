@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sendMessage, splitMessage } from "../internal/telegram.ts";
+import { sendFile, sendMessage, splitMessage } from "../internal/telegram.ts";
+import { writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /** Answers the next sendMessage call with the id it is given, in call order. */
 function answerWith(ids: number[]): () => void {
@@ -36,5 +39,28 @@ test("a text split into several messages reports every id, in order", async () =
     assert.deepEqual(await sendMessage("t", -100, long), expected);
   } finally {
     restore();
+  }
+});
+
+test("a sent file comes back with its id and the kind it went out as", async () => {
+  const real = globalThis.fetch;
+  let method = "";
+  globalThis.fetch = (async (url: string) => {
+    method = String(url).split("/").pop()!;
+    return {
+      text: async () => JSON.stringify({ ok: true, result: { message_id: 909 } }),
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+  try {
+    const png = join(tmpdir(), "one.png");
+    const md = join(tmpdir(), "one.md");
+    writeFileSync(png, "x");
+    writeFileSync(md, "y");
+    assert.deepEqual(await sendFile("t", -100, png), { id: 909, kind: "photo" });
+    assert.equal(method, "sendPhoto");
+    assert.deepEqual(await sendFile("t", -100, md), { id: 909, kind: "document" });
+    assert.equal(method, "sendDocument");
+  } finally {
+    globalThis.fetch = real;
   }
 });

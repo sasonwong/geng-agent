@@ -290,7 +290,20 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
         continue;
       }
-      await sendFile(cfg.token, chat, host);
+      const sent = await sendFile(cfg.token, chat, host);
+      // Files are messages too, and they take their ids before the words below get theirs:
+      // the row has to be written here, or the transcript shows a later stamp over an
+      // earlier id. Each file also took an id in the chat, and a transcript that never
+      // names it leaves the next reader counting a hole that is not one.
+      if (p) {
+        appendSaid(p.data, chat, {
+          // `at` = when the response arrived: an upper bound on the id's instant, ms-level error.
+          at: new Date().toISOString(),
+          dir: "out",
+          text: placeholderFor([{ kind: sent.kind }]),
+          ...(sent.id === undefined ? {} : { id: `${chat}-${sent.id}` }),
+        });
+      }
     }
     if (p) {
       for (const [i, text] of texts.entries()) {

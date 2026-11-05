@@ -224,29 +224,38 @@ export async function downloadFile(
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
 
 /** Photos as photos, everything else as a document. `path` is a host path. */
-export async function sendFile(token: string, chat: number, path: string): Promise<void> {
+export interface SentFile {
+  /** Absent only if Telegram answered without one, the same allowance `sendMessage` keeps. */
+  id?: number;
+  /** What it went out as: the transcript names it the way an inbound one is named. */
+  kind: "photo" | "document";
+}
+
+export async function sendFile(token: string, chat: number, path: string): Promise<SentFile> {
   const bytes = readFileSync(path);
   const name = basename(path);
+  const kind = IMAGE_EXT.test(name) ? "photo" : "document";
   const form = new FormData();
   form.set("chat_id", String(chat));
-  if (IMAGE_EXT.test(name)) {
+  if (kind === "photo") {
     form.set("photo", new Blob([bytes]), name);
   } else {
     form.set("document", new Blob([bytes]), name);
   }
-  const response = await fetch(`${API}/bot${token}/${IMAGE_EXT.test(name) ? "sendPhoto" : "sendDocument"}`, {
+  const response = await fetch(`${API}/bot${token}/${kind === "photo" ? "sendPhoto" : "sendDocument"}`, {
     method: "POST",
     body: form,
     signal: AbortSignal.timeout(120_000),
   });
   const text = await response.text();
-  let body: { ok?: boolean; description?: string };
+  let body: { ok?: boolean; description?: string; result?: { message_id?: number } };
   try {
     body = JSON.parse(text);
   } catch {
     throw new Error(`sendFile: HTTP ${response.status} ${text.slice(0, 200)}`);
   }
   if (!body.ok) throw new Error(`sendFile: ${body.description ?? `HTTP ${response.status}`}`);
+  return { ...(body.result?.message_id === undefined ? {} : { id: body.result.message_id }), kind };
 }
 
 /**
