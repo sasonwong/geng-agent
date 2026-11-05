@@ -134,7 +134,7 @@ const listenTool = tool({
 const forgetTool = tool({
   name: "forget",
   label: "Forget files",
-  description: '删掉别人发来的文件腾地方，下一轮醒来之前生效——这一轮你还听得到它。files 是 id 数组（形如 "F12"；老写法的 /files/… 路径也认），一次最多 50 个。返回 {files}：删掉之后还剩的待删清单。',
+  description: '删掉别人发来的文件腾地方，下一轮醒来之前生效——这一轮你还听得到它。files 是 id 数组（形如 "F12"；老写法的 /files/… 路径也认），一次最多 50 个。返回 {files}：累计的待删清单（含之前记下、还没删掉的），不是删完剩下的——删除发生在下一轮醒来之前。',
   parameters: {
     type: "object",
     properties: {
