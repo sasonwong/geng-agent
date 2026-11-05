@@ -371,6 +371,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       }
     }
     const p = instanceData(key);
+    // A file that cannot go must not take the words with it. The texts above have already
+    // been sent; letting this throw hands the whole item back to the sweep, which retries
+    // it — and the same paragraph would be delivered again, up to five times, because of a
+    // file Telegram refused or one that no longer exists. One line says what stayed behind.
+    const sendQuietly = async (what: string, path: string): Promise<void> => {
+      try {
+        await sendFile(cfg.token, chat, path);
+      } catch (err) {
+        writeOps(ops, "gateway", `${key} 要发的文件 ${what} 没发出去：${(err as Error).message}。话已经送到了，不重发。`);
+      }
+    };
     for (const given of files) {
       // the path came from inside the container, so it can be anything it likes: only
       // /work is its own, and only files that exist there are sent
@@ -379,12 +390,12 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
         continue;
       }
-      await sendFile(cfg.token, chat, host);
+      await sendQuietly(given, host);
     }
     // the daemon resolved these from ids it handed out, so they are already host paths;
     // nothing here can be talked into reading somewhere else
     for (const a of attachments) {
-      await sendFile(cfg.token, chat, a.path);
+      await sendQuietly(a.name, a.path);
     }
     if (p) {
       for (const [i, text] of texts.entries()) {
