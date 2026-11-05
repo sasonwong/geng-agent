@@ -31,7 +31,11 @@ export interface RpcResult {
   timedOut: boolean;
   startFailed: boolean;
   toolCalls: ToolCall[];
-  /** The action that had started and not finished when the round was killed. */
+  /**
+   * The action that had started and not finished when the round was killed. With
+   * parallel tool calls several can be open at once; this names the one that had been
+   * running longest, and it is null only when every start had its end.
+   */
   openCall: { name: string; preview: string; atMs: number } | null;
   repeat: Repeat | null;
   finalText: string;
@@ -130,9 +134,10 @@ export function abortActive(): void {
 export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   const started = Date.now();
   const toolCalls: ToolCall[] = [];
-  // Set when an action starts, cleared when it finishes: it stays set only if the round
-  // was killed with that action still running, which is exactly the thing worth naming.
-  let openCall: { name: string; preview: string; atMs: number } | null = null;
+  // Open calls, not one open call: tools can run in parallel, and a single slot meant
+  // one `end` (for whichever call finished first) cleared the record of another that was
+  // still running — the cut note then said "nothing was running" over a live round.
+  const openCalls: { name: string; preview: string; atMs: number }[] = [];
   const watcher = new RepeatWatcher(o.repeatThreshold);
   const interventions: string[] = [];
   let stderrTail = "";
@@ -190,7 +195,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
       const args = rec.args;
       const call: ToolCall = { name, key: callKey(name, args), preview: callPreview(args) };
       toolCalls.push(call);
-      openCall = { name, preview: call.preview, atMs: Date.now() };
+      openCalls.push({ name, preview: call.preview, atMs: Date.now() });
       const repeat = watcher.observe(call);
       if (repeat && !steered) {
         steered = true;
@@ -209,9 +214,10 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
       return;
     }
 
-    // the only thing an end buys: an action that finished is not the open one
+    // an end retires one open call; without an id in the event the count is the fact, and
+    // the oldest is the one the cut note names (see RpcResult.openCall)
     if (type === "tool_execution_end") {
-      openCall = null;
+      openCalls.shift();
       return;
     }
 
@@ -347,7 +353,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     timedOut,
     startFailed,
     toolCalls,
-    openCall,
+    openCall: openCalls[0] ?? null,
     repeat: watcher.repeat,
     finalText,
     stats,
