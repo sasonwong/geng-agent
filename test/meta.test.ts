@@ -42,7 +42,6 @@ test("a cut note is written, read back whole, and cleared", () => {
 
   const rec = {
     kind: "timeout" as const,
-    at: "2026-03-02T08:30:00Z",
     waking: 212,
     reason: "knock",
     tools: ["bash md5sum v8.md"],
@@ -59,7 +58,7 @@ test("a cut note is written, read back whole, and cleared", () => {
 
 test("a cut note that nothing can read is worth less than a waking that starts", () => {
   const paths = fixture();
-  writeCut(paths, { kind: "timeout", at: "x", waking: 1, reason: "timer" });
+  writeCut(paths, { kind: "timeout", waking: 1, reason: "timer" });
   // someone hand-edited it into something that is not a note
   writeFileSync(join(paths.meta, "cut.json"), '{"kind":"nonsense"}');
   assert.equal(readCut(paths), null);

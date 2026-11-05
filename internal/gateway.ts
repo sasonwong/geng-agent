@@ -536,7 +536,6 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       from: senderName(message),
       at,
       chat: message.chat.id,
-      route: decision.reason,
       ...(att ? { attachments: [att] } : {}),
       ...(quoted ? { quote: quoted } : {}),
     });

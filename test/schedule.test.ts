@@ -88,7 +88,7 @@ test("the knock floor never goes backwards as the ladder climbs", () => {
   const minMs = 60_000;
   const defMs = 30 * 60_000;
   const floor = (level: number): number => {
-    const rung = planFor({ level, streak: level, symptom: "timeout", detail: "", updatedAt: null });
+    const rung = planFor({ level, streak: level, symptom: "timeout", detail: "" });
     return knockFloorMs(false, minMs, defMs * rung.backoff, rung.parked);
   };
   const floors = [1, 2, 3, 4].map(floor);

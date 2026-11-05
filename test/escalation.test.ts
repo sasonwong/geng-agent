@@ -4,7 +4,7 @@ import { advance, parkNotice, planFor, slowDownNotice, timeoutNotice, type Escal
 import { classify } from "../internal/symptoms.ts";
 import type { RpcResult } from "../internal/rpc.ts";
 
-const FRESH: Escalation = { level: 0, streak: 0, symptom: null, detail: "", updatedAt: null };
+const FRESH: Escalation = { level: 0, streak: 0, symptom: null, detail: "" };
 
 function rpc(over: Partial<RpcResult>): RpcResult {
   return {
@@ -124,7 +124,6 @@ test("the rung where the wait triples is said once, where a person looks", () =>
     streak: level,
     symptom,
     detail: "没有动作，也没有话",
-    updatedAt: null,
   });
   assert.match(slowDownNotice(esc(2), esc(3)) ?? "", /放慢到 3 倍/);
   // only the crossing: level 3 repeats for as long as the streak lasts

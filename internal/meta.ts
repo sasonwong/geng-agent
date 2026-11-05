@@ -50,7 +50,6 @@ export const DAY_MS = 24 * 60 * 60 * 1000;
  */
 export interface CutRecord {
   kind: "timeout" | "crashed" | "interrupted";
-  at: string;
   /** Which waking was cut and what woke it: both were already in intent.json. */
   waking: number;
   reason: string;
@@ -94,7 +93,6 @@ export function readCut(paths: Paths): CutRecord | null {
   const open = typeof rec.openMs === "number" ? rec.openMs : undefined;
   return {
     kind: rec.kind,
-    at: typeof rec.at === "string" ? rec.at : "",
     waking: typeof rec.waking === "number" ? rec.waking : 0,
     reason: typeof rec.reason === "string" ? rec.reason : "timer",
     ...(tools.length === 0 ? {} : { tools }),

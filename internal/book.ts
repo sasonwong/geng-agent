@@ -304,7 +304,7 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       }
       const until = new Date(untilMs).toISOString();
       const why = text(params, "why") ?? "";
-      writeJson(paths.attention, { chats, until, why, at: nowIso });
+      writeJson(paths.attention, { chats, until, why });
       return { status: 200, body: { chats, until, why } };
     }
 
@@ -417,10 +417,10 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         if (hit === null) return { status: 404, body: { error: `没有这个文件：${f}` } };
         originals.push({ path: hit.path, name: hit.name });
       }
+      // the file name is the id: a copy of it in the payload is a field with no reader
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       mkdirSync(paths.outbox, { recursive: true });
       writeJson(join(paths.outbox, `${id}.json`), {
-        id,
         messages,
         ...(chat === undefined ? {} : { chat }),
         ...(made.length === 0 ? {} : { files: made }),

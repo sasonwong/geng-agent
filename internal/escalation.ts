@@ -10,7 +10,6 @@ export interface Escalation {
   streak: number;
   symptom: Symptom | null;
   detail: string;
-  updatedAt: string | null;
 }
 
 export interface Plan {
@@ -22,7 +21,7 @@ export interface Plan {
   parked: boolean;
 }
 
-const FRESH: Escalation = { level: 0, streak: 0, symptom: null, detail: "", updatedAt: null };
+const FRESH: Escalation = { level: 0, streak: 0, symptom: null, detail: "" };
 
 export function loadEscalation(paths: Paths): Escalation {
   const raw = readJson<Partial<Escalation>>(join(paths.meta, "escalation.json"), {});
@@ -31,7 +30,6 @@ export function loadEscalation(paths: Paths): Escalation {
     streak: typeof raw.streak === "number" ? raw.streak : 0,
     symptom: (raw.symptom as Symptom) ?? null,
     detail: typeof raw.detail === "string" ? raw.detail : "",
-    updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
   };
 }
 
@@ -136,7 +134,7 @@ export function advance(
   symptom: Symptom,
   result?: { repeat?: { name: string; count: number } | null },
 ): Escalation {
-  if (symptom === "ok") return { ...FRESH, updatedAt: new Date().toISOString() };
+  if (symptom === "ok") return { ...FRESH };
 
   const streak = e.streak + 1;
   // 1 -> tell it what happened, 2 -> wait longer, 3 -> give up and back off,
@@ -148,6 +146,5 @@ export function advance(
     streak,
     symptom,
     detail: describe(symptom, result),
-    updatedAt: new Date().toISOString(),
   };
 }

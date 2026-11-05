@@ -142,7 +142,7 @@ function filesIn(dir: string, prefix: string): string[] {
 }
 
 function cutOf(kind: CutRecord["kind"]): CutRecord {
-  return { kind, at: new Date().toISOString(), waking: 0, reason: "timer" };
+  return { kind, waking: 0, reason: "timer" };
 }
 
 const numOr = (v: unknown, fallback: number): number => (typeof v === "number" ? v : fallback);

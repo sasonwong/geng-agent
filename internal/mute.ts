@@ -57,7 +57,6 @@ export interface OutboxItem {
   /** Answer one particular message, so the other side sees which line it is about. */
   replyTo?: { chat: number; messageId: number };
   file: string;
-  id: string;
   messages: string[];
 }
 
@@ -75,7 +74,6 @@ export function readOutbox(dir: string): OutboxItem[] {
   }
   for (const f of files) {
     const raw = readJson<{
-      id?: string;
       messages?: unknown;
       chat?: unknown;
       files?: unknown;
@@ -87,7 +85,6 @@ export function readOutbox(dir: string): OutboxItem[] {
       : [];
     items.push({
       file: join(dir, f),
-      id: raw.id ?? f.replace(/\.json$/, ""),
       files: Array.isArray(raw.files) ? raw.files.filter((x): x is string => typeof x === "string") : [],
       // rebuilt, not cast: an item written by an older build may carry fields the queue no
       // longer has (a file id, once), and the gateway only ever hands over these two
@@ -142,9 +139,8 @@ export function ensureGatewayDirs(root: string): { ops: string } {
 
 /** The daemon and gateway both speak on the ops channel; the tag says which mouth. */
 export function writeOps(opsDir: string, tag: string, text: string): string {
-  const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const file = join(opsDir, "outbox", `${id}.json`);
+  const file = join(opsDir, "outbox", `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.json`);
   if (!existsSync(join(opsDir, "outbox"))) mkdirSync(join(opsDir, "outbox"), { recursive: true });
-  writeJson(file, { id, messages: [`[${tag}] ${text}`] });
+  writeJson(file, { messages: [`[${tag}] ${text}`] });
   return file;
 }

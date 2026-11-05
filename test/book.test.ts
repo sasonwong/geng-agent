@@ -231,7 +231,8 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   // the file is exactly what the gateway already read: same shape, one fewer writer
   // the quote names its conversation, so the item carries it too: the gateway sends
   // where `chat` says, and a quote that only lived inside replyTo would go home instead
-  assert.deepEqual(written, { id, chat: -1001, messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } });
+  // the file name is the id; the payload carries only what the gateway reads
+  assert.deepEqual(written, { chat: -1001, messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } });
 
   // a chat the daemon does not know is refused before anything is queued
   const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], to: -999 }));

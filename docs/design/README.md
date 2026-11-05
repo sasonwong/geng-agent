@@ -414,13 +414,13 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
-| `inbox/*.json` | gateway | `{id, text, from, at, chat, route, attachments?[{kind,id?,name?,note?,bytes?}], quote?{id,from?,text?}}` |
-| `outbox/*.json` | daemon（`say` 走 socket） | `{id, messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}}` |
+| `inbox/*.json` | gateway | `{id, text, from, at, chat, attachments?[{kind,id?,name?,note?,bytes?}], quote?{id,from?,text?}}`（为什么投递只在 `daemon.log` 那一行） |
+| `outbox/*.json` | daemon（`say` 走 socket） | `{messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}}`；id 是文件名 |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
 | `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{at,wake,tools,inbox,talkedTo[],touched}, knockHold?}` |
-| `meta/escalation.json` | daemon | `{level, streak, symptom, detail, updatedAt}` |
+| `meta/escalation.json` | daemon | `{level, streak, symptom, detail}` |
 | `meta/wakes.json` | daemon | 24 小时内的唤醒时间戳数组 |
-| `meta/cut.json` | daemon | `{kind:"timeout"\|"crashed"\|"interrupted", at, waking, reason, tools[]?, openMs?, capMinutes?}`，只活一张纸 |
+| `meta/cut.json` | daemon | `{kind:"timeout"\|"crashed"\|"interrupted", waking, reason, tools[]?, openMs?, capMinutes?}`，只活一张纸 |
 
 `stateSchema` 是 `meta/state.json` 的版本号，由 `writeMeta` 统一盖戳——一份形状只有一个版本号，别的文件没有它的副本。**磁盘上的版本比代码新就拒绝启动**——
 被旧代码按自己的形状覆盖一次，比重启一百次都糟。
