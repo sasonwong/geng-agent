@@ -15,11 +15,12 @@ import { parseAfter } from "./schedule.ts";
 import { readJson, readText, writeJson, writeText } from "./fs.ts";
 
 /**
- * The book endpoint: the only way into `/state` once the container's mount is read-only.
+ * The book endpoint: the only way into the book, because the book is not mounted.
  *
- * It exists for one reason the file system cannot give: a write has to leave a name. A
- * round that appends three journal entries and one that runs `ls` three times produce the
- * same `tools=3` today, so nothing the daemon counts can tell work from motion.
+ * `/state`, `/mail`, `/people` and `/inbox` are all outside the container, so every read
+ * and every write is a call the daemon can name and count — a `cat` used to leave no trace
+ * at all. The same socket carries model traffic, the outbound proxy and git's credential
+ * question: one channel into the host, and nothing goes the other way.
  *
  * Why a unix socket and not a port: the container does not need a network address to reach
  * a host process, and a port is reachable by everything on the bridge — which then needs a

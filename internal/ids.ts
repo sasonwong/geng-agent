@@ -4,12 +4,16 @@ import type { Paths } from "./paths.ts";
 import { mtimeMs, readJson, writeJson } from "./fs.ts";
 
 /**
- * Every id in the book, handed out from one place.
+ * The numbered ids in the book, handed out from one place.
  *
  * One letter decides where an id lives — J journal, L loop, P person, M message,
  * E email, R round, F file — so a reader never has to try four places to find out what
- * it is holding. The number after the letter is permanent: a name that gets reused is a
- * name that silently renamed an old entry.
+ * it is holding. This file numbers the four that need a counter (J/L/E/F); P, M and R are
+ * built from numbers that already exist (a chat id, a message id, the waking count), which
+ * is why `recall` can read all seven letters and only allocate four.
+ *
+ * The number after the letter is permanent: a name that gets reused is a name that
+ * silently renamed an old entry.
  */
 export type IdKind = "journal" | "loop" | "mail" | "file";
 
