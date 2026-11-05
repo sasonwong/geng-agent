@@ -94,6 +94,10 @@ test("an IPv4 address in IPv6 clothes is refused by the IPv4 rule", () => {
   assert.equal(addrAllowed("::1", ["0.0.0.0/0"]).ok, false, "::1 不能被 0.0.0.0/0 放行");
   assert.equal(addrAllowed("::127.0.0.1", ["0.0.0.0/0"]).ok, false);
   assert.equal(addrAllowed("::1", ["::/0"]).ok, true, "它仍然是 IPv6，由 ::/0 管");
+  // the same address in its fully expanded spelling is the same address
+  assert.equal(addrAllowed("0:0:0:0:0:ffff:127.0.0.1", rule).ok, false);
+  // a deny written against the block wins the same way
+  assert.equal(addrAllowed("::ffff:192.0.2.7", ["0.0.0.0/0", "!::ffff:0:0/96"]).ok, false);
   // an explicit v4-only rule governs the embedded form too
   assert.equal(addrAllowed("::ffff:192.0.2.7", ["192.0.2.0/24"]).ok, true);
   assert.equal(addrAllowed("::ffff:192.0.2.7", ["192.0.2.1/32"]).ok, false);

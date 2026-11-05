@@ -123,8 +123,9 @@ export function hostAllowed(host: string, rule: string[]): boolean {
 /** The address half. Named `addrAllowed`, not "public", because it is only what the rules say. */
 export function addrAllowed(ip: string, rule: string[]): { ok: boolean; by?: string } {
   const { allow, deny } = entries(rule);
-  // Node connects IPv4-compatible/mapped IPv6 literals to the embedded IPv4 address.
-  // Checking only the 128-bit spelling makes `::ffff:127.0.0.1` sail past `!127/8`.
+  // The kernel connects an IPv4-mapped literal to the embedded IPv4 address, so both
+  // spellings are judged: checking only the 128-bit one lets `::ffff:127.0.0.1` sail past
+  // `!127/8`, and checking only the embedded one lets a `!::ffff:0:0/96` deny be ignored.
   const addresses = [ip, ...(embeddedV4(ip) === null ? [] : [embeddedV4(ip) as string])];
   for (const address of addresses) {
     const denied = deny.find((entry) => inCidr(address, entry));
