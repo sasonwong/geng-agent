@@ -619,7 +619,12 @@ data/<instance>/
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
   session/      pi 的会话文件，一轮一个（可写，但纸上不提它）
-  usage/ meta/ daemon.log
+  pi/           这个实例的 pi 配置（settings.json），只读挂进容器
+  usage/        症状日志 symptoms.log
+  meta/         计数、stateSchema、快照版本，以及一两份跨轮的注记（cut / escalation）
+  run/          socket 目录，整目录挂成容器里的 /run/geng
+  daemon.log    一行一轮；轮转了就有 daemon.log.1
+  net.log       一行一次出网；last-stderr.log 是某轮 stderr 的尾巴，有才写
 secrets/<instance>.env   GitHub App 的两个 id；--env-file 注入，永不挂载（模型 key 不在这个文件里）
 secrets/<instance>.model.env  模型 key 与上游地址，只有宿主读；容器问，读不到
 secrets/bots.json        每个实例一个 bot（token 就是路由键）
@@ -631,7 +636,8 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
 
-挂载是逐条论证过的，不是攒出来的，一共七条：
+挂载是逐条论证过的，不是攒出来的：**七条是底线，配上搜索时是八条**——搜索的 socket 只在它
+真的存在时才挂，所以那一条可能不在。少挂它，容器里就没有 `web_search`（见 §5.2）。
 
 | 宿主 | 容器 | 为什么 |
 |---|---|---|
@@ -642,6 +648,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 | `session/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
 | `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 |
 | `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |
+| `secrets/search.env` 里的 socket | 同一个绝对路径 | 只读：搜索端点。文件不在就不挂——docker 会把缺失的宿主路径建成目录 |
 
 书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`discard`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`/`say`，
