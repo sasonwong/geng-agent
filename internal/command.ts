@@ -115,9 +115,9 @@ export function buildCommand(
     "-v",
     `${join(paths.root, "deploy", "models.json")}:/home/agent/.pi/agent/models.json:ro`,
     // The book is not mounted at all. Every read and every write goes through the
-    // endpoint, so a call is the only way in and the ledger sees all of it — a `cat`
-    // used to count as a read neither the daemon nor the page could name. The single
-    // exception is the page it rewrites freely, which is a file, not an action.
+    // endpoint, so a call is the only way in — a `cat` used to count as a read neither the
+    // daemon nor the page could name. The single exception is the page it rewrites freely,
+    // which is a file, not an action.
     "-v",
     `${paths.identity}:/state/identity.md`,
     // the tools come from the checkout, not from an image layer: read-only, at the same

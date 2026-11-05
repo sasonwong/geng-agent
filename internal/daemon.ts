@@ -407,8 +407,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       }
     }
 
-    // Read without consuming: the messages stay on disk (and inside the container's
-    // read-only /state/inbox) until this wake has actually finished with them.
+    // Read without consuming: the messages stay on disk until this wake has actually
+    // finished with them. Nothing about them is mounted into the container any more, so a
+    // preview and a real start see exactly the same list.
     const lowInbox = peekInbox(paths.inboxLow);
     const inbox = [...peekInbox(paths.inbox), ...lowInbox];
     // only the loud half can change why this wake happened; the ambient half is handed

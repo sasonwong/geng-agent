@@ -8,9 +8,8 @@ import { readJson, writeJson } from "./fs.ts";
  * The reading half of the book, on the host.
  *
  * It lives here rather than in the extension because the container no longer has the
- * book at all: `/state`, `/mail`, `/people` and `/inbox` are not mounted, so every read
- * is a call and every call is a line in the ledger. A `cat` can no longer count as a
- * read of something the daemon cannot name.
+ * book at all: `/state`, `/mail`, `/people` and `/inbox` are not mounted, so every read is
+ * a call. A `cat` can no longer count as a read of something the daemon cannot name.
  */
 export type Source = "journal" | "loops" | "mail" | "people" | "inbox" | "sessions" | "files";
 export const SOURCES: Source[] = ["journal", "loops", "mail", "people", "inbox", "sessions", "files"];
