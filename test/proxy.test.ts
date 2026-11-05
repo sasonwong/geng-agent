@@ -147,8 +147,9 @@ test("when the host is itself behind a proxy, the tunnel goes through it", async
   const restore = clearProxyEnv();
   process.env.HTTPS_PROXY = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
   const chain = chainFrom("auto");
+  // `localhost` resolves without a network; the chain stub never looks at the name
   const clientSide = createTcp((socket) => {
-    void handleConnect("github.com:443", socket, Buffer.alloc(0), { allow: ["github.com"], cidrs: ["0.0.0.0/0"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
   });
   await new Promise<void>((r) => clientSide.listen(0, "127.0.0.1", () => r()));
   try {
@@ -228,7 +229,7 @@ test("a SOCKS5 chain does the handshake before it pipes anything", async () => {
   await new Promise<void>((r) => socks.listen(0, "127.0.0.1", () => r()));
   const chain = chainFrom(`socks5://me:secret@127.0.0.1:${(socks.address() as { port: number }).port}`);
   const front = createTcp((socket) => {
-    void handleConnect("github.com:443", socket, Buffer.alloc(0), { allow: ["github.com"], cidrs: ["0.0.0.0/0"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
   });
   await new Promise<void>((r) => front.listen(0, "127.0.0.1", () => r()));
   try {
@@ -248,10 +249,50 @@ test("a SOCKS5 chain does the handshake before it pipes anything", async () => {
     assert.match(out, /200 Connection Established/);
     assert.match(out, /echo:ping/);
     // the name travelled in the CONNECT, not resolved on the daemon side
-    assert.deepEqual(seen, ["github.com"]);
+    assert.deepEqual(seen, ["localhost"]);
   } finally {
     front.close();
     socks.close();
+  }
+});
+
+test("a chain does not buy an address the rules refuse", async () => {
+  // `!127.0.0.0/8` is the rule that stops the container from reaching the host's own
+  // services. Skipping the address check when a chain was configured made it decoration:
+  // the chain is usually on this very host, and it would CONNECT anywhere the name allowed.
+  // a chain that answers properly: if the address check is skipped this becomes a working
+  // tunnel, and the assertion below fails instead of waiting for a reply that never comes
+  const reached: string[] = [];
+  const chainStub = createTcp((socket) => {
+    reached.push("connected");
+    // it refuses on purpose: if the address check is skipped the chain answers 403 and the
+    // tunnel is torn down, so the broken case fails fast instead of half-open
+    socket.once("data", () => socket.write("HTTP/1.1 403 Forbidden\r\n\r\n"));
+  });
+  await new Promise<void>((r) => chainStub.listen(0, "127.0.0.1", () => r()));
+  const chain = chainFrom(`http://127.0.0.1:${(chainStub.address() as { port: number }).port}`);
+  try {
+    const answer = await new Promise<string>((resolve) => {
+      const socket = {
+        write: (s: string) => resolve(s),
+        end: (s?: string) => resolve(s ?? ""),
+        on: () => {},
+        destroy: () => {},
+      };
+      void handleConnect(
+        "localhost:22",
+        socket as never,
+        Buffer.alloc(0),
+        { allow: ["localhost"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] },
+        () => {},
+        chain,
+      );
+    });
+    assert.match(answer, /403/);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(reached, [], "到链那一侧的连接一次都不该建立");
+  } finally {
+    chainStub.close();
   }
 });
 

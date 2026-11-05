@@ -178,14 +178,15 @@ export interface Decision {
 export async function checkTarget(
   raw: string,
   rule: ProxyRule,
-  skipAddressCheck = false,
 ): Promise<Decision & { host?: string; port?: number; addr?: string; by?: string }> {
   const match = /^\[?([^\]]+?)\]?:(\d+)$/.exec(raw.trim());
   if (match === null) return { ok: false, why: `看不懂的目标：${raw}` };
   const host = match[1] as string;
   const port = Number(match[2]);
   if (!hostAllowed(host, rule.allow)) return { ok: false, why: `${host} 不在放行名单里`, host, port };
-  if (skipAddressCheck) return { ok: true, host, port };
+  // Both keys, always — including when the daemon itself goes through a chain. Skipping the
+  // address half there made `!127.0.0.0/8` a decoration: the chain would happily CONNECT to
+  // the loopback address the rule exists to refuse.
   const resolved = await resolveChecked(host, rule.cidrs);
   if ("why" in resolved) return { ok: false, why: resolved.why, host, port };
   return { ok: true, host, port, addr: resolved.addr, by: resolved.by };
@@ -216,7 +217,7 @@ export async function handleConnect(
   // `checkTarget` resolves the name as part of the address check, so its `addr` is the
   // one that was vetted. Resolving again below would be a second lookup whose answer
   // nothing checks — the shape of a rebinding window.
-  const decision = await checkTarget(raw, rule, chain !== null);
+  const decision = await checkTarget(raw, rule);
   if (!decision.ok || decision.host === undefined || decision.port === undefined) {
     const why = decision.why ?? "?";
     log(`proxy 拒绝 ${raw}：${why}`);
@@ -225,9 +226,9 @@ export async function handleConnect(
     return;
   }
   if (chain !== null) {
-    // The daemon lifts its own proxy's weight: the name check already ran, and resolving
-    // here would fail on a host that has no DNS of its own.
-    tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log, once);
+    // The name travelled in the CONNECT: the chain resolves it, so this side has to be the
+    // one that says which address was vetted (`by`), or the log loses the rule that matched.
+    tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log, once, decision.by);
     return;
   }
   const upstream = tcpConnect(decision.port, decision.addr as string);
@@ -275,12 +276,13 @@ function tunnel(
   o: { connect: string; then: string },
   log: (line: string) => void,
   report: (ok: boolean, why?: string) => void,
+  by?: string,
 ): void {
   const host = chain.host;
   const port = chain.port;
   const upstream = tcpConnect(port, host);
   if (chain.kind === "socks5") {
-    socks5(upstream, socket, head, chain, o, log, report);
+    socks5(upstream, socket, head, chain, o, log, report, by);
     return;
   }
   let ready = false;
@@ -305,7 +307,7 @@ function tunnel(
     ready = true;
     // the upstream may have sent bytes of the tunnel in the same chunk
     const rest = chunk.subarray(text.indexOf("\r\n\r\n") + 4);
-    tunnelDone(socket, upstream, head, report);
+    tunnelDone(socket, upstream, head, report, by);
     if (rest.length > 0) upstream.unshift(rest);
   });
   upstream.on("connect", () => {
@@ -326,6 +328,7 @@ function socks5(
   o: { connect: string; then: string },
   log: (line: string) => void,
   report: (ok: boolean, why?: string) => void,
+  by?: string,
 ): void {
   const [host, portText] = o.then.split(":");
   const port = Number(portText);
@@ -399,7 +402,7 @@ function socks5(
       upstream.destroy();
       return;
     }
-    tunnelDone(socket, upstream, head, report);
+    tunnelDone(socket, upstream, head, report, by);
     if (rest.length > 0) upstream.unshift(rest);
   };
 
