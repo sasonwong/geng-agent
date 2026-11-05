@@ -1,4 +1,5 @@
-import { existsSync, statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import type { TgMessage } from "./telegram.ts";
 
 /**
@@ -81,6 +82,19 @@ export function hostPathForWorkPath(workRoot: string, given: string): string | n
   if (!given.startsWith("/work/")) return null;
   const rel = given.slice("/work/".length);
   if (rel === "" || rel.includes("..")) return null;
-  const abs = `${workRoot}/${rel}`;
-  return existsSync(abs) && statSync(abs).isFile() ? abs : null;
+  // `join`, not `${workRoot}/${rel}`: the answer is a host path, and a host path assembled
+  // with a slash is wrong on a host that does not use them.
+  const abs = join(workRoot, rel);
+  try {
+    if (!statSync(abs).isFile()) return null;
+    // A symlink in /work is one the container wrote, and the container's `/` is not the
+    // host's: `ln -s /etc/passwd /work/x` plus `say(files: ["/work/x"])` sent the host's
+    // file, because `stat` follows the link. Only a real path that stays inside the
+    // workspace is a file this container actually produced.
+    const real = realpathSync(abs);
+    if (!real.startsWith(realpathSync(workRoot) + sep)) return null;
+    return abs;
+  } catch {
+    return null; // missing, unreadable, or a link that goes nowhere
+  }
 }
