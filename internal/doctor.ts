@@ -148,18 +148,18 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   const envVars = readEnvFile(p.secrets);
   // The list readModelKey would accept, not a copy of it: a sixth spelling added there and
   // not here leaves the migration check silently blind to exactly the name it is for.
-  const leakedKey = MODEL_KEY_VARS.filter((name) => (envVars[name] ?? "") !== "");
+  const namedInEnv = MODEL_KEY_VARS.filter((name) => (envVars[name] ?? "") !== "");
   // Both halves are needed now that the daemon is the data plane: without an upstream the
   // proxy answers 503 and every model request fails with what looks like a network error.
   const upstream = modelUpstream(p);
   checks.push({
     name: "模型密钥",
-    ok: key !== null && leakedKey.length === 0 && upstream !== null,
+    ok: key !== null && namedInEnv.length === 0 && upstream !== null,
     detail:
       key === null
         ? `没有 ${modelKeyFile(p)}：第一轮就会没有模型可用`
-        : leakedKey.length > 0
-          ? `${leakedKey.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/<实例>.model.env`
+        : namedInEnv.length > 0
+          ? `${namedInEnv.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/<实例>.model.env`
           : upstream === null
             ? "没有 GENG_MODEL_UPSTREAM：代理不知道往哪转发，每次请求都 503"
             : `${key.name} → ${upstream}（都在宿主上，容器只是问）`,
