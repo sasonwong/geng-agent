@@ -624,10 +624,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       ...meta,
       knockHold: handed.length === 0 ? null : { files: handed, untilMs: Date.now() + holdMs },
       lastCycle: {
-        at: new Date().toISOString(),
         wake: reason,
-        tools: result.toolCalls.length,
-        inbox: inbox.length,
         // not from the inbox: it can also speak first, and that is the same act.
         // A list, because a cycle can reach more than one person.
         talkedTo: activeSince(paths.data, startedMs).map((a) => a.who),

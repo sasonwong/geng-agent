@@ -75,12 +75,9 @@ export interface PacketInput {
   envChanged: string | null;
   /** The last thing it said, when there is no transcript to read it from. */
   lastSaid: string | null;
-  /** Why the previous waking happened and what it left behind, in counts. */
+  /** Why the previous waking happened and what it left behind, in the counts it prints. */
   lastCycle: {
-    at: string;
     wake: WakeReason;
-    tools: number;
-    inbox: number;
     talkedTo: string[];
     touched: number;
   } | null;

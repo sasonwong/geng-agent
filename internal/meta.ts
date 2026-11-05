@@ -23,12 +23,9 @@ export interface Meta {
   wakings?: number;
   /** The last thing it said, so a fresh-context waking knows how it left things. */
   lastSaid?: string | null;
-  /** What the previous waking turned out to be, in counts and reasons only. */
+  /** What the previous waking turned out to be, in the three counts the page prints. */
   lastCycle?: {
-    at: string;
     wake: "timer" | "knock" | "nudge";
-    tools: number;
-    inbox: number;
     /** Everybody it exchanged words with during that cycle, by their own name. */
     talkedTo: string[];
     /** Files written during that cycle, in /work and the book together. */

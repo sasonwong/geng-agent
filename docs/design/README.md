@@ -417,7 +417,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `inbox/*.json` | gateway | `{id, text, from, at, chat, attachments?[{kind,id?,name?,note?,bytes?}], quote?{id,from?,text?}}`（为什么投递只在 `daemon.log` 那一行） |
 | `outbox/*.json` | daemon（`say` 走 socket） | `{messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}}`；id 是文件名 |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
-| `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{at,wake,tools,inbox,talkedTo[],touched}, knockHold?}` |
+| `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{wake,talkedTo[],touched}, knockHold?}` |
 | `meta/escalation.json` | daemon | `{level, streak, symptom, detail}` |
 | `meta/wakes.json` | daemon | 24 小时内的唤醒时间戳数组 |
 | `meta/cut.json` | daemon | `{kind:"timeout"\|"crashed"\|"interrupted", waking, reason, tools[]?, openMs?, capMinutes?}`，只活一张纸 |
