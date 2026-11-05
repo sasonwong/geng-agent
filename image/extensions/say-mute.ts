@@ -213,7 +213,7 @@ const proposeTool = tool({
   label: "Propose",
   description:
     "申请改自己的运行条件，下次醒来前生效。只认时机和阈值：" +
-    '{"cycle":{"defaultWakeMinutes":30}}。runner、容器限额、网络、timeout 不在这张桌子上。',
+    '{"cycle":{"defaultWakeMinutes":30}}。容器限额、网络、timeout 不在这张桌子上。',
   parameters: {
     type: "object",
     properties: {

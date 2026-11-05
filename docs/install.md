@@ -628,11 +628,12 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 ```bash
 command -v node && node --version          # ≥ 22.18
 docker ps                                  # 不需要 sudo
-docker run --rm geng-agent:latest sh -lc 'curl -sS -m 5 -o /dev/null -w "%{http_code}\n" https://api.github.com'
 node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
-# 其中四条是"漏配"的唯一出口：模型凭据 / 搜索接线 / 邮件接线 / bot 接线
+# 其中四条是"漏配"的唯一出口：模型密钥 / 搜索接线 / 邮件接线 / bot 接线
 #   配好且对 = ok，配了但不对 = FAIL，没配 = warn
-node cmd/geng/index.ts doctor alice --probe   # 容器能上网、私网不通、policy 写不进去
+# 「policy 跟模板」报的是模板有、这份副本没有的键——它在用没人选过的默认值
+node cmd/geng/index.ts doctor alice --probe   # 直连必须断开、代理必须通、policy 写不进去
+#   （--probe 要有 daemon 在跑：代理是它答的，没有它只能测到"直连断了"）
 node cmd/geng/index.ts status --all        # 上次=… 下次=…
 tail -3 data/alice/daemon.log              # 有行就是跑过
 node cmd/geng/index.ts backup alice --list # 有快照

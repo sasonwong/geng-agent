@@ -725,13 +725,11 @@ rustic，一次清醒一次快照。内容去重是免费的，**不要设计增
 
 按代价从低到高，现在真正摆在面前的：
 
-1. **把"漏配"变成 doctor 的一句话。** 装了才有的能力（网关、搜索、邮件、备份、它的 GitHub 凭据）
-   现在完全不出现在检查里，于是"没配"和"配好了但没动静"一模一样。两件具体的事：
-   **policy 与模板逐字段比**（`data/<inst>/policy.json` 是 `init` 时的副本，模板改了它不会跟；
-   一次真实的例子是超时停在 20 分钟而模板已经 30），以及**逐项报"未配置 + 一条命令"**。
-2. **`init` 应该带参数。** 现在它拷模板，于是每个新实例都要手工把 `runner` 改回 `docker`——
-   漏了就跑在本机 pi 上，看起来完全正常。`--runner`、`--timeout-min`、`--provider`/`--model`
-   应该一次写对。
+1. ~~把"漏配"变成 doctor 的一句话~~ **已改**：policy 与模板逐字段比（`policyDrift`，缺键会说
+   "正在用默认值"并给出那个值，多余的键也会点名）；装了才有的能力各有一条三态检查。
+2. **`init` 应该带参数。** 现在它拷模板，于是每个新实例都要手工改 `cycle.timeoutSec`、
+   `container.image`，而 `settings.json` 里的 provider/model 是另一份拷贝。`--timeout-min`、
+   `--image`、`--provider`/`--model` 应该一次写对。（`runner` 已经不存在了。）
 3. ~~凭据的位置~~ **已改**：GitHub 是一个 App，私钥在 `secrets/gh-app.pem`，容器里没有凭据，
    `git` 要的时候现换一个一小时的 installation token；模型 key 在 `secrets/model.env`，
    同样只在宿主上。两处都是"容器能问，不能存"。
