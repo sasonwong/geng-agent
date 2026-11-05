@@ -200,7 +200,9 @@ test("a conversation carries how much was said and when it started", () => {
   assert.match(text, /你和 telegram:@you 说过 214 句，下面是最新的 3 句/);
   assert.match(text, /对方：它在干嘛/);
   assert.match(text, /你：在看自己写的 status.sh/);
-  assert.match(text, /一共 214 句（43 KB）。用 open\("chat:123456789"\) 读全部。/);
+  // the id the listing prints is `P<chat>`; `open("chat:<id>")` is a refusal, and the page
+  // must not teach a call that 404s
+  assert.match(text, /一共 214 句（43 KB）。用 open\("P123456789"\) 读全部。/);
   // no summary of the relationship, ever
   assert.doesNotMatch(text, /关系|关心|画像/);
 });

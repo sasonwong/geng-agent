@@ -143,8 +143,9 @@ function renderThread(t: ThreadInput): string[] {
     const back = line.quote?.text ? `（回：${excerpt(line.quote.text, 60)}）` : "";
     out.push(`  ${line.dir === "out" ? "你" : "对方"}：${excerpt(line.text, 200)}${back}`);
   }
-  // the file is not in the container any more: the way back to it is the tool
-  out.push(`一共 ${t.total} 句（${Math.round(t.bytes / 1024)} KB）。用 open("chat:${t.chat}") 读全部。`);
+  // the file is not in the container any more: the way back to it is the tool, by the id
+  // the listing prints — `P<chat>`, not `chat:<chat>`, which `open` would not find
+  out.push(`一共 ${t.total} 句（${Math.round(t.bytes / 1024)} KB）。用 open("P${t.chat}") 读全部。`);
   return out;
 }
 
