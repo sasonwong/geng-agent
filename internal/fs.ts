@@ -106,5 +106,8 @@ export function mtimeMs(file: string): number | null {
 export function excerpt(text: string | null, maxChars: number): string {
   if (!text) return "";
   const t = text.trim();
-  return t.length <= maxChars ? t : t.slice(0, maxChars) + "\n…(截断)";
+  // The marker stays on the line it marks. Five of the six callers put the result inside
+  // `（…）` or `「…」` on a single line of the page; a marker that began its own line read as
+  // a thread entry with nobody speaking, or as a closing bracket on its own paragraph.
+  return t.length <= maxChars ? t : `${t.slice(0, maxChars)}…(截断)`;
 }
