@@ -1,7 +1,7 @@
 import { connect as tcpConnect } from "node:net";
 import { lookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
 import type { Duplex } from "node:stream";
-import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 /**
@@ -548,17 +548,58 @@ export async function forwardPlain(
     if (typeof value !== "string" || lower === "host" || lower === "connection" || lower === "content-length") continue;
     headers[lower] = value;
   }
-  const upstream = await fetch(url.toString(), {
-    method: req.method ?? "GET",
-    headers,
-    body: body.length === 0 ? undefined : new Uint8Array(body),
-  });
+  if (body.length > 0) headers["content-length"] = String(body.length);
+  // Not `fetch`, for two reasons that are the whole point of this file.
+  //
+  // It resolves the name a second time: `checkTarget` above vetted one answer, and the
+  // request would connect to whatever the second lookup returns — the rebinding window
+  // `handleConnect` deliberately refuses to open. And it follows `Location:` by itself, so
+  // one redirect from a public host reached any address at all: the rules were asked once,
+  // about the first URL, and never again. A redirect now goes back to the client, whose next
+  // request arrives here and is checked like any other.
+  const upstream = await plainRequest(url, decision.addr as string, decision.port as number, req.method ?? "GET", headers, body);
   report(true, decision.by);
-  const out: Record<string, string> = { "content-type": upstream.headers.get("content-type") ?? "application/octet-stream" };
-  res.writeHead(upstream.status, out);
-  if (upstream.body === null) {
-    res.end();
-    return;
+  // Everything but the hop-by-hop headers. A whitelist here lost `Location` on the first
+  // redirect it tried to pass back — a 302 with no destination, which is a dead end rather
+  // than a refusal. `content-encoding` is the other reason: the body below is byte for byte
+  // what the server sent, so the client has to be told how to read it.
+  const hop = new Set([
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "proxy-connection",
+    "te", "trailer", "transfer-encoding", "upgrade",
+  ]);
+  const out: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(upstream.headers)) {
+    if (value === undefined || hop.has(name)) continue;
+    out[name] = value;
   }
-  await pipeline(Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]), res);
+  if (out["content-type"] === undefined) out["content-type"] = "application/octet-stream";
+  res.writeHead(upstream.statusCode ?? 502, out);
+  await pipeline(upstream, res);
+}
+
+/** One request to the address that was checked, with the name only in the `Host` header. */
+function plainRequest(
+  url: URL,
+  address: string,
+  port: number,
+  method: string,
+  headers: Record<string, string>,
+  body: Buffer,
+): Promise<import("node:http").IncomingMessage> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        method,
+        // the vetted address, so a virtual host still works and a second lookup cannot
+        // answer with something else
+        host: address,
+        port,
+        path: `${url.pathname}${url.search}`,
+        headers: { ...headers, host: url.host },
+      },
+      resolve,
+    );
+    req.on("error", reject);
+    req.end(body.length === 0 ? undefined : body);
+  });
 }

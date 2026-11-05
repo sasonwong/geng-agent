@@ -10,6 +10,7 @@ import { connect, createServer as createTcp } from "node:net";
 import {
   addrAllowed,
   chainFrom,
+  forwardPlain,
   hostAllowed,
   inCidr,
   checkTarget,
@@ -479,4 +480,64 @@ test("a refused direct connection is a refusal, not an uncaught error", async ()
   // And it is a refusal, said once: `net=N` counts places it went.
   assert.deepEqual(reports.map((r) => r[0]), [false], JSON.stringify(reports));
   assert.match(reports[0]?.[1] ?? "", /ECONNREFUSED/);
+});
+
+// 明文 HTTP 是那条路上唯一没人钉过的一段。`fetch` 在这里做两件这个文件明确不许做的事：
+// 把名字再解析一次（上面刚查过的那一个答案就不作数了），以及自己跟随 `Location:`——于是
+// 规则只被问过一次，问的是第一个地址，一个公开网站返回一条指向 169.254.169.254 的重定向
+// 就够了。重定向现在回到客户端手上，它下一次请求还会经过这里、还会被查。
+test("a plain-HTTP redirect goes back to the client, not to its target", async () => {
+  const hits: string[] = [];
+  const upstream = createHttp((req, res) => {
+    hits.push(req.url ?? "");
+    if (req.url === "/go") {
+      res.writeHead(302, { location: "/secret" });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end("SECRET");
+  });
+  await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
+  const target = (upstream.address() as { port: number }).port;
+
+  const rule = { allow: ["127.0.0.1"], cidrs: ["127.0.0.0/8"] };
+  const proxy = createHttp((req, res) => {
+    void forwardPlain(req, res, Buffer.alloc(0), rule, null, () => {});
+  });
+  await new Promise<void>((r) => proxy.listen(0, "127.0.0.1", r));
+  const front = (proxy.address() as { port: number }).port;
+
+  // absolute-form is what a client sends a proxy; the path *is* a URL
+  const through = (url: string): Promise<{ status: number; body: string; location?: string }> =>
+    new Promise((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port: front, path: url, method: "GET" }, (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c: string) => (body += c));
+        res.on("end", () =>
+          resolve({ status: res.statusCode ?? 0, body, location: res.headers.location }),
+        );
+      });
+      req.on("error", reject);
+      req.end();
+    });
+
+  try {
+    // the path works at all, so the assertion below is about the redirect and not about a
+    // proxy that answers nothing
+    const direct = await through(`http://127.0.0.1:${target}/secret`);
+    assert.equal(direct.status, 200);
+    assert.equal(direct.body, "SECRET");
+
+    hits.length = 0;
+    const hop = await through(`http://127.0.0.1:${target}/go`);
+    assert.equal(hop.status, 302);
+    assert.equal(hop.location, "/secret");
+    assert.equal(hop.body, "");
+    assert.deepEqual(hits, ["/go"], "重定向的目标一次都没被取过");
+  } finally {
+    await new Promise<void>((r) => proxy.close(() => r()));
+    await new Promise<void>((r) => upstream.close(() => r()));
+  }
 });
