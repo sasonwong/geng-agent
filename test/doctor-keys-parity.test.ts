@@ -10,7 +10,7 @@ import { RULES } from "../tools/gate/patterns.mjs";
 import { scanLogBodies } from "../internal/doctor.ts";
 
 // 为什么有这个文件：internal/doctor.ts 的 SECRET_SHAPES 是从 tools/gate/patterns.mjs 的
-// 凭据表里**复制**出来的七条（见 doctor.ts:315-320 的注释）。复制本身可以，安静地漂不行：
+// 凭据表里**复制**出来的七条（`SECRET_SHAPES` 上方的注释就是这么写的）。复制本身可以，安静地漂不行：
 // 门那边加了一条凭据形状、doctor 这边没跟上，效果就是日志里真出现那种 key 时，
 // 一项说「干净」的检查——这正是这张 PR 要修的那句假话，只是换了个地方。
 //
@@ -49,7 +49,7 @@ const EXEMPT: Record<string, string> = {
   连接串含口令: "连接串/赋值形状是日志常态，一条见谁都报的检查最后会被当背景噪音——这条留在门上",
   "Bearer 头": "Authorization 头在日志里天天有，搬进这条检查等于给自己造噪音，同上",
   Webhook: "本项目不发 discord/slack webhook；真粘进来一条，换掉它得去对方那边操作",
-  密钥赋值: "赋值形状，doctor.ts:317-319 的注释里已写明为什么不搬",
+  密钥赋值: "赋值形状，`SECRET_SHAPES` 上方的注释里已写明为什么不搬",
   口令赋值: "赋值形状同「密钥赋值」：日志里 `password=…` 是常态形状，门的提交前拦才拦得住",
   "npm 令牌": "赋值形状；npm 不在运行实例里跑，日志里不该有 install 输出",
   "docker login": "命令形状；真出现说明已经有人在宿主上手动操作了，不是一条日志检查兜得住的",

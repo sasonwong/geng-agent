@@ -18,14 +18,14 @@ test("an env file keeps its comments and only moves the line it was asked to mov
   writeFileSync(file, "# 这是注释\nOPENCODE_API_KEY=old\n# 中间一行\nOTHER=1\n");
 
   writeEnvValue(file, "OPENCODE_API_KEY", "new");
-  writeEnvValue(file, "GENG_SEARCH_TOKEN", "tok");
+  writeEnvValue(file, "SOME_TOKEN", "tok");
 
   const text = readFileSync(file, "utf8");
   assert.match(text, /^# 这是注释$/m);
   assert.match(text, /^# 中间一行$/m);
   assert.equal(readEnvFile(file).OPENCODE_API_KEY, "new");
   assert.equal(readEnvFile(file).OTHER, "1");
-  assert.equal(readEnvFile(file).GENG_SEARCH_TOKEN, "tok");
+  assert.equal(readEnvFile(file).SOME_TOKEN, "tok");
   // a secret file that is group/world readable is a secret in name only
   assert.equal(statSync(file).mode & 0o777, 0o600);
 });

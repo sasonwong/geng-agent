@@ -32,7 +32,14 @@ interface Args {
 }
 
 function parse(argv: string[]): Args {
-  const args: Args = { cmd: argv[0] ?? "", instance: null, root: REPO_ROOT, force: false };
+  const first = argv[0] ?? "";
+  // `--help` is in the command position, where the loop below never looks
+  const args: Args = {
+    cmd: first === "-h" || first === "--help" ? "help" : first,
+    instance: null,
+    root: REPO_ROOT,
+    force: false,
+  };
   const rest = argv.slice(1);
   const positional: string[] = [];
   for (let i = 0; i < rest.length; i++) {

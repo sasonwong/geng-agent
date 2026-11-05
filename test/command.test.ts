@@ -17,7 +17,7 @@ function tools(root: string, names: string[]): void {
 test("the container writes nothing but the page it calls its own", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
-  const argv = buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…", []).args.join(" ");
+  const argv = buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…").args.join(" ");
   // say queues through the daemon now, so the outbox is not something it can write
   assert.equal(argv.includes(":/outbox"), false, "outbox 不该挂进容器");
   assert.match(argv, new RegExp(`-v ${paths.identity}:/state/identity.md`));
@@ -26,7 +26,7 @@ test("the container writes nothing but the page it calls its own", () => {
 test("the tools are loaded from outside the agent's home", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   tools(root, ["mail.ts", "say-mute.ts", "websearch.ts"]);
-  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "你是…", []);
+  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "你是…");
   const joined = args.join(" ");
   assert.match(joined, /-e \/opt\/geng\/extensions\/say-mute\.ts/);
   assert.match(joined, /-e \/opt\/geng\/extensions\/websearch\.ts/);
@@ -38,7 +38,7 @@ test("a tool dropped into image/extensions/ is loaded, with no other edit", () =
   // the fourth file was mounted into the container and never loaded, and nothing said so
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   tools(root, ["say-mute.ts", "websearch.ts", "mail.ts", "calendar.ts", "README.md", "helper.js"]);
-  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "P", []);
+  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "P");
   const loaded = args.filter((a) => a.startsWith("/opt/geng/extensions/"));
   assert.deepEqual(loaded, [
     "/opt/geng/extensions/calendar.ts",
@@ -51,7 +51,7 @@ test("a tool dropped into image/extensions/ is loaded, with no other edit", () =
 test("the tools are mounted, not baked, so editing one needs no rebuild", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
-  const { args } = buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…", []);
+  const { args } = buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…");
   // without :ro the agent could rewrite the tool that decides how it speaks to people
   assert.notEqual(
     args.indexOf(`${paths.extensions}:/opt/geng/extensions:ro`),
@@ -63,7 +63,7 @@ test("the tools are mounted, not baked, so editing one needs no rebuild", () => 
 test("every -e value is really passed to docker as an env var", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const p = defaultPolicy();
-  const args = buildCommand(makePaths(root, "alice"), p, "geng-x-0001", "P", []).args;
+  const args = buildCommand(makePaths(root, "alice"), p, "geng-x-0001", "P").args;
   // TZ once shipped without its flag: docker read "TZ=Asia/Shanghai" as the image name,
   // the container never started, and the daemon died with no log line at all.
   for (let i = 0; i < args.length; i++) {
@@ -81,7 +81,7 @@ test("the search socket is mounted only when it exists, and at the same path", (
   mkdirSync(join(root, "secrets"), { recursive: true });
   const env = (p: string) => `DEEPSEEK_API_KEY=sk-x\nGENG_SEARCH_SOCKET=${p}\n`;
   const argv = (): string =>
-    buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…", []).args.join(" ");
+    buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…").args.join(" ");
 
   writeFileSync(join(root, "secrets", "search.env"), env(sock));
   // nothing listens yet: docker would materialise the missing host path as a directory,
@@ -101,7 +101,7 @@ test("the book socket is mounted read-only, and only when something is listening
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
   const argv = (): string =>
-    buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…", []).args.join(" ");
+    buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…").args.join(" ");
 
   assert.equal(argv().includes("GENG_BOOK_SOCK"), false, "socket 不在的时候还是注入了路径");
 

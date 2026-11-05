@@ -30,6 +30,6 @@ test("an image id it could not read is not a change", () => {
   // docker was unreachable when the page was built: "could not tell" must not be
   // reported as "different", or every docker hiccup tells the agent its world changed
   assert.equal(describeEnvChange(before, { imageId: null, version: "0.1.0" }), null);
-  // the other direction is a real change: a runner that used to have no image at all
+  // the other direction is a real change: a life that used to have no image at all
   assert.equal(describeEnvChange({ imageId: null }, { imageId: id("a") }), "环境变了。");
 });

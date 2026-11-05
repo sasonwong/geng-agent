@@ -6,14 +6,6 @@ import { connect } from "node:net";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
 import { readJson, readText } from "./fs.ts";
-
-function readdirSafe(dir: string): number {
-  try {
-    return readdirSync(dir).length;
-  } catch {
-    return 0;
-  }
-}
 import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
@@ -27,6 +19,14 @@ import { makePaths } from "./paths.ts";
 import { loadPolicy, policyDrift, templateValue, type Policy } from "./policy.ts";
 import { repairTail } from "./session.ts";
 import { onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
+
+function readdirSafe(dir: string): number {
+  try {
+    return readdirSync(dir).length;
+  } catch {
+    return 0;
+  }
+}
 
 export interface Check {
   name: string;

@@ -89,7 +89,7 @@ test("a trailing note on the quota line is the note's problem, not the quota's",
 
 test("the quota the agent is shown uses the same reading of an empty line", () => {
   const f = fixture();
-    try {
+  try {
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY="));
     assert.equal(searchQuota(f.root)?.limit, 111);
     assert.equal(searchQuota(f.root)?.left, 111);
@@ -146,7 +146,7 @@ test("a quota file left at zero by an earlier run is not a permanent verdict", a
     mkdirSync(join(f.root, "data", "_ops", "usage"), { recursive: true });
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY="));
     delete process.env.GENG_SEARCH_DAILY;
-        writeFileSync(usage, JSON.stringify({ day, count: 0, limit: 0 }));
+    writeFileSync(usage, JSON.stringify({ day, count: 0, limit: 0 }));
     assert.equal(searchQuota(f.root)?.left, 0); // before: the old zero wins
     const env = readSearchEnv(f.root);
     assert.ok(env);

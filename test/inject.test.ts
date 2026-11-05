@@ -62,7 +62,7 @@ test("an inbox message reaches the injected line with its attachment intact", ()
   assert.equal(injectionText(handed[0]!), "[刚收到] telegram:@x：没写字，只带了 1个文件。");
 });
 
-test("a voice note says it cannot be listened to, because it never lands in /files", () => {
+test("a voice note says it cannot be listened to, because nothing is ever fetched for it", () => {
   // the only attachment that is deliberately not fetched: a bare count would send it
   // looking for a file that does not exist
   const said = injectionText({ id: "9", file: "9.json", text: "", from: "telegram:@x", attachments: [{ kind: "voice", note: "没有转写" }] });

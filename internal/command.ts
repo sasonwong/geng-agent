@@ -63,120 +63,120 @@ export function buildCommand(
   // the tools the page names, the operator's keys in reach and the book readable on disk —
   // a different agent wearing the same name, and it reported `sym=ok`.
   ensureIdentityMountSource(paths);
-    const args = [
-      "run",
-      "--rm",
-      "-i",
-      "--label",
-      `agent.instance=${paths.instance}`,
-      "--name",
-      `agent-${paths.instance}`,
-      "--user",
-      uidGid(),
-      "--memory",
-      policy.container.memory,
-      "--cpus",
-      policy.container.cpus,
-      "--pids-limit",
-      String(policy.container.pidsLimit),
-      "--cap-drop",
-      "ALL",
-      "--security-opt",
-      "no-new-privileges",
-      // The root filesystem is read-only: what pi and git may write is /work, the agent's
-      // own home (a tmpfs, refilled from the image at start), and /tmp.
-      "--read-only",
-      "--tmpfs",
-      "/tmp:rw,nosuid,size=64m",
-      "--tmpfs",
-      "/home/agent/.pi/agent:rw,size=32m",
-      // the proxy lives on loopback, bridged to the book socket by `geng-pi`
-      "-e",
-      "HTTP_PROXY=http://127.0.0.1:3128",
-      "-e",
-      "HTTPS_PROXY=http://127.0.0.1:3128",
-      "-e",
-      "http_proxy=http://127.0.0.1:3128",
-      "-e",
-      "https_proxy=http://127.0.0.1:3128",
-      "-e",
-      "NO_PROXY=localhost,127.0.0.1,::1",
-      "-e",
-      "HOME=/home/agent",
-      // every -e needs its own flag; a bare KEY=VALUE lands where the image name goes
-      "-e",
-      `TZ=${policy.timezone}`,
-      "-v",
-      `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
-      "-v",
-      `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
-      // pi posts model requests to the socat port below; the daemon adds the credential
-      // on the way out, so no provider key is in this container's environment at all.
-      "-v",
-      `${join(paths.root, "deploy", "models.json")}:/home/agent/.pi/agent/models.json:ro`,
-      // The book is not mounted at all. Every read and every write goes through the
-      // endpoint, so a call is the only way in and the ledger sees all of it — a `cat`
-      // used to count as a read neither the daemon nor the page could name. The single
-      // exception is the page it rewrites freely, which is a file, not an action.
-      "-v",
-      `${paths.identity}:/state/identity.md`,
-      // the tools come from the checkout, not from an image layer: read-only, at the same
-      // absolute path the image used to copy them to, so `@earendil-works/pi-ai` keeps
-      // resolving. Read-only is the point — it must not be able to rewrite how it speaks.
-      "-v",
-      `${paths.extensions}:/opt/geng/extensions:ro`,
-      "-v",
-      `${paths.workspace}:/work`,
-      "-w",
-      "/work",
-    ];
-    // The search endpoint is a unix socket, not a port on the bridge: nothing on the
-    // network can reach it, which is why nothing else has to be opened for it.
-    // Mounted only when the file is there — docker materialises a missing host path as a
-    // directory, and a directory at that path fails at connect time with a shape nobody
-    // recognises.
-    const search = readSearchEnv(paths.root);
-    if (search !== null && existsSync(search.socket)) {
-      args.push(
-        "-v",
-        `${search.socket}:${search.socket}:ro`,
-        "-e",
-        `GENG_SEARCH_SOCKET=${search.socket}`,
-      );
-    }
-    // The book endpoint, same shape as search: a unix socket, no port. Read-only on the
-    // mount so the agent cannot unlink the name and cut itself off mid-round.
-    if (bookSocketExists(paths)) {
-      args.push(
-        "-v",
-        `${paths.run}:/run/geng:ro`,
-        "-e",
-        `GENG_BOOK_SOCK=${BOOK_SOCKET_IN_CONTAINER}`,
-      );
-    }
-    // There is no direct network at all. Everything leaves through the proxy on the book
-    // socket, so "it went somewhere" is a line in net.log rather than a route.
-    args.push("--network", "none");
-    // secrets are injected, never mounted
-    if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
+  const args = [
+    "run",
+    "--rm",
+    "-i",
+    "--label",
+    `agent.instance=${paths.instance}`,
+    "--name",
+    `agent-${paths.instance}`,
+    "--user",
+    uidGid(),
+    "--memory",
+    policy.container.memory,
+    "--cpus",
+    policy.container.cpus,
+    "--pids-limit",
+    String(policy.container.pidsLimit),
+    "--cap-drop",
+    "ALL",
+    "--security-opt",
+    "no-new-privileges",
+    // The root filesystem is read-only: what pi and git may write is /work, the agent's
+    // own home (a tmpfs, refilled from the image at start), and /tmp.
+    "--read-only",
+    "--tmpfs",
+    "/tmp:rw,nosuid,size=64m",
+    "--tmpfs",
+    "/home/agent/.pi/agent:rw,size=32m",
+    // the proxy lives on loopback, bridged to the book socket by `geng-pi`
+    "-e",
+    "HTTP_PROXY=http://127.0.0.1:3128",
+    "-e",
+    "HTTPS_PROXY=http://127.0.0.1:3128",
+    "-e",
+    "http_proxy=http://127.0.0.1:3128",
+    "-e",
+    "https_proxy=http://127.0.0.1:3128",
+    "-e",
+    "NO_PROXY=localhost,127.0.0.1,::1",
+    "-e",
+    "HOME=/home/agent",
+    // every -e needs its own flag; a bare KEY=VALUE lands where the image name goes
+    "-e",
+    `TZ=${policy.timezone}`,
+    "-v",
+    `${paths.sessionDir}:/home/agent/.pi/agent/sessions`,
+    "-v",
+    `${join(paths.piDir, "settings.json")}:/home/agent/.pi/agent/settings.json:ro`,
+    // pi posts model requests to the socat port below; the daemon adds the credential
+    // on the way out, so no provider key is in this container's environment at all.
+    "-v",
+    `${join(paths.root, "deploy", "models.json")}:/home/agent/.pi/agent/models.json:ro`,
+    // The book is not mounted at all. Every read and every write goes through the
+    // endpoint, so a call is the only way in and the ledger sees all of it — a `cat`
+    // used to count as a read neither the daemon nor the page could name. The single
+    // exception is the page it rewrites freely, which is a file, not an action.
+    "-v",
+    `${paths.identity}:/state/identity.md`,
+    // the tools come from the checkout, not from an image layer: read-only, at the same
+    // absolute path the image used to copy them to, so `@earendil-works/pi-ai` keeps
+    // resolving. Read-only is the point — it must not be able to rewrite how it speaks.
+    "-v",
+    `${paths.extensions}:/opt/geng/extensions:ro`,
+    "-v",
+    `${paths.workspace}:/work`,
+    "-w",
+    "/work",
+  ];
+  // The search endpoint is a unix socket, not a port on the bridge: nothing on the
+  // network can reach it, which is why nothing else has to be opened for it.
+  // Mounted only when the file is there — docker materialises a missing host path as a
+  // directory, and a directory at that path fails at connect time with a shape nobody
+  // recognises.
+  const search = readSearchEnv(paths.root);
+  if (search !== null && existsSync(search.socket)) {
     args.push(
-      policy.container.image,
-      // an empty replacement is not a command: only the probe passes one, and it passes
-      // a real one
-      ...(tail !== undefined && tail.length > 0
-        ? tail
-        : [
-            "geng-pi",
-            "--mode",
-            "rpc",
-            "--session-id",
-            sessionId,
-            "--system-prompt",
-            systemPrompt,
-            ...extensionArgs(paths.extensions),
-          ]),
+      "-v",
+      `${search.socket}:${search.socket}:ro`,
+      "-e",
+      `GENG_SEARCH_SOCKET=${search.socket}`,
     );
-    return { cmd: "docker", args, env: process.env, cwd: paths.workspace };
+  }
+  // The book endpoint, same shape as search: a unix socket, no port. Read-only on the
+  // mount so the agent cannot unlink the name and cut itself off mid-round.
+  if (bookSocketExists(paths)) {
+    args.push(
+      "-v",
+      `${paths.run}:/run/geng:ro`,
+      "-e",
+      `GENG_BOOK_SOCK=${BOOK_SOCKET_IN_CONTAINER}`,
+    );
+  }
+  // There is no direct network at all. Everything leaves through the proxy on the book
+  // socket, so "it went somewhere" is a line in net.log rather than a route.
+  args.push("--network", "none");
+  // secrets are injected, never mounted
+  if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
+  args.push(
+    policy.container.image,
+    // an empty replacement is not a command: only the probe passes one, and it passes
+    // a real one
+    ...(tail !== undefined && tail.length > 0
+      ? tail
+      : [
+          "geng-pi",
+          "--mode",
+          "rpc",
+          "--session-id",
+          sessionId,
+          "--system-prompt",
+          systemPrompt,
+          ...extensionArgs(paths.extensions),
+        ]),
+  );
+  return { cmd: "docker", args, env: process.env, cwd: paths.workspace };
 }
 
 /** A killed daemon leaves `docker run` children alive; nothing else cleans them up. */

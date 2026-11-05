@@ -38,7 +38,8 @@ const USAGE = `geng <command> [options]
                                      往 secrets/bots.json 里加一个 bot（token 从 stdin 读）
   bots allow <inst> add|rm <ids>     改白名单（逗号分隔）；只有 add 过的人才叫得醒它
   secrets init <inst> [--rotate]     生成 mail token（搜索的 token 已经取消：socket 就是授权）
-  secrets set <inst> <NAME>          从 stdin 读一个值写进 secrets/<inst>.env（600）
+  secrets set <inst> <NAME>          从 stdin 读一个值写进该去的地方（600）：模型 key 落
+                                     secrets/<inst>.model.env，其余落 secrets/<inst>.env
   search                             跑搜索端点（需要 secrets/search.env）
 
 通用选项：
@@ -76,8 +77,11 @@ const SUB_FLAG_VALUED = new Set([
 const SUB_FLAG_BOOL = new Set(["--token-stdin", "--rotate"]);
 
 function parse(argv: string[]): Args {
+  const first = argv[0] ?? "";
   const args: Args = {
-    cmd: argv[0] ?? "",
+    // the flag is in the command position, so the loop below (which starts at argv[1])
+    // never sees it: `geng --help` used to answer "未知命令 --help"
+    cmd: first === "-h" || first === "--help" ? "help" : first,
     instance: null,
     root: REPO_ROOT,
     fix: false,
@@ -110,10 +114,9 @@ function parse(argv: string[]): Args {
     } else if (a === "--list") {
       args.list = true;
     } else if (a === "--check") {
-    args.check = true;
-  } else if (a === "--yes") {
+      args.check = true;
+    } else if (a === "--yes") {
       args.yes = true;
-
     } else if (a === "--all") {
       args.all = true;
     } else if (a === "-h" || a === "--help") {

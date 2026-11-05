@@ -30,7 +30,7 @@ function fixture(): {
     places: [{ id: -1001234567890, label: "群「测试」", home: false }],
     attention: null,
     cut: null,
-      filesForgotten: 0,
+    filesForgotten: 0,
     filesPruned: 0,
     filesOldestPrunedMs: null,
     filesUsedBytes: 0,
