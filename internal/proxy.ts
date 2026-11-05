@@ -289,6 +289,15 @@ export async function handleConnect(
     reported = true;
     report(ok, why);
   };
+  // The `connect` event hands over a socket that has no 'error' listener: the HTTP server
+  // takes its own off before emitting, on purpose, because from here on the socket is ours.
+  // `curl --max-time 5` giving up, or a round being killed mid-handshake, would then be an
+  // uncaught exception — the daemon goes down with the round it was serving. Attached before
+  // the first await, because the first await is DNS.
+  socket.on("error", (err: Error) => {
+    log(`proxy ${raw} 客户端那一头断了：${err.message}`);
+    once(false, err.message);
+  });
   // `checkTarget` resolves the name as part of the address check, so its `addr` is the
   // one that was vetted. Resolving again below would be a second lookup whose answer
   // nothing checks — the shape of a rebinding window.
@@ -334,6 +343,13 @@ function tunnelDone(
   // Both ends die together, and each end's failure is one event, not two: `report` is the
   // `once` from handleConnect, so an error that arrives after "出去" cannot be logged a
   // second time as if the tunnel had never opened.
+  if (socket.destroyed) {
+    // The client left while the name was being resolved or the chain was handshaking. Its
+    // 'close' has already fired, so the listener below will never run: without this the
+    // upstream socket stays open for as long as the far end keeps it.
+    upstream.destroy();
+    return;
+  }
   socket.on("error", () => upstream.destroy());
   socket.on("close", () => upstream.destroy());
   // "出去" means a connection exists, so it is said here and nowhere earlier: a chain

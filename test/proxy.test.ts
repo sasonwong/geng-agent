@@ -19,6 +19,18 @@ import {
   splitAuthority,
 } from "../internal/proxy.ts";
 
+/** A connected pair of real sockets, so a caller has a client end to speak into. */
+async function pair(): Promise<{ mine: import("node:net").Socket; peer: import("node:net").Socket }> {
+  let resolvePeer!: (s: import("node:net").Socket) => void;
+  const ready = new Promise<import("node:net").Socket>((r) => (resolvePeer = r));
+  const server = createTcp((s) => resolvePeer(s));
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+  const mine = connect((server.address() as { port: number }).port, "127.0.0.1");
+  const peer = await ready;
+  server.close();
+  return { mine, peer };
+}
+
 test("a host is allowed by itself or as a subdomain, never as a suffix of something else", () => {
   const allow = ["github.com", "npmjs.org"];
   assert.equal(hostAllowed("github.com", allow), true);
@@ -153,12 +165,15 @@ test("a CONNECT to a name that resolves inside the host's own network is refused
         on: () => {},
         destroy: () => {},
       };
-      void handleConnect(`localhost:${port}`, socket as never, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] }, (l) => {
+      // both loopback spellings are excluded: `localhost` resolves to `::1` first on some
+      // machines and to `127.0.0.1` first on others, and this test is about the address
+      // rule, not about which of the two a resolver happens to hand back.
+      void handleConnect(`localhost:${port}`, socket as never, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["0.0.0.0/0", "::/0", "!127.0.0.0/8", "!::1/128"] }, (l) => {
         refusals.push(l);
       });
     });
     assert.match(denied, /403/);
-    assert.match(refusals.join("\n"), /127\.0\.0\.1/);
+    assert.match(refusals.join("\n"), /127\.0\.0\.1|::1/);
   } finally {
     restore();
     await new Promise<void>((r) => target.close(() => r()));
@@ -209,7 +224,7 @@ test("when the host is itself behind a proxy, the tunnel goes through it", async
   const chain = chainFrom("auto");
   // `localhost` resolves without a network; the chain stub never looks at the name
   const clientSide = createTcp((socket) => {
-    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
   });
   await new Promise<void>((r) => clientSide.listen(0, "127.0.0.1", () => r()));
   try {
@@ -289,7 +304,7 @@ test("a SOCKS5 chain does the handshake before it pipes anything", async () => {
   await new Promise<void>((r) => socks.listen(0, "127.0.0.1", () => r()));
   const chain = chainFrom(`socks5://me:secret@127.0.0.1:${(socks.address() as { port: number }).port}`);
   const front = createTcp((socket) => {
-    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8"] }, () => {}, chain);
+    void handleConnect("localhost:443", socket, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] }, () => {}, chain);
   });
   await new Promise<void>((r) => front.listen(0, "127.0.0.1", () => r()));
   try {
@@ -408,17 +423,6 @@ test("plain http is proxied too, and refused by the same address rules", async (
 
 test("one connection is one report, and it is said only once the tunnel is up", async () => {
   // A socket pair, so the proxy has a client end to speak into without a container.
-  const pair = async (): Promise<{ mine: import("node:net").Socket; peer: import("node:net").Socket }> => {
-    let resolvePeer!: (s: import("node:net").Socket) => void;
-    const ready = new Promise<import("node:net").Socket>((r) => (resolvePeer = r));
-    const server = createTcp((s) => resolvePeer(s));
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
-    const mine = connect((server.address() as { port: number }).port, "127.0.0.1");
-    const peer = await ready;
-    server.close();
-    return { mine, peer };
-  };
-
   const target = createTcp((s) => s.end("hello"));
   await new Promise<void>((r) => target.listen(0, "127.0.0.1", () => r()));
   const port = (target.address() as { port: number }).port;
@@ -480,6 +484,47 @@ test("a refused direct connection is a refusal, not an uncaught error", async ()
   // And it is a refusal, said once: `net=N` counts places it went.
   assert.deepEqual(reports.map((r) => r[0]), [false], JSON.stringify(reports));
   assert.match(reports[0]?.[1] ?? "", /ECONNREFUSED/);
+});
+
+// `connect` 事件交出来的 socket 上没有 error 监听：HTTP server 在 emit 之前把自己的摘掉了，
+// 因为从那以后这个 socket 归调用方。于是「CONNECT 收到、隧道还没开」这段窗口里客户端断一次
+// （`curl --max-time` 到点、这一轮被杀），就是一次没人接的 error——未捕获异常，daemon 连同它
+// 正在服务的那一轮一起没了。下面这个监听必须挂在第一个 await 之前，因为第一个 await 是 DNS。
+test("a client that hangs up before the tunnel opens is a disconnect, not a crash", async () => {
+  // A port that was just closed, so the connect on the other side cannot succeed and the
+  // report below has exactly one thing it can be.
+  const probe = createTcp(() => {});
+  await new Promise<void>((r) => probe.listen(0, "127.0.0.1", () => r()));
+  const port = (probe.address() as { port: number }).port;
+  await new Promise<void>((r) => probe.close(() => r()));
+
+  const crashes: unknown[] = [];
+  const onCrash = (e: unknown): void => {
+    crashes.push(e);
+  };
+  process.on("uncaughtException", onCrash);
+  const reports: [boolean, string | undefined][] = [];
+  const { mine, peer } = await pair();
+  try {
+    const settled = handleConnect(
+      `localhost:${port}`,
+      peer,
+      Buffer.alloc(0),
+      { allow: ["localhost"], cidrs: ["127.0.0.0/8", "::1/128"] },
+      () => {},
+      null,
+      (ok, why) => reports.push([ok, why]),
+    );
+    // the listener is attached synchronously, so this lands inside the window
+    peer.emit("error", Object.assign(new Error("客户端那一头 reset 了"), { code: "ECONNRESET" }));
+    await settled;
+  } finally {
+    process.off("uncaughtException", onCrash);
+    mine.destroy();
+  }
+  assert.deepEqual(crashes, [], "客户端断一次不该把 daemon 带走");
+  // And the hang-up is the one report: a connection that never opened is not a trip.
+  assert.deepEqual(reports.map((r) => r[0]), [false], JSON.stringify(reports));
 });
 
 // 明文 HTTP 是那条路上唯一没人钉过的一段。`fetch` 在这里做两件这个文件明确不许做的事：
