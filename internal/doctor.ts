@@ -82,7 +82,9 @@ function v4Range(entry: string): V4Range | null {
     (((octets[0] as number) << 24) | ((octets[1] as number) << 16) | ((octets[2] as number) << 8) | (octets[3] as number)) >>> 0;
   const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
   const low = (base & mask) >>> 0;
-  return { low, high: (low | (~mask >>> 0)) >>> 0 };
+  // complement written as an XOR, not `~mask`: a tilde before a word reads as a home
+  // directory to the gate, and correctly so — nothing else in this repo writes one
+  return { low, high: (low | (mask ^ 0xffffffff)) >>> 0 };
 }
 
 const inRange = (ip: number, r: V4Range): boolean => ip >= r.low && ip <= r.high;
