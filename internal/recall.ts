@@ -400,7 +400,12 @@ export function openText(p: Paths, id: string, offset: number): OpenResult {
   const page = item.body.slice(offset, offset + PAGE);
   const rest = item.body.length - offset - page.length;
   const out = [`${item.id}  ${item.source}  ${stamp(item.at)}`, ""];
-  out.push(page === "" ? "（这一件没有正文）" : page);
+  // An empty page has two causes and they mean opposite things: the entry has no body,
+  // or the offset is already past the end of one. Saying "没有正文" for the second makes
+  // a reader believe the entry is empty when it was only read too far.
+  if (page !== "") out.push(page);
+  else if (item.body === "") out.push("（这一件没有正文）");
+  else out.push(`（读过头了：这一件正文共 ${item.body.length} 字，offset=${offset} 已经在末尾之后）`);
   if (rest > 0) out.push("", `（还有 ${rest} 字，offset=${offset + page.length} 接着读）`);
   if (item.source === "mail") {
     const had = readJson<unknown>(p.mailRead, []);

@@ -135,3 +135,18 @@ test("a discarded entry is still listed, and says it no longer counts", () => {
   // and `open` still reaches it, so "what did I say and why did I take it back" is answerable
   assert.match(openText(p, "J20260303-1", 0).text, /不算/);
 });
+
+test("an offset past the end is not the same thing as having no body", () => {
+  const p = fixture();
+  mkdirSync(p.journal, { recursive: true });
+  writeFileSync(join(p.journal, "J20260302-1.md"), "只有这一句\n");
+  const past = openText(p, "J20260302-1", 999);
+  assert.equal(past.found, true);
+  // reading past the end used to answer "这一件没有正文", which is a claim about the
+  // thing, not about the offset — the reader then believes the entry is empty
+  assert.doesNotMatch(past.text, /没有正文/);
+  assert.match(past.text, /末尾/);
+  // an item that really is empty still says so
+  writeFileSync(join(p.journal, "J20260302-2.md"), "");
+  assert.match(openText(p, "J20260302-2", 0).text, /没有正文/);
+});
