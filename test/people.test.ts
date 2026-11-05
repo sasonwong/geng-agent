@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { activeSince, appendSaid, lastSaidIn, readSaid, saidFile } from "../internal/people.ts";
@@ -26,6 +26,22 @@ test("the tail is the newest few, and the count is everything", () => {
   assert.equal(t?.total, 50);
   assert.deepEqual(t?.tail.map((l) => l.text), ["第 47 句", "第 48 句", "第 49 句"]);
   assert.ok((t?.bytes ?? 0) > 0);
+});
+
+test("a long conversation is not rotated away, because nothing reads the rotated file", () => {
+  // `appendLine` renames at 20 000 lines. For a log that is the deal; for a transcript it
+  // would silently drop the older half of a history the page and `open` promise to keep.
+  const d = data();
+  const file = saidFile(d, 7);
+  mkdirSync(join(d, "people"), { recursive: true });
+  const line = JSON.stringify({ at: "2026-03-02T09:00:00Z", dir: "in", text: "旧", from: "telegram:@a" }) + "\n";
+  writeFileSync(file, line.repeat(20_000));
+  appendSaid(d, 7, { at: "2026-03-02T09:01:00Z", dir: "in", text: "新" });
+
+  const lines = readFileSync(file, "utf8").trim().split("\n");
+  assert.equal(lines.length, 20_001, "一次追加不该把前两万行搬走");
+  assert.equal(existsSync(`${file}.1`), false, "对话记录不该有轮转出来的副本");
+  assert.match(lines[20_000] as string, /"新"/);
 });
 
 test("one broken line does not hide the conversation, and no file is not an error", () => {

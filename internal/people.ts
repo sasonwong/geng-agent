@@ -26,9 +26,17 @@ export function saidFile(data: string, chat: number): string {
   return join(peopleDir(data), `${chat}.jsonl`);
 }
 
+/**
+ * A conversation is not a log. `appendLine` rotates at 20 000 lines by renaming the file,
+ * and nothing reads `<chat>.jsonl.1` — so a chat that reached the cap would lose its older
+ * half from `recall`, `open("P…")` and the page's thread block, silently, while this file's
+ * own comment says it is kept forever.
+ */
+const KEEP_ALL = Number.POSITIVE_INFINITY;
+
 export function appendSaid(data: string, chat: number, entry: Said): void {
   mkdirSync(peopleDir(data), { recursive: true });
-  appendLine(saidFile(data, chat), JSON.stringify(entry));
+  appendLine(saidFile(data, chat), JSON.stringify(entry), KEEP_ALL);
 }
 
 /**
