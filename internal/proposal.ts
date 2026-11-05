@@ -18,7 +18,6 @@ export const NEGOTIABLE: Record<string, { min: number; max: number; integer: boo
 export interface ProposalResult {
   applied: Array<{ key: string; from: unknown; to: number }>;
   rejected: Array<{ key: string; reason: string }>;
-  archived: string | null;
 }
 
 function getPath(obj: unknown, path: string): unknown {
@@ -86,8 +85,7 @@ export function applyProposal(paths: Paths): ProposalResult | null {
   const historyDir = join(paths.meta, "policy.history");
   mkdirSync(historyDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const archived = join(historyDir, `${stamp}.json`);
-  copyFileSync(paths.policy, archived);
+  copyFileSync(paths.policy, join(historyDir, `${stamp}.json`));
 
   if (applied.length > 0) {
     // validate before writing: a malformed result must never replace a working policy
@@ -97,7 +95,7 @@ export function applyProposal(paths: Paths): ProposalResult | null {
   }
 
   renameSync(file, join(paths.meta, `proposal.applied.${stamp}.json`));
-  return { applied, rejected, archived };
+  return { applied, rejected };
 }
 
 function flatten(obj: unknown, prefix = ""): Record<string, unknown> {

@@ -53,7 +53,7 @@ export interface OutboxItem {
   /** Container paths under /work that go out with the words. */
   files?: string[];
   /** Files the daemon resolved from an id of its own, already absolute on the host. */
-  attachments?: { id: string; path: string; name: string }[];
+  attachments?: { path: string; name: string }[];
   /** Answer one particular message, so the other side sees which line it is about. */
   replyTo?: { chat: number; messageId: number };
   file: string;
@@ -77,7 +77,6 @@ export function readOutbox(dir: string): OutboxItem[] {
     const raw = readJson<{
       id?: string;
       messages?: unknown;
-      text?: unknown;
       chat?: unknown;
       files?: unknown;
       attachments?: unknown;
@@ -85,20 +84,16 @@ export function readOutbox(dir: string): OutboxItem[] {
     }>(join(dir, f), {});
     const messages = Array.isArray(raw.messages)
       ? raw.messages.filter((m): m is string => typeof m === "string" && m.trim() !== "")
-      : typeof raw.text === "string" && raw.text.trim() !== ""
-        ? [raw.text]
-        : [];
+      : [];
     items.push({
       file: join(dir, f),
       id: raw.id ?? f.replace(/\.json$/, ""),
       files: Array.isArray(raw.files) ? raw.files.filter((x): x is string => typeof x === "string") : [],
       attachments: Array.isArray(raw.attachments)
-        ? (raw.attachments as unknown[])
-            .filter((x): x is { path: string; name: string } => {
-              const o = x as { path?: unknown; name?: unknown } | null;
-              return typeof o?.path === "string" && typeof o?.name === "string";
-            })
-            .map((x) => ({ ...x, id: "" }))
+        ? (raw.attachments as unknown[]).filter((x): x is { path: string; name: string } => {
+            const o = x as { path?: unknown; name?: unknown } | null;
+            return typeof o?.path === "string" && typeof o?.name === "string";
+          })
         : [],
       messages,
       chat: typeof raw.chat === "number" ? raw.chat : undefined,
@@ -119,13 +114,13 @@ export function ackOutbox(dir: string, file: string): void {
   }
 }
 
-export function ensureGatewayDirs(root: string): { ops: string; gateway: string } {
+export function ensureGatewayDirs(root: string): { ops: string } {
   const ops = join(root, "data", "_ops");
   const gateway = join(root, "data", "_gateway");
   for (const d of [join(ops, "outbox"), join(gateway, "outbox"), join(gateway, "usage")]) {
     mkdirSync(d, { recursive: true });
   }
-  return { ops, gateway };
+  return { ops };
 }
 
 /** The daemon and gateway both speak on the ops channel; the tag says which mouth. */

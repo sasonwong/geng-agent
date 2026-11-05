@@ -46,7 +46,7 @@ import { systemFacts } from "./packet.ts";
 import { startBookServer } from "./book.ts";
 import { actsFor, appendActs } from "./acts.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
-import { describeEnvChange, imageId, packageVersion } from "./env.ts";
+import { describeEnvChange, imageId } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
 import { advance, loadEscalation, parkNotice, planFor, saveEscalation, timeoutNotice, type Escalation, type Plan } from "./escalation.ts";
@@ -337,7 +337,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // daemon kept running was never reported, and `meta.env` kept claiming the old image.
     const currentEnv = {
       imageId: await imageId(policy),
-      version: packageVersion(paths.root),
       search: searchConfigured(paths.root),
     };
     const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);

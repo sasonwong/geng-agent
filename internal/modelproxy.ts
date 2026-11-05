@@ -18,10 +18,6 @@ import { readModelKey, modelUpstream } from "./model.ts";
  */
 export const MODEL_PREFIX = "/model";
 
-export function upstreamFor(p: Paths): string | null {
-  return modelUpstream(p);
-}
-
 export async function proxyModel(
   p: Paths,
   req: IncomingMessage,
@@ -29,7 +25,7 @@ export async function proxyModel(
   body: Buffer,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const upstream = upstreamFor(p);
+  const upstream = modelUpstream(p);
   if (upstream === null) {
     res.writeHead(503, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: "没有配置模型上游：写 secrets/<实例>.model.env 的 GENG_MODEL_UPSTREAM" }));

@@ -68,7 +68,7 @@ test("outbox items keep message order and are acked into sent/", () => {
   const dir = mkdtempSync(join(tmpdir(), "geng-test-"));
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "001.json"), JSON.stringify({ id: "a", messages: ["一", "二"] }));
-  writeFileSync(join(dir, "002.json"), JSON.stringify({ id: "b", text: "三" }));
+  writeFileSync(join(dir, "002.json"), JSON.stringify({ id: "b", messages: ["三"] }));
 
   const items = readOutbox(dir);
   assert.deepEqual(items.map((i) => i.messages), [["一", "二"], ["三"]]);

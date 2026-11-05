@@ -8,7 +8,6 @@ import type { KnockHold } from "./schedule.ts";
 /** What the waking was run with, so a change of environment can be stated as fact. */
 export interface Env {
   imageId?: string | null;
-  version?: string | null;
   /** Whether the search tool exists for this container, which the env file decides. */
   search?: boolean;
 }

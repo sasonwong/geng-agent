@@ -13,7 +13,8 @@ import { resolveUnder } from "./lib/under.ts";
 import { getToFile } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
-const WORK = process.env.GENG_WORK ?? "/work";
+/** The container's working directory, mounted from the instance's `workspace/`. */
+const WORK = "/work";
 
 const downloadTool = tool({
   name: "download",

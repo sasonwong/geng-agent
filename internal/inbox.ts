@@ -88,11 +88,6 @@ export function markSeen(dirs: string[], seenDir: string, files: string[]): void
   }
 }
 
-/** How many messages it could actually hand over. The count that decides "did someone knock". */
-export function inboxCount(dir: string): number {
-  return peekInbox(dir).length;
-}
-
 /**
  * A file nobody can read used to knock forever: inboxPending counted names while
  * peekInbox skipped the content, so every waking handed over nothing and the file stayed.

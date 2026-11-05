@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { applyProposal } from "../internal/proposal.ts";
@@ -28,7 +28,10 @@ test("a negotiable field is applied and the old policy is archived", () => {
     { key: "cycle.defaultWakeMinutes", from: 30, to: 45 },
   ]);
   assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 45);
-  assert.ok(result?.archived && readFileSync(result.archived, "utf8").includes("30"));
+  // the old policy is archived next to it, unchanged, for the day the change was wrong
+  const history = readdirSync(join(paths.meta, "policy.history"));
+  assert.equal(history.length, 1);
+  assert.match(readFileSync(join(paths.meta, "policy.history", history[0] as string), "utf8"), /"defaultWakeMinutes": 30/);
 });
 
 test("out-of-range values are rejected and nothing is written", () => {

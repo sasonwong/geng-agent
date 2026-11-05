@@ -381,7 +381,9 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const words = message.text ?? message.caption ?? "";
     const att = attachmentOf(message);
     if (words === "" && att === null) {
-      log(`${key} ← 忽略（${message.sticker ? "sticker" : "没有文字也没有附件"}）`);
+      // A sticker is an attachment (`attachmentOf`), so it never reaches this branch: what
+      // lands here is a poll, a location, a dice — something with neither words nor a file.
+      log(`${key} ← 忽略（没有文字也没有附件）`);
       return;
     }
     const mine = (chats[key] ??= { known: {} });

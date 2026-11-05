@@ -103,7 +103,7 @@ export function timeoutNotice(prev: Escalation, next: Escalation): string | null
   return "有一轮跑到时间上限被杀了：做到一半，话可能没说完。不是出错，也不是没事，下一轮会接着看。";
 }
 
-function describe(symptom: Symptom, result?: { repeat?: { name: string; count: number } | null; durationMs?: number }): string {
+function describe(symptom: Symptom, result?: { repeat?: { name: string; count: number } | null }): string {
   if (symptom === "repeat" && result?.repeat) {
     return `${result.repeat.name} 同样的参数重复了 ${result.repeat.count} 次`;
   }
@@ -116,7 +116,7 @@ function describe(symptom: Symptom, result?: { repeat?: { name: string; count: n
 export function advance(
   e: Escalation,
   symptom: Symptom,
-  result?: { repeat?: { name: string; count: number } | null; durationMs?: number },
+  result?: { repeat?: { name: string; count: number } | null },
 ): Escalation {
   if (symptom === "ok") return { ...FRESH, updatedAt: new Date().toISOString() };
 

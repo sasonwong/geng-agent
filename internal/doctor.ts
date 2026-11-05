@@ -556,7 +556,6 @@ const PROBE = [
     '(socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &)',
     'sleep 0.3',
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
-    'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
     // the tools are a mount now, so "they are not there" is not a quiet degradation:
     // pi is started with one -e per file, and a missing file makes it exit 1 — the
     // wake dies instead of waking up with fewer things it can do

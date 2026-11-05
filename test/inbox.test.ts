@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxCount, markSeen, newestKnock, peekInbox, quarantine } from "../internal/inbox.ts";
+import { markSeen, newestKnock, peekInbox, quarantine } from "../internal/inbox.ts";
 import { writeJson } from "../internal/fs.ts";
 
 function inbox(): { dir: string; seen: string } {
@@ -93,7 +93,7 @@ test("a picture with no caption is a message, not a broken file", () => {
   const msgs = peekInbox(inbox);
   assert.equal(msgs.length, 1);
   assert.deepEqual(msgs[0]?.attachments, [{ kind: "document", path: "/files/-100-9-a.md", bytes: 12 }]);
-  assert.equal(inboxCount(inbox), 1);
+  assert.equal(peekInbox(inbox).length, 1);
 });
 
 test("a file with neither words nor attachments is set aside, and never knocks", () => {
@@ -105,7 +105,7 @@ test("a file with neither words nor attachments is set aside, and never knocks",
   writeFileSync(join(inbox, "-100-10.json"), JSON.stringify({ id: "-100-10", text: "" }));
   // the knock count is the parser's, not a directory listing: this is the loop that cost
   // around sixty cycles in an hour
-  assert.equal(inboxCount(inbox), 0);
+  assert.equal(peekInbox(inbox).length, 0);
   assert.deepEqual(quarantine(inbox, seen), ["-100-10.json"]);
   assert.equal(existsSync(join(seen, "-100-10.json.bad")), true);
   assert.equal(existsSync(join(inbox, "-100-10.json")), false);

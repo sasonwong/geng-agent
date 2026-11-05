@@ -226,9 +226,8 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       return { status: 200, body: { at: new Date(dueAtMs).toISOString(), why } };
     }
 
-    // mail/read: the one write a read is allowed to cause. /state is a mount the container
-    // may not write once it is read-only, and the list of what has been opened is part of
-    // the agent's own book — so the host keeps it, and `open` is what adds to it.
+    // A mute is a state the gateway reads before it decides; the page shows it as state and
+    // says out loud that it does not change delivery for a direct address.
     if (route === "/mute/set") {
       const target = text(params, "target")?.trim();
       if (target === undefined || !keyCanMute(target)) {
@@ -308,7 +307,7 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         : [];
       const all = [...new Set([...had, ...names])];
       writeJson(paths.filesForget, { files: all, at: nowIso });
-      return { status: 200, body: { files: all, pending: wanted.length, at: nowIso } };
+      return { status: 200, body: { files: all, at: nowIso } };
     }
 
     if (route === "/proposal") {

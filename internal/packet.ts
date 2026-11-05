@@ -365,7 +365,7 @@ export function buildPacket(input: PacketInput): string {
         ? ""
         : `（最老的一个 ${Math.max(1, Math.round((nowMs - filesOldestPrunedMs) / DAY_MS))} 天前）`;
     out.push(`地方不够了，清掉 ${filesPruned} 个最老的${age}。`);
-  } else if (filesCapMb > 0 && filesUsedBytes > filesCapMb * 1024 * 1024 * 0.85) {
+  } else if (filesUsedBytes > filesCapMb * 1024 * 1024 * 0.85) {
     out.push(`别人发来的文件占了 ${Math.round(filesUsedBytes / 1024 / 1024)} MB，上限 ${filesCapMb} MB。`);
   }
   const voice = kinds.get("voice") ?? 0;
