@@ -156,7 +156,7 @@ const forgetTool = tool({
     const { ok, reply } = await send("/files/forget", { files });
     if (!ok) return { content: [{ type: "text", text: String(reply.error) }], details: undefined };
     return {
-      content: [{ type: "text", text: `下一轮醒来前删掉 ${files.length} 个。` }],
+      content: [{ type: "text", text: `记下了 ${files.length} 个，下一轮醒来前删（已经不在的跳过）。` }],
       details: reply,
     };
   },

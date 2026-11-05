@@ -1,4 +1,4 @@
-import { readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -108,11 +108,15 @@ export function forgetFiles(dir: string, requested: string[]): number {
   for (const given of requested) {
     const name = bareName(given);
     if (name === null) continue;
+    // Counted only when it was there. `rmSync(force)` does not throw on a missing file, so
+    // a name that matched nothing used to be counted as a removal — the page then said
+    // "按你说的删了 3 个文件" over a directory it had emptied one file from.
+    if (!existsSync(join(dir, name))) continue;
     try {
       rmSync(join(dir, name), { force: true });
       removed += 1;
     } catch {
-      // already gone
+      // a file that would not go is retried next waking
     }
   }
   return removed;

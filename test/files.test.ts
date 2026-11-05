@@ -50,6 +50,9 @@ test("forgetting takes only bare names inside the directory", () => {
   assert.equal(bareName("/files/sub/a.jpg"), null);
   assert.equal(forgetFiles(d, ["/files/a.jpg", "/files/../policy.json"]), 1);
   assert.equal(filesUsage(d).count, 1);
+  // a name that matches nothing is not a removal: `rmSync(force)` never throws, so the
+  // count used to include it and the page said "删了 3 个" over one deleted file
+  assert.equal(forgetFiles(d, ["/files/gone.jpg", "F12"]), 0, "只在真删掉东西的时候算一个");
 });
 
 test("a malformed request deletes nothing", () => {
