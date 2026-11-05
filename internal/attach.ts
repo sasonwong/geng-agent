@@ -10,7 +10,6 @@ export interface Attachment {
   kind: "photo" | "document" | "audio" | "video" | "animation" | "video_note" | "sticker" | "voice";
   fileId?: string;
   name?: string;
-  mime?: string;
   bytes?: number;
   /** the file id once it is on disk (`F12`); absent when we chose not to fetch it */
   id?: string;
@@ -45,7 +44,6 @@ export function attachmentOf(m: TgMessage): Attachment | null {
     kind,
     fileId: one.file_id,
     name: one.file_name ?? `${kind}`,
-    mime: one.mime_type,
     bytes: one.file_size,
   };
 }

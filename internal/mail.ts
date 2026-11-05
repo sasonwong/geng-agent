@@ -105,7 +105,6 @@ export function mailId(messageId: string, fallback: string): string {
 
 export interface IngestAttachment {
   name?: string;
-  mime?: string;
   bytes?: number;
   /** base64; absent when the Worker decided it was too big to carry */
   content?: string;
@@ -137,7 +136,6 @@ export function parseIngest(raw: unknown): Ingest | null {
         .filter((a): a is Record<string, unknown> => !!a && typeof a === "object")
         .map((a) => ({
           name: asString(a.name) || undefined,
-          mime: asString(a.mime) || undefined,
           bytes: typeof a.bytes === "number" ? a.bytes : undefined,
           content: asString(a.content) || undefined,
         }))

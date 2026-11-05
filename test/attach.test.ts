@@ -24,6 +24,9 @@ test("a photo uses its largest size, and a document keeps its own name", () => {
   });
   assert.equal(doc?.name, "报告.pdf");
   assert.equal(doc?.kind, "document");
+  // Telegram sends a mime type and nothing here ever read it: what is stored is the id, the
+  // name and the size — a field with no reader is a field somebody will keep filling
+  assert.equal("mime" in (doc ?? {}), false, "mime 没有人读，不该留在附件记录里");
   assert.equal(attachmentOf({ message_id: 3, chat: { id: 1, type: "private" }, text: "嗯" }), null);
 });
 
