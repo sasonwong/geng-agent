@@ -13,11 +13,27 @@ interface RawWaiting {
 
 const UNIT_MS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
-export function parseAfter(v: string | number): number | null {
-  if (typeof v === "number") return v * 60_000;
+/**
+ * `"20m"`, `"90s"`, `"2h"`, `"1d"`; a bare number is minutes, which is the shape older
+ * versions wrote into `waiting.json`.
+ *
+ * `v` is `unknown` on purpose. `waiting.json` is state on disk, not a value this process
+ * just produced: `after` reaches here straight out of `readJson`, so a hand edit, a
+ * restored snapshot or an older writer can put `null` in it — and `null.trim()` was a
+ * TypeError in the first statement of the daemon's main loop, i.e. a daemon that dies on
+ * every start with nothing in the log about why. Every other branch of `readWaiting`
+ * answers `null` for a shape it does not know; this one has to as well.
+ *
+ * The finiteness checks guard the other end: 400 digits of `\d+` parse to `Infinity`, and
+ * an alarm due at `Infinity` is an instance that never wakes again.
+ */
+export function parseAfter(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v * 60_000 : null;
+  if (typeof v !== "string") return null;
   const m = /^(\d+(?:\.\d+)?)\s*([smhd])$/.exec(v.trim());
   if (!m) return null;
   const n = Number(m[1]);
+  if (!Number.isFinite(n)) return null;
   const unit = UNIT_MS[m[2] as string];
   return unit ? n * unit : null;
 }
