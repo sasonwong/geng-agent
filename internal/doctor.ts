@@ -784,11 +784,16 @@ async function backupChecks(root: string, instance: string, restoreTest: boolean
     return checks;
   }
 
-  const snapshots = await listSnapshots(p);
-  if (snapshots.length === 0) {
+  const list = await listSnapshots(p);
+  if (!list.ok) {
+    checks.push({ name: "备份", ok: false, warnOnly: true, detail: `读不出快照：${list.detail ?? "?"}` });
+    return checks;
+  }
+  if (list.snapshots.length === 0) {
     checks.push({ name: "备份", ok: false, warnOnly: true, detail: "还没有快照" });
     return checks;
   }
+  const snapshots = list.snapshots;
   const latest = snapshots[snapshots.length - 1];
   const ageMs = Date.now() - Date.parse(latest?.time ?? "");
   checks.push({

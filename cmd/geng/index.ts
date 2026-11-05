@@ -277,16 +277,20 @@ async function main(): Promise<number> {
       }
       const p = makePaths(args.root, args.instance);
       if (args.list) {
-        const snapshots = await listSnapshots(p);
+        const list = await listSnapshots(p);
         const policy = loadPolicy(p.policy);
-        if (snapshots.length === 0) {
+        if (!list.ok) {
+          console.error(`读不出快照列表：${list.detail ?? "?"}`);
+          return 1;
+        }
+        if (list.snapshots.length === 0) {
           console.log(`没有快照（仓库 ${backupRepo(p)}，备份${policy.backup.enabled ? "开着" : "关着"}）`);
           return 0;
         }
-        for (const s of snapshots.slice(-20)) {
+        for (const s of list.snapshots.slice(-20)) {
           console.log(`${s.id.slice(0, 8)}  ${s.time}  ${s.files} 个文件`);
         }
-        console.log(`${snapshots.length} 张`);
+        console.log(`${list.snapshots.length} 张`);
         return 0;
       }
       const outcome = await maybeBackup({ paths: p, policy: loadPolicy(p.policy), nowMs: Date.now() });

@@ -130,8 +130,9 @@ export interface Snapshot {
   files: number;
 }
 
-/** rustic emits two different group shapes across releases; flatten both. */
-export function parseSnapshots(text: string): Snapshot[] {
+/** rustic emits two different group shapes across releases; flatten both. Null: the
+ *  output is not a snapshot list at all — a different fact from an empty one. */
+export function parseSnapshots(text: string): Snapshot[] | null {
   type Entry = {
     id?: string;
     time?: string;
@@ -141,9 +142,9 @@ export function parseSnapshots(text: string): Snapshot[] {
   try {
     parsed = JSON.parse(text);
   } catch {
-    return [];
+    return null;
   }
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) return null;
   const flat = parsed.flatMap((g: unknown): Entry[] => {
     if (Array.isArray(g)) return (g[1] as Entry[]) ?? []; // rustic 0.7: [[group, [snaps]]]
     const grouped = (g as { snapshots?: Entry[] }).snapshots; // rustic 0.11: [{group_key, snapshots}]
@@ -158,16 +159,40 @@ export function parseSnapshots(text: string): Snapshot[] {
     }));
 }
 
-export async function listSnapshots(paths: Paths): Promise<Snapshot[]> {
+export interface SnapshotList {
+  /**
+   * False means the list could not be read — a wrong password, an unreachable repo, a
+   * rustic that answered something else. It used to come back as an empty list, so
+   * `restore` said 「没有快照」 over a repo that simply was not reachable, and the
+   * operator was told to believe their backups were gone.
+   */
+  ok: boolean;
+  snapshots: Snapshot[];
+  detail?: string;
+}
+
+export async function listSnapshots(paths: Paths): Promise<SnapshotList> {
   const password = readPassword(paths.root);
-  if (!password) return [];
+  if (!password) {
+    return { ok: false, snapshots: [], detail: "没有密码：secrets/rustic.env 里没有 RUSTIC_PASSWORD" };
+  }
   const result = await run(
     [...baseArgs(backupRepo(paths)), "snapshots", "--json"],
     { RUSTIC_PASSWORD: password },
     60_000,
   );
-  if (result.code !== 0) return [];
-  return parseSnapshots(result.stdout);
+  if (result.code !== 0) {
+    return {
+      ok: false,
+      snapshots: [],
+      detail: result.stderr.trim().slice(0, 200) || `rustic 退出 ${result.code}`,
+    };
+  }
+  const parsed = parseSnapshots(result.stdout);
+  if (parsed === null) {
+    return { ok: false, snapshots: [], detail: "rustic 的输出不是快照列表" };
+  }
+  return { ok: true, snapshots: parsed };
 }
 
 export interface BackupOptions {
@@ -264,8 +289,13 @@ export async function restore(o: RestoreOptions): Promise<{ ok: boolean; detail:
 
   let id = o.snapshot;
   if (!id) {
-    const snapshots = await listSnapshots(o.paths);
-    id = snapshots[snapshots.length - 1]?.id;
+    const list = await listSnapshots(o.paths);
+    if (!list.ok) {
+      // an unreachable repo is not an empty one: saying 「没有快照」 here told the
+      // operator their backups were gone when they were merely not readable
+      return { ok: false, detail: `读不出快照列表：${list.detail ?? "?"}` };
+    }
+    id = list.snapshots[list.snapshots.length - 1]?.id;
     if (!id) return { ok: false, detail: "没有快照" };
   }
 

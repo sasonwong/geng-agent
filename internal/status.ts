@@ -74,7 +74,7 @@ export async function printStatus(root: string, instance: string): Promise<void>
   const logTail = (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] ?? "（无）";
   const spend = spendSince(p, now);
   const snapshots = await listSnapshots(p);
-  const latest = snapshots[snapshots.length - 1];
+  const latest = snapshots.ok ? snapshots.snapshots[snapshots.snapshots.length - 1] : undefined;
   // one read, one answer: the list was fetched twice in the same expression
   const places = knownPlaces(p.root, instance);
 
@@ -97,9 +97,11 @@ export async function printStatus(root: string, instance: string): Promise<void>
     `  session     ${sessions.length} 文件 / ${bytes(sessionBytes)}`,
     `  花费        ${spend.cycles} 轮 · ${spend.tokens} tokens · $${spend.cost.toFixed(4)}`,
     `  快照        ${
-      latest
-        ? `${snapshots.length} 张，最近 ${formatDuration(now - Date.parse(latest.time))} 前`
-        : "没有（或 rustic 不可用）"
+      !snapshots.ok
+        ? `读不出（${snapshots.detail ?? "?"}）`
+        : latest
+          ? `${snapshots.snapshots.length} 张，最近 ${formatDuration(now - Date.parse(latest.time))} 前`
+          : "没有"
     }`,
     `  上次一轮    ${logTail}`,
   ];
