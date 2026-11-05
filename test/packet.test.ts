@@ -245,6 +245,20 @@ test("search quota is stated as a fact it can weigh", () => {
   assert.doesNotMatch(unconfigured, /搜索/);
 });
 
+test("the quota is a fact above the closing block, not the last thing it reads", () => {
+  // The page ends with "我认的自己 / 为什么醒 / 你可以什么都不做": a quota line pushed after
+  // them made the last sentence it read a number, which is the one thing the design says
+  // must not float past the standing permission.
+  const { input } = fixture();
+  const text = buildPacket(input({ searchLeft: 3 }));
+  const quota = text.indexOf("今天还能搜 3 次");
+  assert.ok(quota > 0, "quota line is missing");
+  assert.ok(quota < text.indexOf("你还没写下过自己"), "quota is after the identity block");
+  assert.ok(quota < text.indexOf("你可以什么都不做"), "quota is after the standing permission");
+  // and the permission is the very last line
+  assert.equal(text.trimEnd().split("\n").pop(), "你可以什么都不做，那不算失败。");
+});
+
 test("the page stays bounded without being cut: nothing external is pasted", () => {
   const { input, paths } = fixture();
   const many = Array.from({ length: 200 }, (_, n) => ({

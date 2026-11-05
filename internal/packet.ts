@@ -402,6 +402,10 @@ export function buildPacket(input: PacketInput): string {
       mailPending.senders.length === 0 ? "" : `，来自 ${mailPending.senders.join("、")}`;
     out.push(`邮件：${mailPending.count} 封没打开${first}${who}。用 recall(sources:["mail"]) 看。`);
   }
+  if (searchLeft !== null) {
+    out.push(searchLeft === 0 ? "今天的搜索用完了。" : `今天还能搜 ${searchLeft} 次。`);
+  }
+
   const muteLine = renderMutes(mutes, places);
   const attentionLine = renderAttention(attention, places, timezone, nowMs);
   if (muteLine) out.push(muteLine);
@@ -430,10 +434,6 @@ export function buildPacket(input: PacketInput): string {
   // standing permission, alone, because it is the only line that is always true.
   out.push("", `${waking <= 1 ? "这是你第一次醒来" : REASON_LINE[reason]}${whoLine(inbox)}`);
   out.push("你可以什么都不做，那不算失败。");
-
-  if (searchLeft !== null) {
-    out.push("", searchLeft === 0 ? "今天的搜索用完了。" : `今天还能搜 ${searchLeft} 次。`);
-  }
 
   // No truncation: nothing that grows with the outside world is pasted any more,
   // so the page is bounded by construction rather than by cutting it in half.
