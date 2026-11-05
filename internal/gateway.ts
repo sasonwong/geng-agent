@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { attentionActive, parseAttention } from "./attention.ts";
 import { Tripwire } from "./tripwire.ts";
 import { quoteFor, quotedOf } from "./quote.ts";
@@ -270,6 +270,37 @@ export function targetChat(
   return typeof chat === "number" ? chat : null;
 }
 
+export interface PartialSend {
+  texts: number;
+  files: number;
+  attachments: number;
+}
+
+/**
+ * What is still owed after a send that broke halfway. The sweep hands the same outbox
+ * file back every two seconds, so anything already delivered has to come out of it —
+ * otherwise the words are spoken again on every retry, and the burst trips the rate
+ * brake for ten minutes.
+ */
+export function unsentPart(
+  o: {
+    chat?: number;
+    messages: string[];
+    files: string[];
+    attachments: { path: string; name: string; id?: string }[];
+    replyTo?: { chat: number; messageId: number };
+  },
+  sent: PartialSend,
+): Record<string, unknown> {
+  return {
+    ...(o.chat === undefined ? {} : { chat: o.chat }),
+    messages: o.messages.slice(sent.texts),
+    files: o.files.slice(sent.files),
+    attachments: o.attachments.slice(sent.attachments),
+    ...(o.replyTo === undefined ? {} : { replyTo: o.replyTo }),
+  };
+}
+
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const root = o.root;
@@ -331,6 +362,8 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     files: string[] = [],
     replyTo?: { chat: number; messageId: number },
     attachments: { path: string; name: string }[] = [],
+    /** The outbox file, so a partial success can put only the unsent part back. */
+    queueFile?: string,
   ): Promise<boolean> => {
     const cfg = bots[key];
     if (!cfg) return false;
@@ -357,34 +390,67 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     // a quote only means something inside the chat it came from; a mismatched one is
     // dropped rather than sent into the wrong conversation
     const reply = quoteFor(chat, replyTo);
-    const ids: (number | undefined)[] = [];
-    for (const text of texts) {
-      if (reply === undefined) {
-        ids.push((await sendMessage(cfg.token, chat, text))[0]);
-        continue;
-      }
+
+    // A failure halfway through used to hand the whole item back to the sweep: words
+    // already spoken were spoken again on every retry (five of them), and the burst then
+    // tripped the rate brake for ten minutes. Put only what did not go out back into
+    // the queue before letting the sweep retry.
+    let sentTexts = 0;
+    let sentFiles = 0;
+    let sentAttachments = 0;
+    const keepUnsent = (): void => {
+      if (queueFile === undefined) return;
       try {
-        ids.push((await sendMessage(cfg.token, chat, text, reply))[0]);
+        writeJson(queueFile, {
+          id: basename(queueFile, ".json"),
+          ...unsentPart(
+            { chat: want, messages: texts, files, attachments, replyTo },
+            { texts: sentTexts, files: sentFiles, attachments: sentAttachments },
+          ),
+        });
       } catch {
-        // a deleted message must not take the words down with it
-        ids.push((await sendMessage(cfg.token, chat, text))[0]);
+        // the sweep retries the whole item; that is the old behaviour, and still beats
+        // losing the words altogether
       }
-    }
+    };
+
+    const ids: (number | undefined)[] = [];
     const p = instanceData(key);
-    for (const given of files) {
-      // the path came from inside the container, so it can be anything it likes: only
-      // /work is its own, and only files that exist there are sent
-      const host = hostPathForWorkPath(p?.workspace ?? "", given);
-      if (host === null) {
-        writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
-        continue;
+    try {
+      for (const text of texts) {
+        if (reply === undefined) {
+          ids.push((await sendMessage(cfg.token, chat, text))[0]);
+        } else {
+          try {
+            ids.push((await sendMessage(cfg.token, chat, text, reply))[0]);
+          } catch {
+            // a deleted message must not take the words down with it
+            ids.push((await sendMessage(cfg.token, chat, text))[0]);
+          }
+        }
+        sentTexts += 1;
       }
-      await sendFile(cfg.token, chat, host);
-    }
-    // the daemon resolved these from ids it handed out, so they are already host paths;
-    // nothing here can be talked into reading somewhere else
-    for (const a of attachments) {
-      await sendFile(cfg.token, chat, a.path);
+      for (const given of files) {
+        // the path came from inside the container, so it can be anything it likes: only
+        // /work is its own, and only files that exist there are sent
+        const host = hostPathForWorkPath(p?.workspace ?? "", given);
+        if (host === null) {
+          writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
+          sentFiles += 1; // a refused path will never succeed on a retry either
+          continue;
+        }
+        await sendFile(cfg.token, chat, host);
+        sentFiles += 1;
+      }
+      // the daemon resolved these from ids it handed out, so they are already host paths;
+      // nothing here can be talked into reading somewhere else
+      for (const a of attachments) {
+        await sendFile(cfg.token, chat, a.path);
+        sentAttachments += 1;
+      }
+    } catch (err) {
+      keepUnsent();
+      throw err;
     }
     if (p) {
       for (const [i, text] of texts.entries()) {
@@ -724,12 +790,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         }
         const dir = key === "ops" ? outboxDir(join(root, "data", "_ops")) : outboxDir(join(root, "data", key));
         for (const item of readOutbox(dir)) {
-          if (item.messages.length === 0) {
+          // An item may have no words left after a partial success but still owe a file.
+          if (
+            item.messages.length === 0 &&
+            (item.files ?? []).length === 0 &&
+            (item.attachments ?? []).length === 0
+          ) {
             ackOutbox(dir, item.file);
             continue;
           }
           try {
-            if (await deliver(key, item.messages, item.chat, item.files, item.replyTo, item.attachments)) {
+            if (await deliver(key, item.messages, item.chat, item.files, item.replyTo, item.attachments, item.file)) {
               ackOutbox(dir, item.file);
               sendFailures.delete(item.file);
             }

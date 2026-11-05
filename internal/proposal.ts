@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -85,13 +85,25 @@ export function applyProposal(paths: Paths): ProposalResult | null {
   const historyDir = join(paths.meta, "policy.history");
   mkdirSync(historyDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  copyFileSync(paths.policy, join(historyDir, `${stamp}.json`));
+  const historyFile = join(historyDir, `${stamp}.json`);
+  // loadPolicy() happily uses the default when policy.json is absent, so applying a
+  // proposal in that state used to throw ENOENT here and leave the proposal on disk,
+  // retried every waking forever. Record what was in force instead: the file, or the
+  // defaults that were actually being used.
+  if (existsSync(paths.policy)) copyFileSync(paths.policy, historyFile);
+  else writeFileSync(historyFile, JSON.stringify(current, null, 2) + "\n");
 
   if (applied.length > 0) {
     // validate before writing: a malformed result must never replace a working policy
-    writeFileSync(`${paths.policy}.tmp-${process.pid}`, JSON.stringify(draft, null, 2) + "\n");
-    loadPolicy(`${paths.policy}.tmp-${process.pid}`);
-    renameSync(`${paths.policy}.tmp-${process.pid}`, paths.policy);
+    const tmp = `${paths.policy}.tmp-${process.pid}`;
+    try {
+      writeFileSync(tmp, JSON.stringify(draft, null, 2) + "\n");
+      loadPolicy(tmp);
+      renameSync(tmp, paths.policy);
+    } finally {
+      // a rejected draft must not leave a stray file in data/<inst>/ every waking
+      rmSync(tmp, { force: true });
+    }
   }
 
   renameSync(file, join(paths.meta, `proposal.applied.${stamp}.json`));

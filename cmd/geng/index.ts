@@ -176,6 +176,24 @@ function initArgs(rest: string[]): { instance: string | null; opts: InitOptions 
   return { instance: left[0] ?? null, opts };
 }
 
+/**
+ * Chat ids are numbers. `Number("")` is 0 and `Number("abc")` is NaN, and a silent 0 in
+ * `allow` or a NaN pinned home (`JSON.stringify` turns it into null) is a config that
+ * looks fine right up until nobody can reach the bot. A typo has to be an error.
+ */
+function chatIds(raw: string, what: string): number[] {
+  const out: number[] = [];
+  for (const part of raw.split(",")) {
+    const text = part.trim();
+    const n = Number(text);
+    if (text === "" || !Number.isSafeInteger(n)) {
+      throw new Error(`${what} 要写成逗号分隔的数字 id，拿到 ${raw}`);
+    }
+    out.push(n);
+  }
+  return out;
+}
+
 async function main(): Promise<number> {
   let args: Args;
   try {
@@ -350,18 +368,24 @@ async function main(): Promise<number> {
           console.error("--listen 只能是 all 或 mentions");
           return 2;
         }
+        let allow: number[] | undefined;
+        let pinned: number | undefined;
+        try {
+          if (ids !== null) allow = chatIds(ids, "--allow");
+          if (chat !== null) {
+            const one = chatIds(chat, "--chat");
+            if (one.length !== 1) throw new Error("--chat 只写一个 id");
+            pinned = one[0];
+          }
+        } catch (err) {
+          console.error((err as Error).message);
+          return 2;
+        }
         addBot(args.root, key, {
           token,
           ...(listen === null ? {} : { listen: listen as "all" | "mentions" }),
-          ...(ids === null
-            ? {}
-            : {
-                allow: ids
-                  .split(",")
-                  .map((x) => Number(x.trim()))
-                  .filter((n) => Number.isFinite(n)),
-              }),
-          ...(chat === null ? {} : { chat: Number(chat) }),
+          ...(allow === undefined ? {} : { allow }),
+          ...(pinned === undefined ? {} : { chat: pinned }),
         });
         console.log(`写好 secrets/bots.json 里的 ${key}：${describeBot(readBots(args.root)[key])}`);
         console.log("接着跑 `geng gateway --check`：它会对每个 token 调一次 getMe，只有那一步能证明 token 是对的。");
@@ -369,10 +393,13 @@ async function main(): Promise<number> {
       }
       if (sub === "allow") {
         const op = args.rest[2] ?? "";
-        const ids = (args.rest[3] ?? "")
-          .split(",")
-          .map((x) => Number(x.trim()))
-          .filter((n) => Number.isFinite(n));
+        let ids: number[];
+        try {
+          ids = chatIds(args.rest[3] ?? "", "<ids>");
+        } catch (err) {
+          console.error((err as Error).message);
+          return 2;
+        }
         if (key === "" || (op !== "add" && op !== "rm") || ids.length === 0) {
           console.error("用法：geng bots allow <instance> add|rm <id,id>");
           return 2;

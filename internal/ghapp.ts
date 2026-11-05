@@ -95,9 +95,13 @@ export async function installationToken(
   if (!response.ok || typeof body.token !== "string") {
     throw new Error(`换 installation token 失败：${response.status} ${body.message ?? "没有说明"}`);
   }
+  // An unparseable expires_at used to become NaN. `NaN - SECURITY > now` is false on
+  // every check, so a token was minted again for every single git command instead of
+  // being reused for the hour GitHub gave it.
+  const parsed = typeof body.expires_at === "string" ? Date.parse(body.expires_at) : Number.NaN;
   const fresh = {
     token: body.token,
-    expiresAt: typeof body.expires_at === "string" ? Date.parse(body.expires_at) : nowMs + 3_600_000,
+    expiresAt: Number.isFinite(parsed) ? parsed : nowMs + 3_600_000,
   };
   cache.set(key, fresh);
   return fresh;

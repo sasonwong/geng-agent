@@ -48,6 +48,24 @@ test("a token is reused while it has time left, and re-minted when it does not",
   assert.equal(third.token, "ghs_2");
 });
 
+test("an unparseable expires_at still leaves a reusable hour of token", async () => {
+  forgetCachedTokens();
+  let calls = 0;
+  const fake = (async () => {
+    calls += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ token: `ghs_${calls}`, expires_at: "not-a-date" }),
+    };
+  }) as unknown as typeof fetch;
+  const now = 1_800_000_000_000;
+  const first = await installationToken(app, now, fake);
+  assert.equal(Number.isNaN(first.expiresAt), false, "NaN 的过期时刻等于永远过期");
+  await installationToken(app, now + 60_000, fake);
+  assert.equal(calls, 1, "缓存命中不了的话，一条 git 命令就要换一次 token");
+});
+
 test("a refused exchange names the status instead of returning an empty token", async () => {
   forgetCachedTokens();
   const fake = (async () => ({

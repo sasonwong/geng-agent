@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readJson, writeJson } from "./fs.ts";
 import { parseReplyTo } from "./quote.ts";
 
@@ -53,7 +53,7 @@ export interface OutboxItem {
   /** Container paths under /work that go out with the words. */
   files?: string[];
   /** Files the daemon resolved from an id of its own, already absolute on the host. */
-  attachments?: { path: string; name: string }[];
+  attachments?: { path: string; name: string; id?: string }[];
   /** Answer one particular message, so the other side sees which line it is about. */
   replyTo?: { chat: number; messageId: number };
   file: string;
@@ -108,7 +108,10 @@ export function ackOutbox(dir: string, file: string): void {
   const sent = join(dir, "sent");
   mkdirSync(sent, { recursive: true });
   try {
-    renameSync(file, join(sent, file.split("/").pop() as string));
+    // basename(), not split("/"): on a host whose separator is "\" the old code moved
+    // the file to `sent/C:\...\item.json`, the rename failed, and the sweep handed the
+    // same item back every two seconds forever.
+    renameSync(file, join(sent, basename(file)));
   } catch {
     // if the rename fails the item is retried; the file may still be there
   }

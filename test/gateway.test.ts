@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { failedAttempt, knownPlaces, noteChat, readChats, route, targetChat } from "../internal/gateway.ts";
+import { failedAttempt, knownPlaces, noteChat, readChats, route, targetChat, unsentPart } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/fs.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -184,4 +184,33 @@ test("a failed send is retried a few times, then let go of with one line", () =>
   // and a success clears the count, so separate blips never add up
   failures.delete("1-x.json");
   assert.deepEqual(failedAttempt(failures, "1-x.json"), { n: 1, giveUp: false });
+});
+
+test("a send that broke halfway puts back only the words and files still owed", () => {
+  // Two of three messages and one of two /work files went out before the attachment
+  // failed. The sweep retries this same file: keeping the whole item says those words
+  // five more times and trips the rate brake.
+  const item = {
+    chat: 111,
+    messages: ["一", "二", "三"],
+    files: ["/work/a.txt", "/work/b.txt"],
+    attachments: [{ path: "/somewhere/F12-0-photo.jpg", name: "F12-0-photo.jpg", id: "F12" }],
+    replyTo: { chat: 111, messageId: 2 },
+  };
+  const left = unsentPart(item, { texts: 2, files: 1, attachments: 0 });
+  assert.deepEqual(left.messages, ["三"]);
+  assert.deepEqual(left.files, ["/work/b.txt"]);
+  assert.equal((left.attachments as unknown[]).length, 1);
+  assert.equal(left.chat, 111, "where it was going survives the retry");
+  assert.deepEqual(left.replyTo, item.replyTo, "so does the quote");
+
+  // Nothing went out: a tripwire pause must leave the item exactly as it was.
+  const untouched = unsentPart(item, { texts: 0, files: 0, attachments: 0 });
+  assert.deepEqual(untouched.messages, item.messages);
+  assert.deepEqual(untouched.files, item.files);
+
+  // The sweep may now see an item with no words left but a file still owed.
+  const onlyFiles = unsentPart(item, { texts: 3, files: 1, attachments: 1 });
+  assert.deepEqual(onlyFiles.messages, []);
+  assert.deepEqual(onlyFiles.files, ["/work/b.txt"]);
 });

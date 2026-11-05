@@ -94,6 +94,14 @@ function str(v: unknown, path: string): string {
   return v;
 }
 
+/** A wrong type in an allow list used to become `[]` — a silent "refuse everything". */
+function stringList(v: unknown, path: string): string[] {
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
+    throw new ExpectedError(`policy: ${path} 要是字符串数组`);
+  }
+  return (v as string[]).map((x) => x.trim()).filter((x) => x !== "");
+}
+
 /**
  * Missing file -> defaults (init writes it). Present but malformed -> throw,
  * because a silent fallback would change behaviour behind your back.
@@ -146,20 +154,17 @@ export function loadPolicy(file: string): Policy {
               // A wildcard here would be an open proxy on the host; direct network is what
               // "let it go anywhere" already means, and it is a different field with a
               // different consequence.
-              const list = Array.isArray(container.proxyAllow) ? container.proxyAllow : [];
-              if (list.some((x) => String(x).replace(/^!/, "").includes("/") || String(x).replace(/^!/, "").includes(":"))) {
+              const list = stringList(container.proxyAllow, "container.proxyAllow");
+              if (list.some((x) => x.replace(/^!/, "").includes("/") || x.replace(/^!/, "").includes(":"))) {
                 throw new ExpectedError("policy: container.proxyAllow 只收主机名（\"*\" 表示全部，\"!name\" 排除），不收网段、URL 或端口");
               }
-              return list.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+              return list;
             })(),
       proxyAllowCidrs:
         container.proxyAllowCidrs === undefined
           ? d.container.proxyAllowCidrs
           : (() => {
-              const list = Array.isArray(container.proxyAllowCidrs) ? container.proxyAllowCidrs : [];
-              return list
-                .filter((x): x is string => typeof x === "string" && x.trim() !== "")
-                .map((x) => x.trim())
+              return stringList(container.proxyAllowCidrs, "container.proxyAllowCidrs")
                 .map((entry) => {
                   const body = entry.startsWith("!") ? entry.slice(1) : entry;
                   // A name here would never match an address, and the silence would look

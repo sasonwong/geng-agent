@@ -58,6 +58,25 @@ test("the frame is not negotiable", () => {
   assert.equal(loadPolicy(paths.policy).cycle.timeoutSec, 1800);
 });
 
+test("a proposal works on an instance whose policy.json was never written", () => {
+  // loadPolicy() uses the defaults when the file is missing, so applyProposal() has to
+  // as well: copyFileSync used to throw ENOENT and leave the proposal to be retried
+  // on every waking forever.
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  for (const d of [paths.book, paths.meta]) mkdirSync(d, { recursive: true });
+  writeJson(join(paths.book, "policy.proposal.json"), { cycle: { defaultWakeMinutes: 45 } });
+
+  const result = applyProposal(paths);
+  assert.deepEqual(result?.applied, [
+    { key: "cycle.defaultWakeMinutes", from: 30, to: 45 },
+  ]);
+  assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 45);
+  const history = readdirSync(join(paths.meta, "policy.history"));
+  assert.equal(history.length, 1, "改之前的样子也要留一份");
+  assert.match(readFileSync(join(paths.meta, "policy.history", history[0] as string), "utf8"), /"defaultWakeMinutes": 30/);
+});
+
 test("no proposal means no work", () => {
   const paths = fixture();
   assert.equal(applyProposal(paths), null);
