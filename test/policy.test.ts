@@ -16,8 +16,13 @@ test("a policy copy is compared with the template key by key", () => {
   assert.deepEqual(drift.missing, ["container.proxyAllowCidrs", "container.proxyChain"]);
   // stale = it still declares something nothing reads
   assert.deepEqual(drift.stale, ["container.legacy", "runner"]);
-  // a value that differs is not drift: that is the operator's decision
-  assert.equal(policyDrift(template, { ...copy, timezone: "UTC" }).missing.includes("timezone"), false);
+  // a value that differs is not drift: that is the operator's decision. (Asserted on the
+  // whole list, not on `missing`: the old check asked whether a key the template never had
+  // was missing, which is true of every copy and proved nothing.)
+  assert.deepEqual(policyDrift(template, { ...copy, container: { ...copy.container, image: "别的镜像" } }), {
+    missing: ["container.proxyAllowCidrs", "container.proxyChain"],
+    stale: ["container.legacy", "runner"],
+  });
   assert.deepEqual(templateValue(template, "container.proxyChain"), "auto");
   assert.equal(templateValue(template, "container.nope"), undefined);
 });
