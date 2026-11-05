@@ -14,7 +14,7 @@ const REPO_ROOT = resolve(import.meta.dirname, "../..");
 const USAGE = `geng-dev <command> --instance <name>
 
   packet    打印它这次醒来会看到的纸，不花钱
-  once      前台跑一轮，用来验证 runner（挂载 / uid / session 落盘）
+  once      前台跑一轮，用来验证容器（挂载 / uid / session 落盘）
   fake      造一份有内容的假状态，用来试唤醒纸
              （只写自己没有的东西；--force 覆盖）
 

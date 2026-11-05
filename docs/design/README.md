@@ -400,7 +400,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 
 | 文件 | 写者 | 形状 |
 |---|---|---|
-| `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | `{schema, runner, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,network}}` |
+| `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | `{schema, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,proxyChain,proxyAllow,proxyAllowCidrs}, files, timezone}` |
 | `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
@@ -666,7 +666,7 @@ assistant 回合开始，它就进了那一回合的上下文**；注入之后�
 ## 10.5 它可以改自己的运行参数
 
 `policy.proposal.json`，下次启动时检查，只采纳白名单里的、在范围内的项，旧版归档。
-**runner、容器限额、网络、一轮超时不在谈判范围**——那是框，不是设置。
+**容器限额、网络、一轮超时不在谈判范围**——那是框，不是设置。
 
 这比"让它直接写 policy.json"更符合那条老规矩：它决定做什么，不决定自己怎么被运行。
 
@@ -692,7 +692,7 @@ rustic，一次清醒一次快照。内容去重是免费的，**不要设计增
   `backup=skip(...)`。备份不该因为环境不全而变成一个天天报错的检查项
 - **记账文件放在 `backup/` 里**，不放 `meta/`：放进被备份的树里，每写一次就会让
   每一张快照看起来都不一样
-- `meta/deploy.json` 记住写这张快照时的 runner / 版本 / policy schema，好让"旧 state 配新
+- `meta/deploy.json` 记住写这张快照时的版本 / policy schema / 镜像摘要，好让"旧 state 配新
   二进制"被 doctor 指出来，而不是行为诡异
 - 恢复**不覆盖 `data/`**，解到 `backup/<inst>.restore-<时间>/`，人看过再拷回去。
   覆盖式恢复是那个会让人后悔的操作

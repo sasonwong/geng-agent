@@ -56,7 +56,7 @@ export function statusLine(root: string, instance: string): string {
   const sinceLast = typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) : "从未";
   const next = wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) : "未设定";
   const pending = countJson(p.inbox);
-  return `${instance.padEnd(12)} 上次=${sinceLast.padEnd(7)} 下次=${next.padEnd(7)} 收件=${String(pending).padEnd(3)} runner=${policy.runner}`;
+  return `${instance.padEnd(12)} 上次=${sinceLast.padEnd(7)} 下次=${next.padEnd(7)} 收件=${String(pending).padEnd(3)}`;
 }
 
 export async function printStatus(root: string, instance: string): Promise<void> {
@@ -78,7 +78,6 @@ export async function printStatus(root: string, instance: string): Promise<void>
 
   const rows: string[] = [
     p.instance,
-    `  runner      ${policy.runner}`,
     `  上次醒来    ${typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) + " 前" : "从未"}`,
     `  第几次      ${meta.wakings ?? 0}（24 小时内 ${wakes.length} 次）`,
     `  下次醒来    ${wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) + " 后" : "未设定"}${wait?.why ? "  ·  " + wait.why : ""}`,

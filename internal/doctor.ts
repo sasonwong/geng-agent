@@ -74,7 +74,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   let policy;
   try {
     policy = loadPolicy(p.policy);
-    checks.push({ name: "policy 解析", ok: true, detail: `runner=${policy.runner}` });
+    checks.push({ name: "policy 解析", ok: true, detail: `镜像 ${policy.container.image}` });
   } catch (err) {
     checks.push({ name: "policy 解析", ok: false, detail: (err as Error).message });
     return checks;
@@ -119,7 +119,6 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       typeof settings.defaultProvider === "string" && typeof settings.defaultModel === "string"
         ? `${settings.defaultProvider}/${settings.defaultModel}`
         : `${join(p.piDir, "settings.json")} 里没有 defaultProvider/defaultModel：容器连不上模型`,
-    warnOnly: policy.runner !== "docker",
   });
 
   // The image installs the packages; this file decides which are loaded. They are two
@@ -194,8 +193,8 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
           : `私钥签不动：${ghWhy}——git push 会要求密码`,
   });
 
-  if (policy.runner === "docker") {
-    checks.push({ name: "docker", ok: hasCmd("docker"), detail: "run 需要 docker 可执行" });
+  checks.push({ name: "docker", ok: hasCmd("docker"), detail: "每一轮醒来是一个容器" });
+  {
     const allowAllNames = policy.container.proxyAllow.includes("*");
     const chain = chainFrom(policy.container.proxyChain);
     checks.push({
@@ -228,8 +227,6 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
         detail: open.join("；"),
       });
     }
-  } else {
-    checks.push({ name: "pi 可执行", ok: hasCmd("pi"), detail: "local runner 直接调用 pi" });
   }
 
   const secretsMode = (() => {
@@ -595,10 +592,6 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   const policy = loadPolicy(o.policy);
   const checks: Check[] = [];
 
-  if (policy.runner !== "docker") {
-    checks.push({ name: "容器探针", ok: false, detail: "runner 不是 docker，跳过", warnOnly: true });
-    return checks;
-  }
   if (!hasCmd("docker")) {
     checks.push({ name: "容器探针", ok: false, detail: "没有 docker" });
     return checks;

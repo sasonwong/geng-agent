@@ -24,7 +24,7 @@ import { readJson, readText, writeJson, writeText } from "./fs.ts";
  * a host process, and a port is reachable by everything on the bridge — which then needs a
  * token, and a firewall exception, to stay safe. The file is the boundary.
  *
- * Served by the daemon, but written as a library that takes `Paths`: `runner: "local"` and
+ * Served by the daemon, but written as a library that takes `Paths`: the tool tests and
  * the dev commands run the same code, and a tool that only exists when systemd is around
  * would be a tool that fails exactly when someone is debugging.
  */

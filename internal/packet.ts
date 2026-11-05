@@ -24,7 +24,7 @@ export interface PacketInput {
   lastWakeMs: number | null;
   /** 1-based: how many times this instance has woken. */
   waking: number;
-  /** Where the agent sees the book: /state in docker, an absolute path for the local runner. */
+  /** Where the agent sees the one file of the book that is mounted: /state. */
   statePath: string;
   /** What arrived by mail and was never opened. Mail never knocks: it waits. */
   mailPending: { count: number; senders: string[]; oldestMs: number | null };
@@ -54,8 +54,6 @@ export interface PacketInput {
   places: { id: number; label: string; home: boolean; kind?: "private" | "group" }[];
   /** A window it opened itself with `listen`; past its end it is not shown at all. */
   attention: { chats: (number | "*")[]; untilMs: number; why?: string } | null;
-  /** Where files people sent it live; injected so neither runner hardcodes a path. */
-  filesPath: string;
   /** Applied before this waking: what it asked to forget, and what the cap took. */
   filesForgotten: number;
   filesPruned: number;
@@ -263,7 +261,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath } = input;
-  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesPath, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending } = input;
+  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending } = input;
 
   const out: string[] = [];
 
@@ -354,7 +352,9 @@ export function buildPacket(input: PacketInput): string {
   const files = [...kinds]
     .filter(([kind]) => kind !== "voice")
     .map(([kind, n]) => `${n}${KIND_WORD[kind as keyof typeof KIND_WORD] ?? "个文件"}`);
-  if (files.length > 0) out.push(`一起发来的还有 ${files.join("、")}，在 ${filesPath}/。`);
+  // `/files` is not mounted any more: what it has is an id, and saying a path would
+  // send it looking for a directory that does not exist.
+  if (files.length > 0) out.push(`一起发来的还有 ${files.join("、")}：用 recall(sources:["files"]) 看 id。`);
   if (filesForgotten > 0) {
     out.push(`按你说的删了 ${filesForgotten} 个文件。`);
   }
@@ -365,7 +365,7 @@ export function buildPacket(input: PacketInput): string {
         : `（最老的一个 ${Math.max(1, Math.round((nowMs - filesOldestPrunedMs) / DAY_MS))} 天前）`;
     out.push(`地方不够了，清掉 ${filesPruned} 个最老的${age}。`);
   } else if (filesCapMb > 0 && filesUsedBytes > filesCapMb * 1024 * 1024 * 0.85) {
-    out.push(`${filesPath} 里 ${Math.round(filesUsedBytes / 1024 / 1024)} MB，上限 ${filesCapMb} MB。`);
+    out.push(`别人发来的文件占了 ${Math.round(filesUsedBytes / 1024 / 1024)} MB，上限 ${filesCapMb} MB。`);
   }
   const voice = kinds.get("voice") ?? 0;
   if (voice > 0) {

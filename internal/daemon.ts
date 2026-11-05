@@ -275,10 +275,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     process.on("SIGINT", onSignal);
   }
 
-  if (policy.runner === "docker") {
-    const swept = await sweepOrphans(paths.instance);
-    if (swept > 0) log(`清扫了 ${swept} 个孤儿容器`);
-  }
+  const swept = await sweepOrphans(paths.instance);
+  if (swept > 0) log(`清扫了 ${swept} 个孤儿容器`);
   for (const file of listSessionFiles(paths.sessionDir)) {
     const report = repairTail(file, true);
     if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
@@ -323,12 +321,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   }
 
   const { ops } = ensureGatewayDirs(paths.root);
-  // The three read-only auxiliaries sit at the top level, not under /state: a mount
-  // nested inside the /state bind makes docker create its mountpoint through the bind,
-  // which drops root-owned directories into the agent's own book.
-  const at = (inContainer: string, host: string): string =>
-    policy.runner === "docker" ? inContainer : host;
-  const statePath = at("/state", paths.book);
   // A preview computes the same note without touching the disk: --dry must not eat what
   // it is showing, but it must still say what a real start would say.
   const leftover = leftoverCut(paths, !o.dry);
@@ -443,11 +435,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       waitWhy: pendingWait?.why ?? null,
       lastWakeMs: typeof meta.lastWakeMs === "number" ? meta.lastWakeMs : null,
       waking,
-      statePath,
+      statePath: "/state",
       timezone: policy.timezone,
       places,
       attention: parseAttention(readJson(paths.attention, null)),
-      filesPath: at("/files", paths.filesDir),
       filesForgotten: forgot,
       filesPruned: pruned.removed,
       filesOldestPrunedMs: pruned.oldestRemovedMs,
@@ -543,7 +534,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       },
       command: buildCommand(paths, policy, sessionId, systemPrompt, places),
       instance: paths.instance,
-      isDocker: policy.runner === "docker",
+      isDocker: true,
       timeoutMs: policy.cycle.timeoutSec * 1000,
       prompt: packet,
       repeatThreshold: policy.cycle.repeatThreshold,

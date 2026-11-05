@@ -6,7 +6,6 @@ import type { Env } from "./meta.ts";
 
 /** The image the next cycle will actually run, by content id rather than by tag. */
 export function imageId(policy: Policy): Promise<string | null> {
-  if (policy.runner !== "docker") return Promise.resolve(null);
   return new Promise((resolve) => {
     const p = spawn("docker", ["image", "inspect", "--format", "{{.Id}}", policy.container.image], {
       stdio: ["ignore", "pipe", "ignore"],

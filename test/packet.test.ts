@@ -30,8 +30,7 @@ function fixture(): {
     places: [{ id: -1001234567890, label: "群「测试」", home: false }],
     attention: null,
     cut: null,
-    filesPath: "/files",
-    filesForgotten: 0,
+      filesForgotten: 0,
     filesPruned: 0,
     filesOldestPrunedMs: null,
     filesUsedBytes: 0,
@@ -317,7 +316,7 @@ test("files it asked to forget, and files the cap took, are stated as what happe
   const full = buildPacket(
     fixture().input({ filesUsedBytes: 460 * 1024 * 1024, filesCapMb: 500 }),
   );
-  assert.match(full, /\/files 里 460 MB，上限 500 MB。/);
+  assert.match(full, /别人发来的文件占了 460 MB，上限 500 MB。/);
 
   // and when nothing happened, the page says nothing at all
   const quiet = buildPacket(fixture().input({}));

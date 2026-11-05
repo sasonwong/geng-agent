@@ -241,9 +241,8 @@ async function maybeForget(
 export function writeDeployMeta(paths: Paths): void {
   const file = join(paths.meta, "deploy.json");
   const pkg = readJson<{ version?: string }>(join(paths.root, "package.json"), {});
-  const policy = readJson<{ schema?: number; runner?: string }>(paths.policy, {});
+  const policy = readJson<{ schema?: number }>(paths.policy, {});
   const next = {
-    runner: policy.runner ?? null,
     daemonVersion: pkg.version ?? null,
     policySchema: policy.schema ?? null,
     imageDigest: readImageDigest(paths),

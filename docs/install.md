@@ -140,14 +140,12 @@ node cmd/geng/index.ts init alice
 
 ### 3.1 改 policy（这一步不能忘）
 
-`init` 拷的是模板，所以它写出来的是 **`runner: "local"`**——那意味着每轮直接跑宿主的 pi：
-没有容器、没有只读文件系统、没有出口代理。生产要改成：
+**没有 `runner` 这个字段了。** 每一轮醒来都是一个容器——只有这一条路。以前那个 `local`
+模式跑的是宿主上的 pi：没有只读根、没有出口代理、书就在盘上能直接 `cat`、你的密钥就在
+`~/.pi/agent` 里，而且它连扩展都不加载（唤醒纸让它调用的工具根本不存在），日志里照样是 `sym=ok`。
+一个坏掉却不说的模式，不如没有。
 
-```json
-{ "runner": "docker" }
-```
-
-就这一个字段。网络不用配：容器默认没有网络，出口只有 book socket 上的代理。
+第一次跑之前建镜像就行（见第 2 节）。网络不用配：容器没有网络，出口只有 book socket 上的代理。
 
 漏了会怎样：**每轮都会跑起来，只是跑在本机的 pi 上**——没有容器、没有只读文件系统、没有出口代理。
 它看起来完全正常，你看不出来。
@@ -271,7 +269,7 @@ loginctl enable-linger "$USER"
 
 ```bash
 systemctl --user is-active geng@alice        # active
-node cmd/geng/index.ts status --all          # alice  上次=… 下次=… runner=docker
+node cmd/geng/index.ts status --all          # alice  上次=… 下次=…
 tail -1 data/alice/daemon.log                # 第一行 key=value
 ```
 
@@ -512,7 +510,7 @@ JSON 形状不一样，只有真的读回来一次才知道。
 
 ```bash
 node cmd/geng/index.ts init bob
-# 改 policy（runner=docker）
+# 改 policy（改了就不用重启，下一轮生效）
 # 填 secrets/bob.env
 sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
   deploy/geng@.service > ~/.config/systemd/user/geng@bob.service
@@ -536,7 +534,7 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 | `cycle.minWakeMinutes` | 1–120 |
 | `cycle.repeatThreshold` | 2–20 |
 
-runner、容器限额、网络、一轮的超时、`backup.enabled`、`files.*`、`timezone` 都**不在谈判范围**——
+容器限额、网络、一轮的超时、`backup.enabled`、`files.*`、`timezone` 都**不在谈判范围**——
 那是框，不是设置。改过的旧版本存在 `meta/policy.history/`。
 
 ---
@@ -635,7 +633,7 @@ node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
 # 其中四条是"漏配"的唯一出口：模型凭据 / 搜索接线 / 邮件接线 / bot 接线
 #   配好且对 = ok，配了但不对 = FAIL，没配 = warn
 node cmd/geng/index.ts doctor alice --probe   # 容器能上网、私网不通、policy 写不进去
-node cmd/geng/index.ts status --all        # runner=docker，下次=…
+node cmd/geng/index.ts status --all        # 上次=… 下次=…
 tail -3 data/alice/daemon.log              # 有行就是跑过
 node cmd/geng/index.ts backup alice --list # 有快照
 node cmd/geng/index.ts doctor alice --restore-test

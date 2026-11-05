@@ -17,15 +17,6 @@ function uidGid(): string {
   return `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`;
 }
 
-function localEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (k.startsWith("PI_")) continue; // never leak the host's pi configuration in
-    env[k] = v;
-  }
-  return env;
-}
-
 /**
  * Which files the container loads as extensions: whatever the mounted directory carries.
  * It was three hardcoded paths, so a fourth tool was mounted into the container and never
@@ -72,8 +63,10 @@ export function buildCommand(
   /** Replace the in-container command; used by the doctor probe. */
   tail?: string[],
 ): Command {
-  if (policy.runner === "docker") {
-    ensureIdentityMountSource(paths);
+  // There is one way to run a round. The old `local` mode ran the host's pi with none of
+  // the tools the page names, the operator's keys in reach and the book readable on disk —
+  // a different agent wearing the same name, and it reported `sym=ok`.
+  ensureIdentityMountSource(paths);
     const args = [
       "run",
       "--rm",
@@ -184,27 +177,6 @@ export function buildCommand(
       ]),
     );
     return { cmd: "docker", args, env: process.env, cwd: paths.workspace };
-  }
-
-  return {
-    cmd: "pi",
-    args: [
-      "--mode",
-      "rpc",
-      "--session-id",
-      sessionId,
-      "--session-dir",
-      paths.sessionDir,
-      "--system-prompt",
-      systemPrompt,
-    ],
-    env: {
-      ...localEnv(),
-      // the local runner reaches the same socket by its host path
-      GENG_BOOK_SOCK: join(paths.run, "book.sock"),
-    },
-    cwd: paths.workspace,
-  };
 }
 
 /** A killed daemon leaves `docker run` children alive; nothing else cleans them up. */

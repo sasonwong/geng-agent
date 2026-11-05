@@ -1,11 +1,8 @@
 import { ExpectedError } from "./errors.ts";
 import { readText } from "./fs.ts";
 
-export type Runner = "docker" | "local";
-
 export interface Policy {
   schema: number;
-  runner: Runner;
   cycle: {
     timeoutSec: number;
     defaultWakeMinutes: number;
@@ -51,7 +48,6 @@ export interface Policy {
 export function defaultPolicy(): Policy {
   return {
     schema: 1,
-    runner: "local",
     cycle: { timeoutSec: 1800, defaultWakeMinutes: 30, minWakeMinutes: 1, repeatThreshold: 3 },
     backup: { enabled: true },
     timezone: "Asia/Shanghai",
@@ -114,15 +110,10 @@ export function loadPolicy(file: string): Policy {
   }
   const p = raw as Partial<Policy>;
   const d = defaultPolicy();
-  const runner = p.runner ?? d.runner;
-  if (runner !== "docker" && runner !== "local") {
-    throw new ExpectedError('policy: runner must be "docker" or "local"');
-  }
   const cycle = p.cycle ?? d.cycle;
   const container = p.container ?? d.container;
   return {
     schema: p.schema ?? d.schema,
-    runner,
     cycle: {
       timeoutSec: num(cycle.timeoutSec, "cycle.timeoutSec", 10),
       defaultWakeMinutes: num(cycle.defaultWakeMinutes, "cycle.defaultWakeMinutes", 1),

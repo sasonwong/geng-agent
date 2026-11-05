@@ -58,7 +58,7 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 而且任何一个扩展加载失败都会让 pi 直接退出：它写错一个文件，下一轮还没醒就死，死前说不出话。
 要新工具就写在唤醒纸上，由操作者写进 `image/extensions/`。
 
-本地 runner 看不到这些扩展，这是已知差异。
+只有容器这一条路：没有 `runner` 字段，本机直接跑 pi 的模式已经删掉。
 
 ## 写代码时的固定动作
 
@@ -113,7 +113,7 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 ## 路径与目录
 
 - 每一条能写进代码的路径都从 `internal/paths.ts` 来。渲染进唤醒纸的路径一律**注入**
-  （`statePath`、`inboxPath`、`filesPath`…），不在模板里写死——本地 runner 和 docker 的
+  （`statePath`、`inboxPath`…），不在模板里写死——宿主和容器的
   路径不一样，写死的那一半会在另一半上指向不存在的目录。
 - 要建的目录只有一份清单：`requiredDirs(p)`。`init` 和 daemon 都调它。两份列表会在加目录
   的时候悄悄分叉，症状是"init 建了、daemon 没建"。
@@ -129,7 +129,7 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 **老实例不会自动跟上模板**：`deploy/policy.json` 只是 `init` 的输入，`data/<inst>/policy.json`
 是生成时的副本。改了模板就要在发布说明里写清楚，或者让 doctor 把差异报出来。
 
-只有时机和阈值进可协商白名单（`proposal.ts` 的 clamp 表）；runner、容器限额、网络、超时、
+只有时机和阈值进可协商白名单（`proposal.ts` 的 clamp 表）；容器限额、网络、超时、
 `backup.enabled`、`files.*`、`timezone` 都不进——那是框，不是设置。
 
 ## 收件箱的可见性
