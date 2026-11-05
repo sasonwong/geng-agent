@@ -1,5 +1,6 @@
 import { join } from "node:path";
-import { chmodSync, existsSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { readJson } from "./fs.ts";
 import type { BotConfig } from "./telegram.ts";
 
@@ -22,6 +23,8 @@ export function readBots(root: string): Bots {
 /** Atomic, and 600: this file is nothing but tokens and ids. */
 export function writeBots(root: string, bots: Bots): void {
   const path = file(root);
+  // a fresh root has no secrets/ yet: the first `bots add` is the first thing that writes here
+  mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, JSON.stringify(bots, null, 2) + "\n", { mode: 0o600 });
   renameSync(tmp, path);

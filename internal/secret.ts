@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { join } from "node:path";
 import type { MailConfig, MailEnv } from "./mail.ts";
 import { MODEL_KEY_VARS } from "./model.ts";
@@ -42,6 +43,8 @@ export function writeEnvValue(path: string, name: string, value: string): void {
     return `${name}=${value}`;
   });
   if (!replaced) out.push(`${name}=${value}`);
+  // a fresh root has no secrets/ yet, and a hand-run `secrets set` is how it gets one
+  mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${process.pid}`;
   writeFileSync(tmp, out.join("\n") + "\n", { mode: 0o600 });
   renameSync(tmp, path);

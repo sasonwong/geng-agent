@@ -321,7 +321,10 @@ async function main(): Promise<number> {
     case "bots": {
       // rest 里是去掉命令名之后的参数：["add", "<instance>", ...]
       const sub = args.rest[0] ?? "";
-      const key = args.rest[1] ?? args.instance ?? "";
+      // the instance is a positional after the subcommand, never the subcommand itself
+      // (`geng bots add` used to create a bot called "add") and never a flag
+      const second = args.rest[1] ?? "";
+      const key = second.startsWith("-") ? "" : second;
       const flag = (name: string): string | null => {
         const at = args.rest.indexOf(`--${name}`);
         return at === -1 ? null : (args.rest[at + 1] ?? null);
@@ -389,7 +392,9 @@ async function main(): Promise<number> {
 
     case "secrets": {
       const sub = args.rest[0] ?? "";
-      const instance = args.rest[1] ?? args.instance ?? "";
+      // same trap as `bots`: a bare `geng secrets init` used to write secrets/init.env
+      const second = args.rest[1] ?? "";
+      const instance = second.startsWith("-") ? "" : second;
       if (sub === "init") {
         if (instance === "") {
           console.error("用法：geng secrets init <instance> [--rotate]");
