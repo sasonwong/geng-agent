@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 import { runDaemon } from "../../internal/daemon.ts";
 import { writeFakeState } from "../../internal/dev/fake.ts";
 import { lockHeld } from "../../internal/lock.ts";
+import { pidLockHeld } from "../../internal/guard.ts";
 import { makePaths } from "../../internal/paths.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
@@ -87,7 +88,9 @@ async function main(): Promise<number> {
     }
 
     case "once": {
-      if (await lockHeld(`${paths.data}/daemon.lock`)) {
+      // the unit holds an flock; a daemon started by hand leaves only the pidfile, and
+      // that is the case the old check missed (it then failed inside runDaemon instead)
+      if ((await lockHeld(`${paths.data}/daemon.lock`)) || pidLockHeld(`${paths.data}/daemon.pid`)) {
         console.error("daemon 正在跑，先停掉它再手工跑一轮：systemctl --user stop geng@" + args.instance);
         return 1;
       }

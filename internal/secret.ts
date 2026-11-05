@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MailConfig, MailEnv } from "./mail.ts";
+import { MODEL_KEY_VARS } from "./model.ts";
 
 /**
  * Env files under `secrets/`, and the three values that have to be identical in two
@@ -51,16 +52,6 @@ export function newToken(): string {
   return randomBytes(16).toString("hex");
 }
 
-export interface SecretInput {
-  root: string;
-  instance: string;
-  instEnv: Record<string, string>;
-  searchEnv: Record<string, string>;
-  mailEnv: MailEnv | null;
-  mail: MailConfig | null;
-}
-
-/** An instance without a model key fails its first waking; nothing else here matters then. */
 /** A mailbox needs both halves, and each one alone fails silently. */
 export function mailWiringProblem(
   instance: string,
@@ -72,6 +63,18 @@ export function mailWiringProblem(
   if (mailEnv === null) return "secrets/mail.json 里有这个实例的地址，但 mail.env 没有 token";
   if (mine.length === 0) return "有邮件 token，但 mail.json 里没有地址指向这个实例";
   return null;
+}
+
+/**
+ * Where one `NAME` belongs. A model key in `secrets/<inst>.env` is a key the container can
+ * read out of its own environment — that file is `--env-file`, and the whole point of the
+ * proxy is that the key is not in it. The two live in different files, so the writer has
+ * to know which one it is writing.
+ */
+export function secretFileFor(root: string, instance: string, name: string): string {
+  return MODEL_KEY_VARS.includes(name)
+    ? join(root, "secrets", `${instance}.model.env`)
+    : join(root, "secrets", `${instance}.env`);
 }
 
 /** Which files this instance's secrets live in, for "where do I put it" messages. */

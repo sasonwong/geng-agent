@@ -9,11 +9,10 @@ import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
 import { runGateway } from "../../internal/gateway.ts";
 import { getMe } from "../../internal/telegram.ts";
-import { readJson } from "../../internal/fs.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 import { describeConfig, loadMailConfig, readMailEnv } from "../../internal/mail.ts";
 import { addBot, describeBot, editAllow, readBots } from "../../internal/bots.ts";
-import { newToken, readEnvFile, secretFiles, writeEnvValue } from "../../internal/secret.ts";
+import { newToken, readEnvFile, secretFileFor, secretFiles, writeEnvValue } from "../../internal/secret.ts";
 import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
 import { loadPolicy } from "../../internal/policy.ts";
 import { MODEL_KEY_VARS, modelKeyFile } from "../../internal/model.ts";
@@ -38,7 +37,7 @@ const USAGE = `geng <command> [options]
   bots add <inst> [--token-stdin] [--listen all|mentions] [--allow 1,2] [--chat N]
                                      往 secrets/bots.json 里加一个 bot（token 从 stdin 读）
   bots allow <inst> add|rm <ids>     改白名单（逗号分隔）；只有 add 过的人才叫得醒它
-  secrets init <inst> [--rotate]     生成成对的 search / mail token，两处一起写
+  secrets init <inst> [--rotate]     生成 mail token（搜索的 token 已经取消：socket 就是授权）
   secrets set <inst> <NAME>          从 stdin 读一个值写进 secrets/<inst>.env（600）
   search                             跑搜索端点（需要 secrets/search.env）
 
@@ -213,6 +212,9 @@ async function main(): Promise<number> {
       console.log(`已初始化 ${p.instance}`);
       console.log(`  数据     ${p.data}`);
       console.log(`  密钥     ${p.secrets}（填好之后再跑）`);
+      console.log(
+        `  模型     ${modelKeyFile(p)}${fromEnv ? "（key 已从环境写入）" : "（把 key 写进这里，或 export 后重跑 init）"}`,
+      );
       console.log("");
       console.log("该空的地方都空着：identity / open-loops / waiting 都没有。");
       console.log("下一步：");
@@ -416,7 +418,9 @@ async function main(): Promise<number> {
       if (sub === "set") {
         const name = args.rest[2] ?? "";
         if (instance === "" || !/^[A-Z][A-Z0-9_]*$/.test(name)) {
-          console.error("用法：echo '<值>' | geng secrets set <instance> <NAME>   （NAME 形如 OPENCODE_API_KEY）");
+          console.error(
+            "用法：echo '<值>' | geng secrets set <instance> <NAME>   （NAME 形如 GENG_GH_APP_ID；模型 key 写 OPENCODE_API_KEY，会自动落进 model.env）",
+          );
           return 2;
         }
         const value = readFileSync(0, "utf8").trim();
@@ -424,7 +428,7 @@ async function main(): Promise<number> {
           console.error("没有值：从 stdin 读——echo '<值>' | geng secrets set <instance> <NAME>");
           return 2;
         }
-        const file = secretFiles(args.root, instance).inst;
+        const file = secretFileFor(args.root, instance, name);
         writeEnvValue(file, name, value);
         // 只报长度，不回显：这条输出会留在 shell 历史里。
         console.log(`写进 ${file}：${name}（${value.length} 字符，600）。`);

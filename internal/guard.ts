@@ -17,9 +17,16 @@ function alive(pid: number): boolean {
  * Not a real lock (racy by nature), but it catches the case that actually happens:
  * someone starting a second copy by hand.
  */
+/** Whether a live process holds this pidfile. Read by the dev commands, which the flock
+ *  in the unit does not cover: a daemon started by hand only leaves this. */
+export function pidLockHeld(file: string): boolean {
+  const existing = readJson<{ pid?: number }>(file, {});
+  return typeof existing.pid === "number" && existing.pid !== process.pid && alive(existing.pid);
+}
+
 export function acquirePidLock(file: string): () => void {
   const existing = readJson<{ pid?: number }>(file, {});
-  if (typeof existing.pid === "number" && existing.pid !== process.pid && alive(existing.pid)) {
+  if (pidLockHeld(file)) {
     throw new ExpectedError(`另一个 daemon 正在跑（pid ${existing.pid}，${file}）`);
   }
   writeJson(file, { pid: process.pid, startedAt: new Date().toISOString() });
