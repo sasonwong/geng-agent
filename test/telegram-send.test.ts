@@ -38,3 +38,21 @@ test("a text split into several messages reports every id, in order", async () =
     restore();
   }
 });
+
+test("a split never cuts a character in half", () => {
+  // an emoji is two UTF-16 units; a part ending between them is a broken character that
+  // Telegram would refuse or mangle. The boundary lands on the pair on purpose.
+  const text = "a".repeat(3999) + "😀" + "b".repeat(10);
+  const parts = splitMessage(text);
+  assert.ok(parts.length > 1, "this text is meant to split");
+  assert.equal(parts.join(""), text, "切完拼回去还是原文");
+  for (const part of parts) {
+    for (let i = 0; i < part.length; i++) {
+      const c = part.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = i + 1 < part.length ? part.charCodeAt(i + 1) : 0;
+        assert.ok(next >= 0xdc00 && next <= 0xdfff, `位置 ${i} 上是半个字符`);
+      }
+    }
+  }
+});

@@ -344,6 +344,15 @@ export async function startMailServer(o: MailServerOptions): Promise<Server> {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
+    // A connection that dies mid-upload emits "error" on the stream, and an unhandled
+    // error is a crash of the whole gateway. `end` never comes after it, so there is
+    // nothing to answer either — the Worker retries the mail.
+    req.on("error", (err) => {
+      o.log(`mail ← 连接断了：${err.message}`);
+    });
+    res.on("error", () => {
+      // the answer could not be written; the request side logs what it knows
+    });
     if (req.method !== "POST") {
       send(405, { ok: false, error: "POST only" });
       return;

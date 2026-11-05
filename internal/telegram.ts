@@ -162,6 +162,13 @@ export function splitMessage(text: string, limit = 4000): string[] {
   while (rest.length > limit) {
     let cut = rest.lastIndexOf("\n", limit);
     if (cut < limit / 2) cut = limit;
+    // A UTF-16 surrogate pair must not be cut in half: a part ending on a high surrogate
+    // is a broken character (an emoji, most of CJK-ext) on its way out. The pair moves
+    // to the next part whole.
+    if (cut > 0) {
+      const before = rest.charCodeAt(cut - 1);
+      if (before >= 0xd800 && before <= 0xdbff) cut -= 1;
+    }
     parts.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }

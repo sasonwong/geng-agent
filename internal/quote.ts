@@ -36,6 +36,10 @@ export function parseReplyTo(raw: unknown): Quote | undefined | null {
   if (typeof raw !== "object") return null;
   const o = raw as { chat?: unknown; messageId?: unknown };
   if (typeof o.chat !== "number" || typeof o.messageId !== "number") return null;
+  // the same rules the string form applies: one reader, one set of checks, or a quote
+  // works when it is typed and 400s when it is written
+  if (!Number.isSafeInteger(o.chat) || !Number.isSafeInteger(o.messageId)) return null;
+  if (o.chat === 0 || o.messageId <= 0) return null;
   return { chat: o.chat, messageId: o.messageId };
 }
 

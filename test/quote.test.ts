@@ -63,3 +63,18 @@ test("a quote is read by one parser, whether it arrives as an id or as an object
     assert.equal(parseReplyTo(junk), null, JSON.stringify(junk));
   }
 });
+
+test("the object form answers to the same rules as the string form", () => {
+  // the string parser rejects fractions, zero chats and non-positive message ids; the
+  // object parser used to take them all, so a quote worked typed and 400s written
+  for (const junk of [
+    { chat: 1.5, messageId: 12 },
+    { chat: -100, messageId: 0 },
+    { chat: -100, messageId: -5 },
+    { chat: 0, messageId: 5 },
+    { chat: Number.MAX_SAFE_INTEGER + 2, messageId: 5 },
+  ]) {
+    assert.equal(parseReplyTo(junk), null, JSON.stringify(junk));
+  }
+  assert.deepEqual(parseReplyTo({ chat: -1001, messageId: 1 }), { chat: -1001, messageId: 1 });
+});

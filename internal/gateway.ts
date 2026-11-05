@@ -193,6 +193,10 @@ export const SEND_ATTEMPTS = 5;
  */
 export const HANDLE_ATTEMPTS = 5;
 
+/** How long an empty poll waits before asking again: fast enough to notice, slow enough
+ * not to spin. */
+const POLL_PAUSE_MS = 3_000;
+
 export function failedAttempt(
   failures: Map<string, number>,
   file: string,
@@ -576,6 +580,21 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     for (;;) {
       const updates = await getUpdates(cfg.token, offsets[key] ?? 0, undefined, signal);
       if (signal.aborted) return;
+      if (updates.length === 0) {
+        // An empty batch from a live long poll just waited 50 seconds; one from a
+        // swallowed failure (a dropped connection, a 429) came back in milliseconds, and
+        // without a pause the loop spins on a down network as fast as fetch can refuse.
+        // The pause is abortable, so a reload does not wait it out.
+        await new Promise<void>((r) => {
+          const t = setTimeout(r, POLL_PAUSE_MS);
+          signal.addEventListener("abort", () => {
+            clearTimeout(t);
+            r();
+          }, { once: true });
+        });
+        if (signal.aborted) return;
+        continue;
+      }
       for (const update of updates) {
         // Handle first, record the offset after: recording it first means a crash in
         // between loses the message for good, and Telegram will never hand it over again.
