@@ -1,7 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { MailConfig, MailEnv } from "./mail.ts";
 import { MODEL_KEY_VARS } from "./model.ts";
 

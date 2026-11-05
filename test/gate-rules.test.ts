@@ -35,7 +35,7 @@ test("a rule name on its own does not leak the line either", () => {
 test("a documented placeholder is not a credential", () => {
   const dir = repo();
   commit(dir, {
-    "README.md": 'api_key = "your-key-here"\nGENG_SEARCH_TOKEN=$(openssl rand -hex 16)\n',
+    "README.md": 'api_key = "your-key-here"\nGENG_MAIL_TOKEN=$(openssl rand -hex 16)\n',
   });
   assert.equal(scan(dir).code, 0);
 });
@@ -121,7 +121,7 @@ test("an unquoted NAME=value is a credential too", () => {
   // 提交进来的时候，最像凭据的几行是静默的（#28 的评论里记的实测）。
   const dir = repo();
   const secret = ["Zm9vYmFy", "YmF6cXV4MTIzNDU2Nzg5MA"].join("");
-  commit(dir, { "secrets.env": `GENG_SEARCH_TOKEN=${secret}\n` });
+  commit(dir, { "secrets.env": `GENG_MAIL_TOKEN=${secret}\n` });
   const r = scan(dir);
   assert.equal(r.code, 1);
   assert.match(r.out, /口令赋值: secrets\.env:1/);

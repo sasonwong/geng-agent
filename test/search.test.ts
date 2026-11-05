@@ -7,9 +7,8 @@ import { readSearchEnv, searchQuota, startSearchServer } from "../internal/searc
 import { postJson } from "../image/extensions/lib/uds.ts";
 
 // systemd loads secrets/search.env with EnvironmentFile=, so by the time any request
-// arrives `process.env` holds the copy from startup. If the environment won, a rotated
-// token never took effect and the old one kept being accepted — a stale credential, not
-// just a stale quota.
+// arrives `process.env` holds the copy from startup. If the environment won, a raised
+// quota never took effect: the endpoint kept enforcing the number it started with.
 const FROZEN = { GENG_SEARCH_DAILY: "111" };
 
 function fixture(): { root: string; sock: string; restore: () => void } {

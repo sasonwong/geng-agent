@@ -507,7 +507,7 @@ test("no unfinished things means no age to report", () => {
   const { input } = fixture();
   const text = buildPacket(input({}));
   assert.match(text, /未闭合的事：（没有未闭合的事）/);
-  assert.doesNotMatch(text, /天前，在 \/state/);
+  assert.doesNotMatch(text, /天前/);
 });
 
 test("an unfinished thing from a minute ago gets no age line", () => {

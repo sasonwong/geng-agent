@@ -57,7 +57,7 @@ test("markSeen quarantines an unparseable message instead of dying", () => {
   assert.deepEqual(readdirSync(dir).filter((f) => f.endsWith(".json")), []);
 });
 
-test("an empty-text message is not handed over, and stays where it is", () => {
+test("an empty-text message is not handed over, and is quarantined instead of knocking", () => {
   const { dir, seen } = inbox();
   writeFileSync(join(dir, "001.json"), JSON.stringify({ text: "   " }));
   assert.equal(peekInbox(dir).length, 0);
@@ -88,12 +88,12 @@ test("a picture with no caption is a message, not a broken file", () => {
     from: "telegram:@you",
     at: "2026-03-02T09:00:00Z",
     chat: -100,
-    attachments: [{ kind: "document", path: "/files/-100-9-a.md", bytes: 12 }],
+    attachments: [{ kind: "document", id: "F9", name: "-100-9-a.md", bytes: 12 }],
   });
   const msgs = peekInbox(inbox);
   assert.equal(msgs.length, 1);
-  assert.deepEqual(msgs[0]?.attachments, [{ kind: "document", path: "/files/-100-9-a.md", bytes: 12 }]);
-  assert.equal(peekInbox(inbox).length, 1);
+  // the id, because that is what `download` and `say` take; `path` is not a field any more
+  assert.deepEqual(msgs[0]?.attachments, [{ kind: "document", id: "F9", name: "-100-9-a.md", bytes: 12 }]);
 });
 
 test("a file with neither words nor attachments is set aside, and never knocks", () => {

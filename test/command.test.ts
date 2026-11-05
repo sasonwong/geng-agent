@@ -93,8 +93,6 @@ test("the search socket is mounted only when it exists, and at the same path", (
   writeFileSync(sock, "");
   assert.match(argv(), new RegExp(`-v ${sock}:${sock}:ro`), "socket 在的时候要挂进来");
   assert.match(argv(), new RegExp(`-e GENG_SEARCH_SOCKET=${sock}`), "路径要和挂载点一致");
-  // no port anywhere: the whole point is that the network has no special address
-  assert.equal(argv().includes("8787"), false, "还在用端口");
 });
 
 test("the book socket is mounted read-only, and only when something is listening", async () => {

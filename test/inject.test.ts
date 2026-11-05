@@ -54,11 +54,12 @@ test("an inbox message reaches the injected line with its attachment intact", ()
     id: "1-9",
     text: "",
     from: "telegram:@x",
-    attachments: [{ kind: "document", path: "/files/1-9.md" }],
+    // the gateway writes an id, not a path: `/files` is not mounted
+    attachments: [{ kind: "document", id: "F9", name: "1-9.md" }],
   });
   const handed = freshForSteer(peekInbox(dir), new Set(), INJECT_CAP);
   assert.equal(handed.length, 1);
-  assert.deepEqual(handed[0]?.attachments, [{ kind: "document", path: "/files/1-9.md" }]);
+  assert.deepEqual(handed[0]?.attachments, [{ kind: "document", id: "F9", name: "1-9.md" }]);
   assert.equal(injectionText(handed[0]!), "[刚收到] telegram:@x：没写字，只带了 1个文件。");
 });
 
