@@ -33,19 +33,58 @@ function bytesOf(ip: string): { bytes: Buffer; bits: number } | null {
     return { bytes: Buffer.from(parts as number[]), bits: 32 };
   }
   if (!ip.includes(":")) return null;
-  const [head, tail] = ip.split("::");
-  const left = head ? head.split(":") : [];
-  const right = tail === undefined ? [] : tail ? tail.split(":") : [];
-  if (tail === undefined && left.length !== 8) return null;
-  const groups = [...left, ...(tail === undefined ? [] : Array(8 - left.length - right.length).fill("0")), ...right];
-  if (groups.length !== 8) return null;
+
+  // RFC 4291 §2.2.3 lets the last 32 bits be written as a dotted quad, and it used to be
+  // fed to `parseInt(…, 16)` like any other group. That stops at the first dot:
+  // `::ffff:127.0.0.1` parsed as `::ffff:0:0:0`, a different address — so `!127.0.0.0/8`
+  // never matched it, `::/0` waved it through, and the daemon connected to the address it
+  // had "checked". A name whose AAAA record is an IPv4-mapped address reached the host's
+  // own loopback through the one wall this container has.
+  const halves = ip.split("::");
+  if (halves.length > 2) return null;
+  const groupsOf = (part: string): number[] | null => {
+    if (part === "") return [];
+    const out: number[] = [];
+    const items = part.split(":");
+    for (const [i, item] of items.entries()) {
+      if (item.includes(".")) {
+        // a dotted quad is two groups, so it can only be the last one
+        const quad = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(item);
+        if (quad === null || i !== items.length - 1) return null;
+        const q = [quad[1], quad[2], quad[3], quad[4]].map((x) => Number(x));
+        if (q.some((n) => n > 255)) return null;
+        out.push(((q[0] as number) << 8) | (q[1] as number), ((q[2] as number) << 8) | (q[3] as number));
+        continue;
+      }
+      if (!/^[0-9a-fA-F]{1,4}$/.test(item)) return null;
+      out.push(Number.parseInt(item, 16));
+    }
+    return out;
+  };
+  const compressed = halves.length === 2;
+  const left = groupsOf(halves[0] as string);
+  const right = compressed ? groupsOf(halves[1] as string) : null;
+  if (left === null || (compressed && right === null)) return null;
+  let groups: number[];
+  if (!compressed) {
+    if (left.length !== 8) return null;
+    groups = left;
+  } else {
+    const tail = right as number[];
+    if (left.length + tail.length > 8) return null;
+    groups = [...left, ...Array(8 - left.length - tail.length).fill(0), ...tail];
+  }
   const bytes = Buffer.alloc(16);
-  for (const [i, group] of groups.entries()) {
-    const value = Number.parseInt(group === "" ? "0" : group, 16);
-    if (!Number.isFinite(value) || value > 0xffff) return null;
+  for (const [i, value] of groups.entries()) {
     bytes[i * 2] = value >> 8;
     bytes[i * 2 + 1] = value & 0xff;
   }
+  // An IPv4-mapped address *is* the IPv4 address it maps (RFC 4291 §2.5.5.2), so it is
+  // compared — and sent — as one. Parsing it right is not enough on its own: left at 128
+  // bits it still never matches a `!`-rule written for an IPv4 range, and the whole
+  // `::ffff:0:0/96` block is a second spelling of every address those rules exclude.
+  const mapped = groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff;
+  if (mapped) return { bytes: Buffer.from(bytes.subarray(12)), bits: 32 };
   return { bytes, bits: 128 };
 }
 
