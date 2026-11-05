@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { printStatus, spendSince } from "../internal/status.ts";
+import { printStatus, spendSince, statusLine } from "../internal/status.ts";
 import { makePaths } from "../internal/paths.ts";
 import { writeText } from "../internal/fs.ts";
 
@@ -42,4 +42,19 @@ test("status counts open loops the way the page does: files, not the old JSON sh
     rmSync(root, { recursive: true, force: true });
   }
   assert.match(lines.join("\n"), /未闭合\s+1 件/);
+});
+
+test("status counts a message the way the daemon does: it has to parse", () => {
+  // A file nothing can read is quarantined at the start of the next round, and until then
+  // it is not a message: the knock count has been the parser's since the sixty-cycle loop
+  // (see inbox.ts). status counted file names, so the two numbers disagreed exactly when
+  // something was broken — and status is the line a person reads first.
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = makePaths(root, "alice");
+  mkdirSync(p.inbox, { recursive: true });
+  writeText(join(p.inbox, "1-1.json"), JSON.stringify({ id: "1-1", text: "在吗" }));
+  writeText(join(p.inbox, "1-2.json"), "{not json");
+  writeText(join(p.inbox, "1-3.json"), JSON.stringify({ id: "1-3", text: "   " }));
+  assert.match(statusLine(root, "alice"), /收件=1\b/);
+  rmSync(root, { recursive: true, force: true });
 });

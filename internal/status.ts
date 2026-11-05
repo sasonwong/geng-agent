@@ -6,6 +6,7 @@ import { makePaths, type Paths } from "./paths.ts";
 import { formatDuration, readWaiting } from "./schedule.ts";
 import { readText } from "./fs.ts";
 import { countLoops } from "./packet.ts";
+import { peekInbox } from "./inbox.ts";
 import { readMeta, readWakes, DAY_MS } from "./meta.ts";
 import { listSnapshots } from "./backup.ts";
 
@@ -41,12 +42,10 @@ function bytes(n: number): string {
   return n < 1024 ? `${n}B` : `${(n / 1024).toFixed(1)}KB`;
 }
 
-function countJson(dir: string): number {
-  try {
-    return readdirSync(dir).filter((f) => f.endsWith(".json")).length;
-  } catch {
-    return 0;
-  }
+/** What is waiting, by the same reader the daemon knocks on: a file it cannot parse is not
+ *  a message. Counting names made the two lines a person reads disagree. */
+function pendingInbox(dir: string): number {
+  return peekInbox(dir).length;
 }
 
 export function statusLine(root: string, instance: string): string {
@@ -56,7 +55,7 @@ export function statusLine(root: string, instance: string): string {
   const now = Date.now();
   const sinceLast = typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) : "从未";
   const next = wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) : "未设定";
-  const pending = countJson(p.inbox);
+  const pending = pendingInbox(p.inbox);
   return `${instance.padEnd(12)} 上次=${sinceLast.padEnd(7)} 下次=${next.padEnd(7)} 收件=${String(pending).padEnd(3)}`;
 }
 
@@ -83,7 +82,7 @@ export async function printStatus(root: string, instance: string): Promise<void>
     `  上次醒来    ${typeof meta.lastWakeMs === "number" ? formatDuration(now - meta.lastWakeMs) + " 前" : "从未"}`,
     `  第几次      ${meta.wakings ?? 0}（24 小时内 ${wakes.length} 次）`,
     `  下次醒来    ${wait ? formatDuration(Math.max(0, wait.dueAtMs - now)) + " 后" : "未设定"}${wait?.why ? "  ·  " + wait.why : ""}`,
-    `  收件        ${countJson(p.inbox)} 条待处理`,
+    `  收件        ${pendingInbox(p.inbox)} 条待处理`,
     ...(places.length > 0
       ? [
           `  说话到      ${(() => {
