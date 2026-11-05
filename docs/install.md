@@ -131,14 +131,33 @@ daemon 在宿主上跑，容器只装 pi 和它的工具链。
 ## 3. 第一个实例
 
 ```bash
-node cmd/geng/index.ts init alice
+node cmd/geng/index.ts init alice \
+  --model deepseek-v4.1-flash \
+  --upstream https://opencode.ai/inference/go/v1
 ```
 
 `init` 会建目录树、从 `deploy/policy.json` 拷一份 policy、生成 `secrets/alice.env` 模板（600）、
-从 `deploy/settings.json` 拷一份 pi 配置，并在 `secrets/rustic.env` 里生成备份口令。
+从 `deploy/settings.json` 拷一份 pi 配置、生成 `secrets/alice.model.env` 和备份口令。
 **它出生时不带 `identity.md`、不带一行日记、不带一件没闭合的事** —— 那几个空白就是它的出生。
 
-### 3.1 改 policy（这一步不能忘）
+四个参数是**这个实例的**决定，其余全是模板的：
+
+| 参数 | 写进哪 | 默认 |
+|---|---|---|
+| `--model <id>` | `data/<inst>/pi/settings.json` 的 `defaultModel` | 模板里的那个 |
+| `--upstream <url>` | `secrets/<inst>.model.env` 的 `GENG_MODEL_UPSTREAM` | opencode 的 `/go/v1` |
+| `--image <tag>` | `data/<inst>/policy.json` 的 `container.image` | `geng-agent:latest` |
+| `--timeout-min <n>` | `data/<inst>/policy.json` 的 `cycle.timeoutSec` | 30 |
+
+模型 key 不用手改文件：环境里有它就直接写进去。
+
+```bash
+OPENCODE_API_KEY=sk-... node cmd/geng/index.ts init alice --model …
+```
+
+`init` 只写这个实例自己的值，模板里其余的键原样保留——它不是 policy 编辑器。
+
+### 3.1 policy 里剩下的东西
 
 **没有 `runner` 这个字段了。** 每一轮醒来都是一个容器——只有这一条路。以前那个 `local`
 模式跑的是宿主上的 pi：没有只读根、没有出口代理、书就在盘上能直接 `cat`、你的密钥就在
@@ -157,7 +176,8 @@ node cmd/geng/index.ts init alice
 
 **两个文件，区别是容器看不看得见。**
 
-`secrets/model.env`（600）——模型密钥，**容器永远读不到**：
+`secrets/<实例>.model.env`（600）——模型密钥，**容器永远读不到**。每个实例一份：两个实例
+可以问两个 provider，用一个文件就没法这么干：
 
 ```
 OPENCODE_API_KEY=...          # 变量名跟着 provider 换（OPENAI_API_KEY / ANTHROPIC_API_KEY …）
@@ -195,7 +215,7 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 
 | 文件 | 谁写的 | 谁读它 | 缺了会怎样 |
 |---|---|---|---|
-| `secrets/model.env` | 你（`init` 只放空模板） | daemon，答 `/model/key` | 第一轮就 `Failed to resolve API key … from shell command` |
+| `secrets/<实例>.model.env` | `init`（key 从环境读，或你填） | daemon，答 `/model` | 第一轮就 `Failed to resolve API key … from shell command` |
 | `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 只该放代价有上限的值；模型密钥写在这儿会进容器，`doctor` 会说 |
 | `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search`（里面只要 `DEEPSEEK_API_KEY` 和 socket 路径） |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |

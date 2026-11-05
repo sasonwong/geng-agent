@@ -16,12 +16,16 @@ import { addBot, describeBot, editAllow, readBots } from "../../internal/bots.ts
 import { newToken, readEnvFile, secretFiles, writeEnvValue } from "../../internal/secret.ts";
 import { backupRepo, listSnapshots, maybeBackup, restore, restoredLooksWhole } from "../../internal/backup.ts";
 import { loadPolicy } from "../../internal/policy.ts";
+import { MODEL_KEY_VARS, modelKeyFile } from "../../internal/model.ts";
+import type { InitOptions } from "../../internal/init.ts";
 
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
 const USAGE = `geng <command> [options]
 
-  init <instance>                    建目录、落 policy、生成 secrets 模板
+  init <instance> [--image t] [--timeout-min n] [--model id] [--upstream url]
+                                     建目录、落 policy、生成 secrets 模板；四个参数是这个实例的
+                                     决定，模型 key 从环境变量读（不写在命令行上）
   daemon --instance <instance>       一直跑（调试用 geng-dev，见 AGENTS.md）
   status [<instance>|--all]          一屏看状态
   doctor <instance> [--fix] [--probe] [--restore-test]
@@ -60,7 +64,16 @@ interface Args {
  * 子命令自己的选项。放在这里而不是全局 Args 上：它们对一个子命令有意义，对其余的没有，
  * 而全局开关每加一个，就多一个"不知道属于谁"的状态。
  */
-const SUB_FLAG_VALUED = new Set(["--listen", "--allow", "--chat"]);
+const SUB_FLAG_VALUED = new Set([
+  "--listen",
+  "--allow",
+  "--chat",
+  // init: the four values that are about one instance rather than the project
+  "--image",
+  "--timeout-min",
+  "--model",
+  "--upstream",
+]);
 const SUB_FLAG_BOOL = new Set(["--token-stdin", "--rotate"]);
 
 function parse(argv: string[]): Args {
@@ -125,6 +138,42 @@ function parse(argv: string[]): Args {
   return args;
 }
 
+/**
+ * `init` 自己的四个值。放在这里而不是 parse() 里：其余子命令不认识它们，而一个"谁的都不属于"
+ * 的全局开关，最后总会被某个子命令悄悄读走。
+ */
+function initArgs(rest: string[]): { instance: string | null; opts: InitOptions } {
+  const opts: InitOptions = {};
+  const left: string[] = [];
+  const text = (flag: string, v: string): string => {
+    if (v.trim() === "") throw new Error(`${flag} 不能是空字符串`);
+    return v.trim();
+  };
+  for (let i = 0; i < rest.length; i++) {
+    const a = rest[i] as string;
+    const v = rest[i + 1];
+    if (a === "--image" || a === "--timeout-min" || a === "--model" || a === "--upstream") {
+      if (v === undefined) throw new Error(`${a} 需要一个值`);
+      i++;
+      if (a === "--image") opts.image = text(a, v);
+      else if (a === "--model") opts.model = text(a, v);
+      else if (a === "--upstream") {
+        opts.upstream = text(a, v);
+        if (!/^https?:\/\//.test(opts.upstream)) throw new Error(`--upstream 要是 http(s) 地址，拿到 ${v}`);
+      } else {
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 1) throw new Error(`--timeout-min 要一个正整数（分钟），拿到 ${v}`);
+        opts.timeoutMin = n;
+      }
+    } else if (a.startsWith("--")) {
+      throw new Error(`init 不认识 ${a}`);
+    } else {
+      left.push(a);
+    }
+  }
+  return { instance: left[0] ?? null, opts };
+}
+
 async function main(): Promise<number> {
   let args: Args;
   try {
@@ -142,12 +191,25 @@ async function main(): Promise<number> {
       return 0;
 
     case "init": {
-      if (!args.instance) {
-        console.error("用法：geng init <instance>");
+      // init's own flags are read here, before the instance name is taken from what is
+      // left: `geng init --model x alice` and `geng init alice --model x` are the same.
+      let parsed: { instance: string | null; opts: InitOptions };
+      try {
+        parsed = initArgs(args.rest);
+      } catch (err) {
+        console.error((err as Error).message);
         return 2;
       }
-      initInstance(args.root, args.instance);
-      const p = makePaths(args.root, args.instance);
+      const { instance, opts } = parsed;
+      if (!instance) {
+        console.error("用法：geng init <instance> [--image <tag>] [--timeout-min <n>] [--model <id>] [--upstream <url>]");
+        return 2;
+      }
+      // A key in the environment is a key the operator does not have to paste into a file.
+      // It is never a flag value: arguments land in shell history and in `ps`.
+      const fromEnv = MODEL_KEY_VARS.map((n) => (process.env[n] ?? "").trim()).find((v) => v !== "");
+      initInstance(args.root, instance, { ...opts, modelKey: fromEnv });
+      const p = makePaths(args.root, instance);
       console.log(`已初始化 ${p.instance}`);
       console.log(`  数据     ${p.data}`);
       console.log(`  密钥     ${p.secrets}（填好之后再跑）`);

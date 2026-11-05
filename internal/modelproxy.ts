@@ -32,13 +32,13 @@ export async function proxyModel(
   const upstream = upstreamFor(p);
   if (upstream === null) {
     res.writeHead(503, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "没有配置模型上游：写 secrets/model.env 的 GENG_MODEL_UPSTREAM" }));
+    res.end(JSON.stringify({ error: "没有配置模型上游：写 secrets/<实例>.model.env 的 GENG_MODEL_UPSTREAM" }));
     return;
   }
   const found = readModelKey(p);
   if (found === null) {
     res.writeHead(503, { "content-type": "application/json" });
-    res.end(JSON.stringify({ error: "没有模型密钥：写 secrets/model.env 的 OPENCODE_API_KEY" }));
+    res.end(JSON.stringify({ error: "没有模型密钥：写 secrets/<实例>.model.env 的 OPENCODE_API_KEY" }));
     return;
   }
   const suffix = (req.url ?? "").slice(MODEL_PREFIX.length) || "/";

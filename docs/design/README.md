@@ -727,9 +727,8 @@ rustic，一次清醒一次快照。内容去重是免费的，**不要设计增
 
 1. ~~把"漏配"变成 doctor 的一句话~~ **已改**：policy 与模板逐字段比（`policyDrift`，缺键会说
    "正在用默认值"并给出那个值，多余的键也会点名）；装了才有的能力各有一条三态检查。
-2. **`init` 应该带参数。** 现在它拷模板，于是每个新实例都要手工改 `cycle.timeoutSec`、
-   `container.image`，而 `settings.json` 里的 provider/model 是另一份拷贝。`--timeout-min`、
-   `--image`、`--provider`/`--model` 应该一次写对。（`runner` 已经不存在了。）
+2. ~~`init` 应该带参数~~ **已改**：`--model`、`--upstream`、`--image`、`--timeout-min` 一次写对，
+   模型 key 从环境变量读进去（命令行参数会进 shell 历史，key 不能走那条路）。
 3. ~~凭据的位置~~ **已改**：GitHub 是一个 App，私钥在 `secrets/gh-app.pem`，容器里没有凭据，
    `git` 要的时候现换一个一小时的 installation token；模型 key 在 `secrets/model.env`，
    同样只在宿主上。两处都是"容器能问，不能存"。

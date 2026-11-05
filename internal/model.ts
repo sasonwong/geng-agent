@@ -13,8 +13,15 @@ import { readEnvFile } from "./secret.ts";
  */
 export const MODEL_KEY_VARS = ["GENG_MODEL_KEY", "OPENCODE_API_KEY", "DEEPSEEK_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"];
 
+/**
+ * One key file per instance, not one for the machine.
+ *
+ * It was `secrets/model.env` while there was one instance to run; a second instance would
+ * have had to share its provider and its key, which is a coupling nobody chose and nothing
+ * reported. `init` writes it, so two instances are two decisions.
+ */
 export function modelKeyFile(p: Paths): string {
-  return join(p.root, "secrets", "model.env");
+  return join(p.root, "secrets", `${p.instance}.model.env`);
 }
 
 /** Where the provider lives. The proxy needs this; pi no longer knows the address. */

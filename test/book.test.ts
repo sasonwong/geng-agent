@@ -393,7 +393,7 @@ test("model traffic is proxied: the key goes upstream, never to the container", 
     assert.equal(none.status, 503);
     assert.match(none.body, /model\.env/);
     writeFileSync(
-      join(root, "secrets", "model.env"),
+      join(root, "secrets", "alice.model.env"),
       `OPENCODE_API_KEY=sk-test-123\nGENG_MODEL_UPSTREAM=http://127.0.0.1:${port}/go/v1\n`,
     );
     const reply = await ask();

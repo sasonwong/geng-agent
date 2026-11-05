@@ -159,7 +159,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       key === null
         ? `没有 ${modelKeyFile(p)}：第一轮就会没有模型可用`
         : leakedKey.length > 0
-          ? `${leakedKey.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/model.env`
+          ? `${leakedKey.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/<实例>.model.env`
           : upstream === null
             ? "没有 GENG_MODEL_UPSTREAM：代理不知道往哪转发，每次请求都 503"
             : `${key.name} → ${upstream}（都在宿主上，容器只是问）`,
