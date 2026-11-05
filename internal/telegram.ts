@@ -1,6 +1,6 @@
 /** Thin Telegram Bot API client. No SDK: a handful of methods is not worth a dependency. */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 export interface BotConfig {
@@ -227,8 +227,19 @@ export async function downloadFile(
 
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
 
-/** Photos as photos, everything else as a document. `path` is a host path. */
-export async function sendFile(token: string, chat: number, path: string): Promise<void> {
+/** Telegram's own ceiling for a bot upload. A file it will not take is one we must not read. */
+export const SEND_LIMIT = 50 * 1024 * 1024;
+
+/**
+ * Photos as photos, everything else as a document. `path` is a host path.
+ *
+ * The size check comes before `readFileSync` on purpose: `/work` is the agent's, so a file
+ * there can be any size it likes, and reading one first is how the gateway would run out of
+ * memory for a send that was never going to succeed.
+ */
+export async function sendFile(token: string, chat: number, path: string, limit = SEND_LIMIT): Promise<void> {
+  const size = statSync(path).size;
+  if (size > limit) throw new Error(`文件 ${basename(path)} 有 ${size} 字节，超过 ${limit}，Telegram 收不下：没发`);
   const bytes = readFileSync(path);
   const name = basename(path);
   const form = new FormData();

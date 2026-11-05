@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sendMessage, splitMessage } from "../internal/telegram.ts";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { sendFile, sendMessage, splitMessage } from "../internal/telegram.ts";
 
 /** Answers the next sendMessage call with the id it is given, in call order. */
 function answerWith(ids: number[]): () => void {
@@ -54,5 +57,29 @@ test("a split never cuts a character in half", () => {
         assert.ok(next >= 0xdc00 && next <= 0xdfff, `位置 ${i} 上是半个字符`);
       }
     }
+  }
+});
+
+test("a file too big for a bot upload is refused before it is read into memory", async () => {
+  // Telegram's own limit for a bot upload is 50 MB. Reading the file first and letting the
+  // API refuse it costs the gateway the whole file in RAM — a /work file is something the
+  // agent made, so its size is not ours to assume.
+  const dir = mkdtempSync(join(tmpdir(), "geng-send-"));
+  const file = join(dir, "big.bin");
+  writeFileSync(file, "x".repeat(9));
+  let uploads = 0;
+  const real = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    uploads += 1;
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(() => sendFile("t", -100, file, 8), /超过/);
+    assert.equal(uploads, 0, "超限的文件不该读进来，更不该发出去");
+    // exactly at the limit is still a send
+    await sendFile("t", -100, file, 9);
+    assert.equal(uploads, 1);
+  } finally {
+    globalThis.fetch = real;
   }
 });
