@@ -510,13 +510,14 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // re-run continues the same file instead of starting a second one.
     const sessionId = `geng-${paths.instance}-${String(waking).padStart(4, "0")}`;
 
+    // Only what a reader opens: `startedAt` is what the gateway's typing indicator asks
+    // for, and the other two become the cut note if this daemon dies mid-round. `level`,
+    // `sessionId` and the list of inbox ids were written here once and read by nothing —
+    // the session id is derived from `waking`, which is on the same record.
     writeJson(paths.intent, {
       startedAt: new Date(nowMs).toISOString(),
       waking,
       reason,
-      level: escalation.level,
-      sessionId,
-      inboxIds: inbox.map((m) => m.id),
     });
     // spread the existing record: writing a literal here silently dropped `spent`
     meta = { ...meta, lastWakeMs: nowMs, wakings: waking, env: currentEnv };
