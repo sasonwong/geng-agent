@@ -5,7 +5,7 @@
   "description": "A wake-packet daemon: pi runs in a container, the daemon only executes the alarms the agent sets for itself.",
   "type": "module",
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.21.0"
   },
   "bin": {
     "geng": "./cmd/geng/index.ts"
