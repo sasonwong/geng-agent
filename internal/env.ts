@@ -31,7 +31,11 @@ export function describeEnvChange(before: Env | undefined, now: Env): string | n
   // An id we could not read is not evidence of a change: `docker image inspect` fails
   // when the daemon is unreachable, and claiming "环境变了" then is a page that lies
   // about the one thing it says rarely enough to be believed.
-  const image = now.imageId !== null && (before.imageId ?? null) !== now.imageId;
+  // Both sides have to be known. Suppressing only `now === null` still reported a
+  // change when docker was unreachable last waking and came back this one: the
+  // before-side null is not evidence of a different world either.
+  const beforeImage = before.imageId ?? null;
+  const image = now.imageId !== null && beforeImage !== null && beforeImage !== now.imageId;
   const tools = (before.search ?? false) !== (now.search ?? false);
   return image || tools ? "环境变了。" : null;
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alarmSpent, knockFloorMs, knockable, readWaiting } from "../internal/schedule.ts";
+import { alarmSpent, knockFloorMs, knockable, parseAfter, readWaiting } from "../internal/schedule.ts";
 import { planFor } from "../internal/escalation.ts";
 
 function tmpFile(content: string): string {
@@ -22,6 +22,19 @@ test("a relative alarm counts from when it was written, not from when it is read
 
   // an alarm that came due while the machine was off is already overdue
   assert.ok((spec?.dueAtMs ?? Infinity) < writtenAt + 21 * 60_000);
+});
+
+test("a malformed wake.after is no alarm, not a crashing waking", () => {
+  // `null !== undefined`, so a restored or hand-edited waiting.json with `"after": null`
+  // reached parseAfter(null) and called null.trim(). The daemon has no catch around
+  // readWaiting, so that was one whole waking gone with no log line.
+  for (const bad of ["null", "true", "{}", "[]", "[1]"]) {
+    const f = tmpFile(`{"wake":{"after":${bad}}}`);
+    assert.equal(readWaiting(f), null, `${bad} 只能读作「没有闹钟」`);
+  }
+  assert.equal(parseAfter(Number.NaN), null, "NaN 分钟不是闹钟");
+  assert.equal(parseAfter(Number.POSITIVE_INFINITY), null);
+  assert.equal(parseAfter(20), 20 * 60_000);
 });
 
 test("readWaiting parses an absolute alarm", () => {

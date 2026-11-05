@@ -23,6 +23,21 @@ test("a policy copy is compared with the template key by key", () => {
   assert.equal(templateValue(template, "container.nope"), undefined);
 });
 
+test("a timezone that cannot format a date is a bad policy, not a crashing waking", () => {
+  // Intl.DateTimeFormat throws RangeError on a typo, and buildPacket has no catch:
+  // one misspelled value made every waking die and systemd restart into the same
+  // line, while doctor still said the policy was fine.
+  const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
+  const base = defaultPolicy() as unknown as Record<string, unknown>;
+  for (const bad of ["Asia/Shangai", "Mars/Olympus", ""]) {
+    writeFileSync(file, JSON.stringify({ ...base, timezone: bad }));
+    assert.throws(() => loadPolicy(file), /合法的时区名|non-empty string/, `${bad} 要在读 policy 时就被挡住`);
+  }
+  // half-hour zones must still be accepted — they are the reason the page prints an offset
+  writeFileSync(file, JSON.stringify({ ...base, timezone: "Asia/Kolkata" }));
+  assert.equal(loadPolicy(file).timezone, "Asia/Kolkata");
+});
+
 test("a wrong type in an allow list is an error, not a silent empty list", () => {
   const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
   const good = defaultPolicy() as unknown as Record<string, unknown>;

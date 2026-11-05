@@ -14,7 +14,8 @@ interface RawWaiting {
 const UNIT_MS: Record<string, number> = { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
 
 export function parseAfter(v: string | number): number | null {
-  if (typeof v === "number") return v * 60_000;
+  // NaN and Infinity are numbers, and an alarm due at NaN never fires — quietly.
+  if (typeof v === "number") return Number.isFinite(v) ? v * 60_000 : null;
   const m = /^(\d+(?:\.\d+)?)\s*([smhd])$/.exec(v.trim());
   if (!m) return null;
   const n = Number(m[1]);
@@ -42,7 +43,9 @@ export function readWaiting(file: string): WaitSpec | null {
     if (Number.isNaN(t)) return null;
     return { dueAtMs: t, why };
   }
-  if (wake.after !== undefined) {
+  // `null` is not `undefined`, and a JSON file can carry it after a hand edit or a
+  // restore. parseAfter would call `null.trim()` and take the whole daemon down.
+  if (typeof wake.after === "string" || typeof wake.after === "number") {
     const delta = parseAfter(wake.after);
     if (delta === null) return null;
     let writtenAt: number;

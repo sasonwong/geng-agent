@@ -10,15 +10,20 @@ export interface Quote {
   messageId: number;
 }
 
+/** One set of rules for both spellings of a quote. */
+function quoteOf(chat: number, messageId: number): Quote | null {
+  if (!Number.isSafeInteger(chat) || !Number.isSafeInteger(messageId)) return null;
+  if (chat === 0 || messageId <= 0) return null;
+  return { chat, messageId };
+}
+
 export function parseInboxId(s: string): Quote | null {
   if (typeof s !== "string") return null;
   const cut = s.lastIndexOf("-");
   if (cut <= 0) return null; // a chat id may start with -, so the split is the last one
   const chat = Number(s.slice(0, cut));
   const messageId = Number(s.slice(cut + 1));
-  if (!Number.isSafeInteger(chat) || !Number.isSafeInteger(messageId)) return null;
-  if (chat === 0 || messageId <= 0) return null;
-  return { chat, messageId };
+  return quoteOf(chat, messageId);
 }
 
 /**
@@ -36,7 +41,10 @@ export function parseReplyTo(raw: unknown): Quote | undefined | null {
   if (typeof raw !== "object") return null;
   const o = raw as { chat?: unknown; messageId?: unknown };
   if (typeof o.chat !== "number" || typeof o.messageId !== "number") return null;
-  return { chat: o.chat, messageId: o.messageId };
+  // The object spelling used to accept NaN, 1.5, 0 and negatives: those then reached
+  // sendMessage as an invalid reply_to_message_id, and Telegram answered 400. The
+  // string spelling already refused them — one reader, one set of rules.
+  return quoteOf(o.chat, o.messageId);
 }
 
 /** The message someone answered, as far as it can be reconstructed from the update. */

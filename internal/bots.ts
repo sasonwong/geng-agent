@@ -68,26 +68,41 @@ export function editAllow(root: string, key: string, add: number[], rm: number[]
   return bots;
 }
 
-/** Problems a human would only find by noticing that nothing ever happens. */
-export function botProblems(bots: Bots, hasInstance: (key: string) => boolean): string[] {
-  const out: string[] = [];
+export interface BotIssue {
+  /** The bot the problem belongs to; "*" means the file as a whole. */
+  key: string;
+  problem: string;
+}
+
+/**
+ * Problems a human would only find by noticing that nothing ever happens.
+ *
+ * Keeps the owner alongside the text: `doctor <instance>` asks about one instance,
+ * and a broken bot belonging to a *different* instance must not FAIL this one's
+ * check (and list somebody else's problems under its name).
+ */
+export function botIssues(bots: Bots, hasInstance: (key: string) => boolean): BotIssue[] {
+  const out: BotIssue[] = [];
   for (const [key, cfg] of Object.entries(bots)) {
+    const say = (text: string): void => {
+      out.push({ key, problem: `${key}：${text}` });
+    };
     if (typeof cfg.token !== "string" || cfg.token.trim() === "") {
-      out.push(`${key}：没有 token`);
+      say("没有 token");
     }
     if (cfg.listen !== undefined && cfg.listen !== "all" && cfg.listen !== "mentions") {
-      out.push(`${key}：listen 只能是 all 或 mentions（现在 ${String(cfg.listen)}）`);
+      say(`listen 只能是 all 或 mentions（现在 ${String(cfg.listen)}）`);
     }
     if (cfg.allow !== undefined && !Array.isArray(cfg.allow)) {
-      out.push(`${key}：allow 必须是数字数组`);
+      say("allow 必须是数字数组");
     } else if (Array.isArray(cfg.allow) && cfg.allow.some((id) => !Number.isFinite(id))) {
-      out.push(`${key}：allow 里有不是数字的 id`);
+      say("allow 里有不是数字的 id");
     }
     if (key !== "ops" && !hasInstance(key)) {
-      out.push(`${key}：data/${key}/ 不存在，这个 bot 没有对应的实例`);
+      say(`data/${key}/ 不存在，这个 bot 没有对应的实例`);
     }
     if (key === "ops" && typeof cfg.chat !== "number") {
-      out.push("ops：没有 chat，运维消息发不出去");
+      say("没有 chat，运维消息发不出去");
     }
   }
   // The gateway drains `data/_ops/outbox` only under an "ops" key, so a bots.json without
@@ -95,9 +110,16 @@ export function botProblems(bots: Bots, hasInstance: (key: string) => boolean): 
   // delivers none of them. Only a problem once there is a bot at all: an instance with no
   // Telegram is a warn everywhere else and should stay one.
   if (Object.keys(bots).length > 0 && !bots.ops) {
-    out.push("没有 ops 这个 bot：静音通知、gateway 断线、停车通知只写不送，会堆在 data/_ops/outbox");
+    out.push({
+      key: "*",
+      problem: "没有 ops 这个 bot：静音通知、gateway 断线、停车通知只写不送，会堆在 data/_ops/outbox",
+    });
   }
   return out;
+}
+
+export function botProblems(bots: Bots, hasInstance: (key: string) => boolean): string[] {
+  return botIssues(bots, hasInstance).map((i) => i.problem);
 }
 
 /** Plain words about what the file gives this instance, for status lines and doctor. */

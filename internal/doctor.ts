@@ -6,7 +6,7 @@ import { connect } from "node:net";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
 import { readJson, readText } from "./fs.ts";
-import { readBots, botProblems } from "./bots.ts";
+import { readBots, botIssues, type BotIssue } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
@@ -42,6 +42,23 @@ function hasCmd(cmd: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Which bots.json problems belong to the instance doctor was asked about.
+ *
+ * `botProblems` returns a flat list for the whole file; feeding it to a per-instance
+ * FAIL check made a broken bob fail alice's doctor and print bob's problems under
+ * alice's name. ops and file-wide problems reach every instance, so they stay.
+ */
+export function botWiring(instance: string, issues: BotIssue[]): { own: string[]; others: string[] } {
+  const own = issues
+    .filter((i) => i.key === instance || i.key === "ops" || i.key === "*")
+    .map((i) => i.problem);
+  const others = issues
+    .filter((i) => i.key !== instance && i.key !== "ops" && i.key !== "*")
+    .map((i) => i.problem);
+  return { own, others };
 }
 
 export function checkInstance(root: string, instance: string, fix: boolean): Check[] {
@@ -303,16 +320,28 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   );
 
   const bots = readBots(root);
-  const issues = botProblems(bots, (key) => existsSync(join(root, "data", key)));
+  const issues = botIssues(bots, (key) => existsSync(join(root, "data", key)));
+  // A broken bot belonging to bob is not a FAIL for alice. ops and file-wide problems
+  // do reach every instance, so they stay in this check; the rest get their own warn
+  // rather than silently disappearing from doctor's output.
+  const { own, others } = botWiring(instance, issues);
   checks.push(
     optional(
       "bot 接线",
       bots[instance] !== undefined,
-      issues.length === 0 ? null : issues.slice(0, 3).join("；"),
+      own.length === 0 ? null : own.slice(0, 3).join("；"),
       `没配：只有它自己的闹钟能叫醒它${issues.length > 0 ? `（bots.json 另有 ${issues.length} 处问题）` : ""}`,
-      "bots.json 的每一项都能解析",
+      "这个实例的 bot 能解析",
     ),
   );
+  if (others.length > 0) {
+    checks.push({
+      name: "bots.json 其他条目",
+      ok: false,
+      warnOnly: true,
+      detail: others.slice(0, 3).join("；"),
+    });
+  }
 
   const sessions = listSessionFiles(p.sessionDir);
   const bad = sessions
@@ -554,7 +583,7 @@ export function scanLogBodies(dir: string): LogScan {
   return { hits: hits.slice(0, 10), truncated, more: Math.max(0, hits.length - 10) };
 }
 
-const PROBE = [
+export const PROBE = [
   "sh",
   "-c",
   [
@@ -576,7 +605,11 @@ const PROBE = [
     'if curl -s -m 20 -o /dev/null https://github.com/ 2>/dev/null; then echo PROXY_OK; else echo PROXY_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
     // the real attack path is the host on our own gateway, not a fixed docker0 address
-    'GW=$(ip route 2>/dev/null | awk "/^default/{print \$3; exit}"); if [ -n "$GW" ] && curl -s -m 3 -o /dev/null "http://$GW:2375/version" 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
+    // `\\$3`: JS drops a lone backslash from "\$", and a bare `$3` inside the shell's
+    // double quotes is expanded as a positional parameter (empty). awk then printed
+    // the whole route line instead of the gateway ip, curl failed, and this check
+    // always said DOCKER_BLOCKED — the one answer that looks like safety.
+    'GW=$(ip route 2>/dev/null | awk "/^default/{print \\$3; exit}"); if [ -n "$GW" ] && curl -s -m 3 -o /dev/null "http://$GW:2375/version" 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
     "true",
   ].join("; "),
 ];
@@ -621,8 +654,20 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     p.stderr?.on("data", (c: string) => {
       text += c;
     });
-    p.on("error", () => resolve(`PROBE_FAILED ${String(p.spawnfile)}`));
-    p.on("close", () => resolve(text));
+    // A `docker run` that hangs used to hang `doctor --probe` forever. A timeout is a
+    // failed probe, not an empty one whose detail would read "直连断开，代理通".
+    const timer = setTimeout(() => {
+      p.kill();
+      resolve(`${text}\nPROBE_FAILED docker run 超时（90s），探针没有跑完`);
+    }, 90_000);
+    p.on("error", () => {
+      clearTimeout(timer);
+      resolve(`PROBE_FAILED ${String(p.spawnfile)}`);
+    });
+    p.on("close", () => {
+      clearTimeout(timer);
+      resolve(text);
+    });
   });
   const inContainer = Number(/EXT_COUNT=(\d+)/.exec(out)?.[1] ?? -1);
 

@@ -94,6 +94,23 @@ function str(v: unknown, path: string): string {
   return v;
 }
 
+/**
+ * `Intl.DateTimeFormat` throws RangeError on a misspelled IANA name, and `localClock`
+ * is called by buildPacket with no catch: one typo in policy.json made every waking
+ * die, systemd restart it, and die again at the same line — while `doctor` still said
+ * the policy parsed fine. A name that cannot format a date is a bad value, not a
+ * runtime surprise.
+ */
+function timezoneOf(v: unknown, path: string): string {
+  const name = str(v, path);
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: name });
+  } catch {
+    throw new ExpectedError(`policy: ${path} 不是合法的时区名（收到 ${name}）`);
+  }
+  return name;
+}
+
 /** A wrong type in an allow list used to become `[]` — a silent "refuse everything". */
 function stringList(v: unknown, path: string): string[] {
   if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
@@ -129,7 +146,7 @@ export function loadPolicy(file: string): Policy {
       repeatThreshold: num(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
     backup: { enabled: p.backup?.enabled !== false },
-    timezone: str(p.timezone ?? d.timezone, "timezone"),
+    timezone: timezoneOf(p.timezone ?? d.timezone, "timezone"),
     files: {
       maxAgeDays: num(p.files?.maxAgeDays ?? d.files.maxAgeDays, "files.maxAgeDays", 0),
       maxMb: num(p.files?.maxMb ?? d.files.maxMb, "files.maxMb", 1),

@@ -1,6 +1,6 @@
 /** Thin Telegram Bot API client. No SDK: a handful of methods is not worth a dependency. */
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 export interface BotConfig {
@@ -156,12 +156,15 @@ export async function getUpdates(
 }
 
 export function splitMessage(text: string, limit = 4000): string[] {
-  if (text.length <= limit) return [text];
+  // A zero or negative limit used to make `cut` zero, leaving `rest` unchanged —
+  // an infinite loop on the first iteration. So did a leading newline.
+  const width = Math.max(1, Math.floor(limit));
+  if (text.length <= width) return [text];
   const parts: string[] = [];
   let rest = text;
-  while (rest.length > limit) {
-    let cut = rest.lastIndexOf("\n", limit);
-    if (cut < limit / 2) cut = limit;
+  while (rest.length > width) {
+    let cut = rest.lastIndexOf("\n", width);
+    if (cut < width / 2 || cut <= 0) cut = width;
     parts.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
@@ -211,11 +214,33 @@ export async function downloadFile(
     signal: AbortSignal.timeout(120_000),
   });
   if (!response.ok) throw new Error(`下载失败 HTTP ${response.status}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length > FILE_LIMIT) throw new Error(`文件超过 ${FILE_LIMIT} 字节`);
+  // arrayBuffer() read the whole body before the 20 MB check ever ran, so a huge (or
+  // malicious) response filled the gateway's memory first. Refuse on the declared
+  // size, then count bytes as they arrive even when no length was declared.
+  const declared = Number(response.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > FILE_LIMIT) {
+    throw new Error(`文件超过 ${FILE_LIMIT} 字节`);
+  }
+  if (response.body === null) throw new Error("下载没有响应体");
+  const chunks: Buffer[] = [];
+  let size = 0;
+  const reader = response.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > FILE_LIMIT) {
+      await reader.cancel().catch(() => {});
+      throw new Error(`文件超过 ${FILE_LIMIT} 字节`);
+    }
+    chunks.push(Buffer.from(value));
+  }
+  // tmp + rename: a crash mid-write must not leave a half file that looks complete.
+  const tmp = `${dest}.tmp-${process.pid}`;
   mkdirSync(dirname(dest), { recursive: true });
-  writeFileSync(dest, bytes);
-  return bytes.length;
+  writeFileSync(tmp, Buffer.concat(chunks));
+  renameSync(tmp, dest);
+  return size;
 }
 
 const IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;

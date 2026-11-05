@@ -1,15 +1,54 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { keyFiles, scanLogBodies } from "../internal/doctor.ts";
+import { PROBE, botWiring, keyFiles, scanLogBodies } from "../internal/doctor.ts";
+import { botIssues } from "../internal/bots.ts";
 
 function tree(build: (root: string) => void): string {
   const root = mkdtempSync(join(tmpdir(), "geng-doctor-"));
   build(root);
   return root;
 }
+
+test("the docker probe extracts the gateway ip, not a whole route line", () => {
+  const script = PROBE[2] ?? "";
+  const m = /awk "([^"]+)"/.exec(script);
+  const awk = m?.[1] ?? "";
+  assert.notEqual(awk, "", "探针里应该有一条 awk");
+  // JS strips a lone backslash from "\$3"; the shell then expands a bare $3 as a
+  // positional parameter (empty), awk prints the entire route line, curl fails, and
+  // the check always answers DOCKER_BLOCKED — the one shape that looks like safety.
+  assert.match(awk, /print \\\$3/, "反斜杠要活到 shell 才对");
+  const out = execFileSync(
+    "sh",
+    ["-c", `printf '%s\\n' 'default via 10.0.0.1 dev eth0' | awk "${awk}"`],
+    { encoding: "utf8" },
+  ).trim();
+  assert.equal(out, "10.0.0.1");
+});
+
+test("one instance's doctor does not FAIL over another bot's typo", () => {
+  const issues = botIssues(
+    { alice: { token: "t" }, bob: { token: "" }, ops: { token: "t", chat: 1 } },
+    () => true,
+  );
+  assert.deepEqual(botWiring("alice", issues), {
+    own: [],
+    others: ["bob：没有 token"],
+  });
+  assert.deepEqual(botWiring("bob", issues), {
+    own: ["bob：没有 token"],
+    others: [],
+  });
+  // ops and file-wide problems reach every instance, so they stay in this check
+  const global = botIssues({ alice: { token: "t" }, ops: { token: "t" } }, () => true);
+  assert.deepEqual(botWiring("alice", global).own, ["ops：没有 chat，运维消息发不出去"]);
+  const noOps = botIssues({ alice: { token: "t" } }, () => true);
+  assert.equal(botWiring("alice", noOps).own.length, 1, "「没有 ops」是文件级问题，归到每个实例");
+});
 
 test("keyFiles: 按文件名找，删掉 seen，也不往 node_modules 里钻", () => {
   const root = tree((r) => {

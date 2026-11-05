@@ -18,6 +18,24 @@ test("anything that is not a message is not a quote", () => {
   }
 });
 
+test("the object spelling of a quote obeys the same rules as the id", () => {
+  // The id branch has always refused NaN, fractions, 0 and negatives. The object
+  // branch only checked `typeof === "number"`, so an outbox item written by an
+  // older tool could carry NaN all the way into reply_to_message_id and get a 400.
+  for (const bad of [
+    { chat: Number.NaN, messageId: 1 },
+    { chat: 1.5, messageId: 1 },
+    { chat: 0, messageId: 1 },
+    { chat: -1001, messageId: 0 },
+    { chat: -1001, messageId: -5 },
+    { chat: Number.POSITIVE_INFINITY, messageId: 1 },
+    { chat: -1001, messageId: 1.5 },
+  ]) {
+    assert.equal(parseReplyTo(bad), null, `两种写法要同一套规则：${bad.chat}/${bad.messageId}`);
+  }
+  assert.deepEqual(parseReplyTo({ chat: -1001, messageId: 151 }), { chat: -1001, messageId: 151 });
+});
+
 test("a quote is dropped, not resent elsewhere, when the chat does not match", () => {
   assert.equal(quoteFor(-100, { chat: -100, messageId: 5 }), 5);
   assert.equal(quoteFor(-100, { chat: -200, messageId: 5 }), undefined);
