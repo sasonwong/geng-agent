@@ -21,7 +21,7 @@
 | Node ≥ 22.18 | 直接跑 TypeScript，没有构建步骤 | `node --version` |
 | node 的**绝对路径** | systemd 的 PATH 里没有 nvm；`env node` 会让 unit 每十秒以 127 退出 | `command -v node` 记下来 |
 | docker + 当前用户在 `docker` 组 | 每轮醒来是一个 `--rm` 容器 | `docker ps`（不是 `sudo docker ps`） |
-| `rustic`、`flock`、`rsync` | 备份、单实例锁、迁移 | `rustic --version`、`flock --help` |
+| `rustic`、`flock` | 备份、单实例锁（`flock` 写在 unit 里） | `rustic --version`、`flock --help` |
 
 **docker 组要重新登录一次才生效。** 刚 `usermod -aG docker` 完就 `docker ps` 会报 socket 权限，
 那不是装错了。
@@ -200,7 +200,7 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 值**从 stdin 读**（argv 会在 `ps` 里露出去），同名行原地替换、注释和别的行一个字不动。
 
 **变量名由 provider 决定，不是靠猜。** `readModelKey` 按 `GENG_MODEL_KEY` / `OPENCODE_API_KEY` /
-`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` 的顺序找第一个非空的，写哪个都行。
+`DEEPSEEK_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` 的顺序找第一个非空的，写哪个都行。
 名字写错的表现是每个请求都 503，而 pi 只说请求失败——看起来像网络坏了。验证的方式是拿它去打
 一次真端点看状态码（401 = 能连上但没认出来，200 = 对了），不要靠打印它、看长度、看前缀。
 
@@ -304,7 +304,7 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是�
 |---|---|---|
 | `secrets/bots.json` | gateway | `systemctl --user reload geng-gateway` |
 | `secrets/mail.json` | gateway | 同上 |
-| `data/<inst>/policy.json` | daemon | **每一轮开头**，什么也不用做 |
+| `data/<inst>/policy.json` | daemon + book 端点 | **每一轮开头**（daemon），**每个请求**（代理名单、最短间隔、能说话的名单）；都不用重启 |
 | `secrets/search.env` | search | **每一次请求**，什么也不用做；`bind` 除外，它只在 listen 时读 |
 
 `reload` 不是重启：长轮询不断，只有 **token 变了的 bot** 才会重新登录（一个 token 只许一个
@@ -344,7 +344,9 @@ journalctl --user -u geng-gateway -n 5    # 应有「重载 alice：… allow=4 
    两个都漏的时候症状很像：人说的话照收，所以你不会起疑。区别是 privacy 没关时别的 bot 只在
    @ / 回复它的时候才到，bot-to-bot 没开时一条都不到。开了之后 Telegram 也不再替它拦 bot 之间的
    循环，刹车只剩 gateway 自己的 tripwire（一分钟 30 条、同一句 10 次 → 停 10 分钟）。
-3. `ops` bot 只建一个：daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀
+3. `ops` bot 只建一个：daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀。
+   **有了任何 bot 就得有它**：没有 `ops` 时，静音通知、gateway 断线、停车通知只会堆在
+   `data/_ops/outbox` 里——gateway 只在这个键下排空那队列，`geng doctor` 的「bot 接线」会说
 
 ```bash
 echo '<BotFather 给的 token>' | node cmd/geng/index.ts bots add alice \
@@ -588,7 +590,7 @@ git fetch origin && git reset --hard origin/main
 | 没有 `daemon.log` 这一行，但状态里有一轮 | `ls -l data/<inst>/daemon.log` | 它是**目录**：每次 append 都 EISDIR，所以症状是"日志不涨"而不是报错。删掉再跑一次 `init` |
 | unit 127，每十秒一次 | unit 里的 `@NODE@` | node 绝对路径错（nvm 不在 systemd 的 PATH 里） |
 | 容器压根没起来，日志里也没有一轮 | 手工跑一遍完整的 `docker run` | argv 里少了一个 `-e`（比如 `TZ=…` 没带 `-e`，docker 会把它当镜像名） |
-| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（`GENG_BOOK_SOCK` 缺了，`web_search`/`say` 这一类干脆不注册自己，`journal` 则在调用时报错） |
+| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（`GENG_BOOK_SOCK` 缺了：`web_search` 干脆不注册自己，`journal`/`say` 这类在调用时回一句话） |
 | 它不回复，但进程正常 | `docker ps`、`daemon.log` 最后一行的用时 | 一轮还在跑（一轮可以跑 30 分钟）；或者它**选择了不说**——只有 `say` 会送出去，正文不会 |
 | 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数；读靠 `recall`/`open` |
 | 搜不到东西 | `doctor` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |

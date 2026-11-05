@@ -93,7 +93,7 @@ gate 脚本本身。
 
 ## 开发套件
 
-`cmd/geng-dev/` 是开发入口，**不发布**（`package.json` 的 `files` 只列 `cmd/geng`）。
+`cmd/geng-dev/` 是开发入口，**不发布**（`package.json` 的 `files` 里没有它）。
 规矩：
 
 - 生产命令（`cmd/geng`）只碰它该碰的；调试命令都在 `cmd/geng-dev`
