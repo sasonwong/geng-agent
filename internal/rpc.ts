@@ -282,7 +282,11 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     resolveSettled();
   });
   child.on("close", () => {
-    if (!settled) startFailed = true;
+    // A child killed on purpose did start: the round was stuck in an action when the
+    // wall came, not missing its first line. Reading that close as "it never started"
+    // made every hard timeout report `start-failed` — and `meta/cut.json`, written only
+    // for a timeout, was never written for the one case it exists for.
+    if (!settled && !timedOut && !killed) startFailed = true;
     failPending();
     resolveSettled();
   });
