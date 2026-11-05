@@ -27,7 +27,11 @@
 **docker 组要重新登录一次才生效。** 刚 `usermod -aG docker` 完就 `docker ps` 会报 socket 权限，
 那不是装错了。
 
-### egress 规则
+### egress 规则（只有选择直连时才需要）
+
+**默认不需要这一节。** 容器默认 `--network none`：没有接口、没有路由、没有 DNS，唯一出口是
+book socket 上的 HTTP 代理（见下）。这一节只在你想让容器**绕过代理直连**时用——
+`policy.json` 里把 `container.network` 填成一个网桥名，然后按这里的规则给它封网。
 
 规则只存在于 iptables 里，**重启就没了，而且没了不报错**：容器照常工作，只是元数据地址和私网段
 又通了。所以它装成 system unit（要 root，不是 user unit），每次开机重新写一遍：
@@ -54,15 +58,35 @@ systemctl is-enabled geng-egress               # enabled = 下次开机会重写
 - 私网是**整段封死**的，没有例外。容器够到宿主靠的不是网络：搜索端点是 unix socket，
   daemon 把那个文件挂进容器（见 5.2）。**不要**为了省事把整段私网放开，也不要再加按端口的例外
 
-验证（两条都要，缺一条就说明规则位置错了）：
+直连模式下验证（两条都要，缺一条就说明规则位置错了）：
 
 ```bash
 docker run --rm --network agent-net geng-agent:latest sh -lc 'curl -sS -m 5 -o /dev/null -w "%{http_code}\n" https://api.github.com'   # 应该出 200/301
 docker run --rm --network agent-net geng-agent:latest sh -lc 'curl -sS -m 5 http://169.254.169.254/ ; echo exit=$?'                    # 应该超时
 ```
 
-> 「连不上」和「被封住」在容器里长得一样。所以在 `geng doctor <inst> --probe` 里有一个
-> **正向对照**（先证明它能上网），再证明私网不通——只测否定的探针在完全没网时也会全绿。
+> 「连不上」和「被封住」在容器里长得一样。所以 `geng doctor <inst> --probe` 两边都测：
+> **直连必须失败，代理必须通**。只测否定的一侧，一个没有任何出口的容器也会全绿。
+
+### 出口代理（容器怎么上网）
+
+容器没有网络。要出去的东西只有三类：模型请求（`socat 11434 → book.sock`，daemon 补 key）、
+搜索（另一个 socket）、以及所有 HTTPS（`socat 3128 → book.sock`，daemon 做 HTTP 代理）。
+
+放行名单是 `policy.json` 的 `container.proxyAllow`，默认八项（github、npm、pypi、golang）。
+要加一个主机就写进去——它是**后缀匹配**：`github.com` 覆盖 `codeload.github.com`，
+但 `evil-github.com` 不匹配。
+
+代理在放行**之前**还会解析那个名字，任何一个答案是私网/回环/链路本地就拒绝；连接用的是被检查过
+的那个地址。这是为了让代理不变成通往宿主自己网络的洞——那比没有代理更糟。
+
+```bash
+node cmd/geng/index.ts doctor --instance alice --probe    # 「只有代理能出去」那一行
+```
+
+被拒绝的主机会在 `daemon.log` 留一行（`proxy 拒绝 pi.dev:443：pi.dev 不在放行名单里`），
+所以「它想连哪儿」是可读的，不是猜的。pi 自己会去拉模型目录（`pi.dev`），默认被拒——
+用镜像里自带的目录，模型列表因此不会在半夜静默变化。
 
 ### 代理（可选）
 

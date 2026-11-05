@@ -6,6 +6,7 @@ import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
+import { handleConnect, type ProxyRule } from "./proxy.ts";
 import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -43,12 +44,16 @@ export interface BookOptions {
   minWakeMs?: number;
   /** Which chats it may speak into or listen to; the daemon already knows, the container does not. */
   places?: number[];
+  /** Hosts the outbound proxy may reach. Absent means no proxy, which is what tests want. */
+  proxy?: ProxyRule;
   /**
    * Called once per model-key fetch. pi asks for the key on every model request, so the
    * count should track the number of calls; a round that fetched it more often than it
    * talked to the model fetched it for something else.
    */
   onKeyFetch?: () => void;
+  /** Called once per proxied connection: the only evidence that it went somewhere. */
+  onNetwork?: () => void;
 }
 
 export interface HandlerOptions {
@@ -416,7 +421,11 @@ export function startBookServer(o: BookOptions): Promise<Server> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const sock = socketPath(o.paths);
   const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs, places: o.places });
+  // Calls into the daemon count against the round: `net=N` on the log line is what makes
+  // "it went somewhere" a number instead of a guess.
+  const net = (): void => o.onNetwork?.();
 
+  const rule = o.proxy ?? { allow: [] };
   const server = createServer((req, res) => {
     const reply = (status: number, body: unknown): void => {
       res.writeHead(status, { "content-type": "application/json" });
@@ -503,6 +512,14 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       handle(req, body).then((r) => reply(r.status, r.body)).catch(guard);
     });
     req.on("error", guard);
+  });
+
+  server.on("connect", (req, socket, head) => {
+    net();
+    handleConnect(req.url ?? "", socket, head, rule, log).catch((err: unknown) => {
+      log(`proxy ${req.url ?? "?"} 出错：${(err as Error).message}`);
+      socket.destroy();
+    });
   });
 
   mkdirSync(o.paths.run, { recursive: true });

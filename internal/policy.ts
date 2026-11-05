@@ -28,8 +28,10 @@ export interface Policy {
     memory: string;
     cpus: string;
     pidsLimit: number;
-    /** null means the default docker bridge; set this to a network with egress rules applied. */
+    /** null means no network at all: the container reaches the world through the proxy. */
     network: string | null;
+    /** Hosts the proxy will open a connection to. Suffix match: `github.com` covers its subdomains. */
+    proxyAllow: string[];
   };
 }
 
@@ -47,6 +49,17 @@ export function defaultPolicy(): Policy {
       cpus: "1.5",
       pidsLimit: 512,
       network: null,
+      // small on purpose: a list that grows by default is a list nobody reads
+      proxyAllow: [
+        "github.com",
+        "api.github.com",
+        "raw.githubusercontent.com",
+        "registry.npmjs.org",
+        "pypi.org",
+        "files.pythonhosted.org",
+        "proxy.golang.org",
+        "sum.golang.org",
+      ],
     },
   };
 }
@@ -108,6 +121,19 @@ export function loadPolicy(file: string): Policy {
       cpus: str(container.cpus, "container.cpus"),
       pidsLimit: num(container.pidsLimit, "container.pidsLimit", 16),
       network: typeof container.network === "string" && container.network !== "" ? container.network : null,
+      proxyAllow:
+        container.proxyAllow === undefined
+          ? d.container.proxyAllow
+          : (() => {
+              // A wildcard here would be an open proxy on the host; direct network is what
+              // "let it go anywhere" already means, and it is a different field with a
+              // different consequence.
+              const list = Array.isArray(container.proxyAllow) ? container.proxyAllow : [];
+              if (list.some((x) => x === "*" || String(x).includes("/"))) {
+                throw new ExpectedError("policy: container.proxyAllow 只收主机名，不收 * 或 URL");
+              }
+              return list.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+            })(),
     },
   };
 }

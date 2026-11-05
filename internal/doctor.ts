@@ -167,11 +167,11 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     checks.push({ name: "docker", ok: hasCmd("docker"), detail: "run 需要 docker 可执行" });
     checks.push({
       name: "出口网络",
-      ok: policy.container.network !== null,
+      ok: policy.container.network === null,
       detail:
         policy.container.network === null
-          ? "container.network 是 null，容器会落在默认桥接上，egress.sh 无从生效"
-          : policy.container.network,
+          ? `没有直接网络：出口只有代理，放行 ${policy.container.proxyAllow.length} 个主机`
+          : `container.network=${policy.container.network}：容器绕过代理直连，代理只对遵守 HTTP_PROXY 的工具生效`,
       warnOnly: true,
     });
   } else {
@@ -497,14 +497,22 @@ const PROBE = [
   "sh",
   "-c",
   [
+    // the entrypoint starts these; the probe bypasses it, so it has to do the same or it
+    // measures a container with no way out at all
+    'socat TCP-LISTEN:11434,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &',
+    'socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock >/dev/null 2>&1 &',
+    'sleep 0.3',
     'if [ -e /state/policy.json ]; then echo POLICY_VISIBLE; else echo POLICY_HIDDEN; fi',
     'ls /state >/dev/null 2>&1 && echo STATE_OK || echo STATE_MISSING',
     // the tools are a mount now, so "they are not there" is not a quiet degradation:
     // pi is started with one -e per file, and a missing file makes it exit 1 — the
     // wake dies instead of waking up with fewer things it can do
     'echo "EXT_COUNT=$(ls /opt/geng/extensions/*.ts 2>/dev/null | wc -l)"',
-    // the positive control: without it, "everything blocked" passes every check below
-    'if curl -s -m 8 -o /dev/null https://opencode.ai/ 2>/dev/null; then echo EGRESS_OK; else echo EGRESS_DEAD; fi',
+    // Two sides, because one alone proves nothing: direct egress has to be *broken* and
+    // the proxy has to work. A container that can still reach github directly would pass
+    // "proxy works" while the thing this is supposed to prevent is happening.
+    'if curl -s -m 5 --noproxy "*" -o /dev/null https://github.com/ 2>/dev/null; then echo NET_DIRECT_OK; else echo NET_DIRECT_BLOCKED; fi',
+    'if curl -s -m 20 -o /dev/null https://github.com/ 2>/dev/null; then echo PROXY_OK; else echo PROXY_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
     // the real attack path is the host on our own gateway, not a fixed docker0 address
     'GW=$(ip route 2>/dev/null | awk "/^default/{print \$3; exit}"); if [ -n "$GW" ] && curl -s -m 3 -o /dev/null "http://$GW:2375/version" 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
@@ -548,11 +556,13 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   const inContainer = Number(/EXT_COUNT=(\d+)/.exec(out)?.[1] ?? -1);
 
   checks.push({
-    name: "容器能上网",
-    ok: out.includes("EGRESS_OK"),
-    detail: out.includes("EGRESS_DEAD")
-      ? "容器连不上 opencode.ai —— 出口规则把 80/443 也拦了"
-      : "通",
+    name: "只有代理能出去",
+    ok: out.includes("PROXY_OK") && out.includes("NET_DIRECT_BLOCKED"),
+    detail: out.includes("NET_DIRECT_OK")
+      ? "容器能直连 github.com —— --network none 没生效，代理只是装饰"
+      : out.includes("PROXY_DEAD")
+        ? "代理不通：容器拿不到任何出口（socat 没起来，或 socket 不在）"
+        : "直连断开，代理通",
   });
   checks.push({
     name: "policy.json 不可见",

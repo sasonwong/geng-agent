@@ -48,7 +48,10 @@ token=$(curl -fsS --unix-socket "${GENG_BOOK_SOCK:-/run/geng/book.sock}" http://
 printf 'username=x-access-token\npassword=%s\n' "$token"
 SH
 RUN chmod 0755 /usr/local/bin/geng-gh-credential \
-  && printf '[credential "https://github.com"]\n\thelper = !/usr/local/bin/geng-gh-credential\n' >> /etc/gitconfig
+  && printf '[credential "https://github.com"]\n\thelper = !/usr/local/bin/geng-gh-credential\n' >> /etc/gitconfig \
+  # git does read the environment, but the system config is the one that survives a
+  # `--noproxy` habit and a wrapper script that clears the environment
+  && printf '[http]\n\tproxy = http://127.0.0.1:3128\n' >> /etc/gitconfig
 
 # pi itself: a Bun-compiled release binary, pinned like gh. No node in the image, so
 # there is no npm, no package manager and no second copy of a JS runtime to keep patched.
@@ -83,9 +86,11 @@ RUN mkdir -p /home/agent/.pi/agent/sessions \
 RUN cat > /usr/local/bin/geng-pi <<'SH'
 #!/bin/sh
 [ -d "$HOME/.pi/agent/npm" ] || cp -r /opt/pi-npm "$HOME/.pi/agent/npm"
-# pi speaks HTTP; the daemon speaks on a unix socket. This is the bridge, and it is the
-# only listener in the container: 127.0.0.1, model traffic only, no credential in it.
+# The container has no network. These two listeners are how anything gets out at all: one
+# carries model requests, the other is the HTTP proxy every tool is pointed at. Both are
+# loopback, both end at the book socket, and neither holds a credential.
 socat TCP-LISTEN:11434,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock &
+socat TCP-LISTEN:3128,bind=127.0.0.1,reuseaddr,fork UNIX-CONNECT:/run/geng/book.sock &
 # the port is open before the first request, but give socat a moment to fail loudly if the
 # socket is missing: a broken pipe here is better than a mystery "connection refused"
 sleep 0.2

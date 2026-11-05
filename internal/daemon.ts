@@ -177,6 +177,8 @@ function logLine(
   inj: { total: number; unread: number },
   /** Model-key fetches: one per model request is normal, more is somebody else asking. */
   keyFetches: number,
+  /** Outbound connections through the proxy: the count of places it went. */
+  netCalls: number,
   interventions: string[],
   backup: BackupOutcome | null,
   spent: { tokens: number; cost: number } | null,
@@ -202,6 +204,7 @@ function logLine(
   }
   parts.push(`inbox=${inboxCount}`);
   if (keyFetches > 0) parts.push(`key=${keyFetches}`);
+  if (netCalls > 0) parts.push(`net=${netCalls}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
   if (inj.total > 0) {
     parts.push(inj.unread > 0 ? `inj=${inj.total}(unread=${inj.unread})` : `inj=${inj.total}`);
@@ -287,6 +290,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // Model-key fetches in the current round. The endpoint lives as long as the daemon, so
   // the counter is reset when a round starts and read when it logs.
   let keyFetches = 0;
+  let netCalls = 0;
   if (!o.dry) {
     try {
       await startBookServer({
@@ -294,6 +298,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         log,
         minWakeMs: policy.cycle.minWakeMinutes * 60_000,
         places: knownPlaces(paths.root, o.instance).map((p) => p.id),
+        proxy: { allow: policy.container.proxyAllow },
+        onNetwork: () => {
+          netCalls += 1;
+        },
         // pi asks for the key on every model request, so this should track the number of
         // calls. A round whose count is higher fetched the key for something else — the
         // socket is reachable from `bash` too, and this is the only way that shows up.
@@ -356,6 +364,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
     keyFetches = 0;
+    netCalls = 0;
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
     let pendingWait: WaitSpec | null;
@@ -632,6 +641,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       inbox.length,
       inj,
       keyFetches,
+      netCalls,
       interventions,
       backup,
       spent,

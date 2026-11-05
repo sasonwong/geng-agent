@@ -101,6 +101,17 @@ export function buildCommand(
       "/tmp:rw,nosuid,size=64m",
       "--tmpfs",
       "/home/agent/.pi/agent:rw,size=32m",
+      // the proxy lives on loopback, bridged to the book socket by `geng-pi`
+      "-e",
+      "HTTP_PROXY=http://127.0.0.1:3128",
+      "-e",
+      "HTTPS_PROXY=http://127.0.0.1:3128",
+      "-e",
+      "http_proxy=http://127.0.0.1:3128",
+      "-e",
+      "https_proxy=http://127.0.0.1:3128",
+      "-e",
+      "NO_PROXY=localhost,127.0.0.1,::1",
       "-e",
       "HOME=/home/agent",
       // every -e needs its own flag; a bare KEY=VALUE lands where the image name goes
@@ -154,7 +165,10 @@ export function buildCommand(
         `GENG_BOOK_SOCK=${BOOK_SOCKET_IN_CONTAINER}`,
       );
     }
-    if (policy.container.network) args.push("--network", policy.container.network);
+    // `network` is now an opt-in to direct egress, not the default. The default is a
+    // container with no interface but loopback: everything leaves through the proxy on the
+    // book socket, so "it went somewhere" is a line in the log rather than a route.
+    args.push("--network", policy.container.network ?? "none");
     // secrets are injected, never mounted
     if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
     args.push(
