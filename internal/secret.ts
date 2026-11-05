@@ -5,9 +5,10 @@ import type { MailConfig, MailEnv } from "./mail.ts";
 import { MODEL_KEY_VARS } from "./model.ts";
 
 /**
- * Env files under `secrets/`, and the three values that have to be identical in two
- * places. A mismatch there is the worst kind of wrong: one side works, the other side
- * quietly does nothing, and nothing in any log says which.
+ * Env files under `secrets/`, and the values that have to match something outside this
+ * repo: the mail token the Worker also holds, the bot token Telegram issued, the GitHub
+ * App's two ids. A mismatch is the worst kind of wrong — one side looks fine, the other
+ * quietly does nothing, and no log says which.
  */
 
 export function readEnvFile(path: string): Record<string, string> {

@@ -98,10 +98,10 @@ exec pi "$@"
 SH
 RUN chmod 0755 /usr/local/bin/geng-pi
 
-# say / mute / web_search are mounted read-only at run time (see internal/command.ts) from
-# image/extensions/, not copied in: a tool that changes during development must not cost a
-# rebuild of the apt and npm layers above it. The mountpoint lives outside the agent's home
-# so that neither writing nor deleting them is possible.
+# The tools in image/extensions/ are mounted read-only at run time (see internal/command.ts),
+# not copied in: a tool that changes during development must not cost a rebuild of the apt and
+# npm layers above it. The mountpoint lives outside the agent's home so that neither writing
+# nor deleting them is possible.
 RUN mkdir -p /opt/geng/extensions
 
 WORKDIR /work

@@ -1,4 +1,4 @@
-/** Thin Telegram Bot API client. No SDK: five methods is not worth a dependency. */
+/** Thin Telegram Bot API client. No SDK: a handful of methods is not worth a dependency. */
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
