@@ -399,7 +399,9 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       // Two shapes, one field: the outbox keeps them apart so the gateway never has to
       // guess whether a string is a container path or a path on the host.
       const made: string[] = [];
-      const originals: { id: string; path: string; name: string }[] = [];
+      // what the gateway sends: a host path and the name to send it under. The id it was
+      // asked for is not on the item — nothing reads it.
+      const originals: { path: string; name: string }[] = [];
       for (const f of files) {
         if (f.startsWith("/")) {
           // Refused here rather than at the gateway: only /work is its own, and a path the
@@ -413,7 +415,7 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         }
         const hit = fileById(paths, f);
         if (hit === null) return { status: 404, body: { error: `没有这个文件：${f}` } };
-        originals.push({ id: f, path: hit.path, name: hit.name });
+        originals.push({ path: hit.path, name: hit.name });
       }
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       mkdirSync(paths.outbox, { recursive: true });

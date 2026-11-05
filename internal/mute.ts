@@ -89,11 +89,12 @@ export function readOutbox(dir: string): OutboxItem[] {
       file: join(dir, f),
       id: raw.id ?? f.replace(/\.json$/, ""),
       files: Array.isArray(raw.files) ? raw.files.filter((x): x is string => typeof x === "string") : [],
+      // rebuilt, not cast: an item written by an older build may carry fields the queue no
+      // longer has (a file id, once), and the gateway only ever hands over these two
       attachments: Array.isArray(raw.attachments)
-        ? (raw.attachments as unknown[]).filter((x): x is { path: string; name: string } => {
-            const o = x as { path?: unknown; name?: unknown } | null;
-            return typeof o?.path === "string" && typeof o?.name === "string";
-          })
+        ? (raw.attachments as ({ path?: unknown; name?: unknown } | null)[])
+            .filter((o): o is { path: string; name: string } => typeof o?.path === "string" && typeof o?.name === "string")
+            .map((o) => ({ path: o.path, name: o.name }))
         : [],
       messages,
       chat: typeof raw.chat === "number" ? raw.chat : undefined,

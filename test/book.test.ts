@@ -343,7 +343,10 @@ test("saying a file by id hands the gateway the original, not a copy", async () 
   const queued = JSON.parse(readText(join(paths.outbox, `${(r.body as { id: string }).id}.json`)) ?? "{}");
   // two shapes, kept apart: one is a path inside the container, the other is on the host
   assert.deepEqual(queued.files, ["/work/in/made.txt"]);
-  assert.deepEqual(queued.attachments, [{ id: "F1", path: original, name: "F1-0-report.pdf" }]);
+  // the queue carries what the gateway sends — a host path and a name. The id it was asked
+  // for is not on it: nothing reads it, and a field nobody opens is a field kept current
+  // by hand.
+  assert.deepEqual(queued.attachments, [{ path: original, name: "F1-0-report.pdf" }]);
   // an id nothing has is refused before anything is queued
   const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], files: ["F9"] }));
   assert.equal(bad.status, 404);

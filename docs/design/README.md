@@ -415,7 +415,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
 | `inbox/*.json` | gateway | `{id, text, from, at, chat, route, attachments?[{kind,id?,name?,note?,bytes?}], quote?{id,from?,text?}}` |
-| `outbox/*.json` | daemon（`say` 走 socket） | `{id, messages[], chat?, files?(/work 路径), attachments?[{id,path,name}], replyTo?{chat,messageId}}` |
+| `outbox/*.json` | daemon（`say` 走 socket） | `{id, messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}}` |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
 | `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{at,wake,tools,inbox,talkedTo[],touched}, knockHold?}` |
 | `meta/escalation.json` | daemon | `{level, streak, symptom, detail, updatedAt}` |
