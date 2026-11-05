@@ -46,3 +46,55 @@ test("RepeatWatcher ignores a different key", () => {
   }
   assert.equal(w.repeat, null);
 });
+
+// Tools can run in parallel: two starts, one end, and a round killed with the second
+// still running. A single open-call slot meant the one `end` erased the other's record,
+// and the cut note said "nothing was running" over a live round.
+test("an end retires one open call, not every open call", async () => {
+  const { writeFileSync, mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { runWaking } = await import("../internal/rpc.ts");
+  const dir = mkdtempSync(join(tmpdir(), "geng-rpc-"));
+  const fake = join(dir, "fake-pi.mjs");
+  writeFileSync(
+    fake,
+    [
+      "let buf = '';",
+      "process.stdin.setEncoding('utf8');",
+      "process.stdin.on('data', (c) => {",
+      "  buf += c;",
+      "  let nl;",
+      "  while ((nl = buf.indexOf('\\n')) !== -1) {",
+      "    const line = buf.slice(0, nl);",
+      "    buf = buf.slice(nl + 1);",
+      "    if (line.trim() === '') continue;",
+      "    const rec = JSON.parse(line);",
+      "    if (rec.type === 'prompt') {",
+      "      process.stdout.write(JSON.stringify({ type: 'response', id: rec.id, data: { disposition: 'accepted' } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'tool_execution_start', toolName: 'bash', args: { cmd: 'a' } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'tool_execution_start', toolName: 'read', args: { path: 'b' } }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'tool_execution_end' }) + '\\n');",
+      "      process.stdout.write(JSON.stringify({ type: 'agent_settled', aborted: true }) + '\\n');",
+      "    } else {",
+      "      process.stdout.write(JSON.stringify({ type: 'response', id: rec.id, data: {} }) + '\\n');",
+      "    }",
+      "  }",
+      "});",
+    ].join("\n"),
+  );
+  try {
+    const r = await runWaking({
+      command: { cmd: process.execPath, args: [fake], env: {}, cwd: dir },
+      instance: "probe",
+      timeoutMs: 20_000,
+      prompt: "hi",
+      repeatThreshold: 3,
+    });
+    assert.equal(r.settled, true);
+    assert.equal(r.toolCalls.length, 2);
+    assert.equal(r.openCall?.name, "read", "一个 end 只收掉一个 start，另一个还在跑");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
