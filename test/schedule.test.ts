@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alarmSpent, knockFloorMs, knockable, readWaiting } from "../internal/schedule.ts";
+import { alarmSpent, knockFloorMs, knockable, parseAfter, readWaiting } from "../internal/schedule.ts";
 import { planFor } from "../internal/escalation.ts";
 
 function tmpFile(content: string): string {
@@ -34,6 +34,30 @@ test("readWaiting returns null when no alarm was set", () => {
   assert.equal(readWaiting(tmpFile("{not json")), null);
   assert.equal(readWaiting(tmpFile(JSON.stringify({ why: "我忘了" }))), null);
   assert.equal(readWaiting(tmpFile(JSON.stringify({ wake: { after: "20 minutes" } }))), null);
+});
+
+// `waiting.json` 是盘上的状态，不是这个进程刚写出来的值：手改、旧版本、恢复的快照都会
+// 往里放别的东西。`after: null` 以前会走到 `null.trim()`，而这一行在 daemon 主循环的
+// 第一条语句上——抛出去就是每次启动都死，日志里一个字都没有。读不认识的形状要答 null，
+// 和这个函数其它每一条分支一样。
+test("an alarm file full of shapes nobody wrote is not a reason to die", () => {
+  for (const after of [null, true, {}, [], "20 minutes", ""]) {
+    const f = tmpFile(JSON.stringify({ wake: { after } }));
+    assert.equal(readWaiting(f), null, `after=${JSON.stringify(after)} 该答 null`);
+  }
+  // 数字是分钟：旧写法留下的形状，还得认
+  const f = tmpFile(JSON.stringify({ wake: { after: 30 } }));
+  assert.equal(readWaiting(f)?.dueAtMs, statSync(f).mtimeMs + 30 * 60_000);
+});
+
+test("a duration that overflows is not a duration", () => {
+  // JSON 里 NaN 和 Infinity 都会变成 null，走不到这一段，只能直接喂给解析器。
+  // 不挡的话 `dueAt` 是 Infinity：一个再也不会醒的实例，而不是一个坏掉的闹钟。
+  assert.equal(parseAfter(Number.NaN), null);
+  assert.equal(parseAfter(Number.POSITIVE_INFINITY), null);
+  assert.equal(parseAfter("9".repeat(400) + "m"), null);
+  assert.equal(parseAfter(30), 30 * 60_000);
+  assert.equal(parseAfter("1.5h"), 90 * 60_000);
 });
 
 test("a message already handed over does not knock again inside the floor", () => {
