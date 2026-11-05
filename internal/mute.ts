@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, renameSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readJson, writeJson } from "./fs.ts";
 import { parseReplyTo } from "./quote.ts";
 
@@ -108,7 +108,9 @@ export function ackOutbox(dir: string, file: string): void {
   const sent = join(dir, "sent");
   mkdirSync(sent, { recursive: true });
   try {
-    renameSync(file, join(sent, file.split("/").pop() as string));
+    // basename, not a split on "/": the separator on the host that runs the tests is not
+    // the one in the path, and a rename that quietly fails retries the item forever
+    renameSync(file, join(sent, basename(file)));
   } catch {
     // if the rename fails the item is retried; the file may still be there
   }
