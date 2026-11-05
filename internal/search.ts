@@ -79,6 +79,17 @@ interface Quota {
   limit?: number;
 }
 
+/**
+ * What is left today. In-flight requests count against it too: charging only after a
+ * success used to let a burst of concurrent calls pass the same check — each one read
+ * the same count, each one was allowed, and each success charged afterwards, so the day
+ * could be overspent by exactly as many calls as were running at once.
+ */
+export function leftOf(q: Quota, limit: number, inFlight: number): number {
+  const used = (q.day === today() ? (q.count ?? 0) : 0) + inFlight;
+  return Math.max(0, limit - used);
+}
+
 const UPSTREAM = "https://api.deepseek.com/v1/tools";
 
 /**
@@ -152,11 +163,17 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
 
   // Two halves, because a failed call costs nothing and used to cost a search: a wrong
   // key burned the whole day's quota in one round, and the quota is the only limit here.
+  // The calls this process is running right now are part of the balance, from the moment
+  // they pass the gate and not from the moment they succeed.
+  let inFlight = 0;
   const allowance = (): { ok: boolean; remaining: number } => {
-    const q = readJson<Quota>(quotaFile, {});
-    const count = q.day === today() ? (q.count ?? 0) : 0;
-    const left = Math.max(0, env.dailyLimit - count);
-    return left === 0 ? { ok: false, remaining: 0 } : { ok: true, remaining: left };
+    const left = leftOf(readJson<Quota>(quotaFile, {}), env.dailyLimit, inFlight);
+    if (left === 0) return { ok: false, remaining: 0 };
+    inFlight += 1; // reserved: spent on success, given back on failure
+    return { ok: true, remaining: left };
+  };
+  const release = (): void => {
+    inFlight -= 1;
   };
 
   /** Charge one search. Only called for an answer that actually came back. */
@@ -236,6 +253,9 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
         } catch (err) {
           log(`${operation} 出错：${(err as Error).message}`);
           send(502, { error: (err as Error).message, remaining: remaining() });
+        } finally {
+          // the reservation became either a charge in the file or nothing at all
+          release();
         }
       })();
     });
