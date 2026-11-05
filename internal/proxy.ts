@@ -609,39 +609,57 @@ export async function forwardPlain(
     headers[lower] = value;
   }
   if (body.length > 0) headers["content-length"] = String(body.length);
+  // Not `fetch`, for two reasons that are the whole point of this file.
+  //
+  // It resolves the name a second time: `checkTarget` above vetted one answer, and the
+  // request would connect to whatever the second lookup returns — the rebinding window
+  // `handleConnect` deliberately refuses to open. And it follows `Location:` by itself, so
+  // one redirect from a public host reached any address at all: the rules were asked once,
+  // about the first URL, and never again. A redirect now goes back to the client, whose next
+  // request arrives here and is checked like any other.
+  const upstream = await plainRequest(url, decision.addr, decision.port as number, req.method ?? "GET", headers, body);
+  report(true, decision.by);
+  // Everything but the hop-by-hop headers. A whitelist here lost `Location` on the first
+  // redirect it tried to pass back — a 302 with no destination, which is a dead end rather
+  // than a refusal. `content-encoding` is the other reason: the body below is byte for byte
+  // what the server sent, so the client has to be told how to read it.
+  const backHop = new Set([
+    "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "proxy-connection",
+    "te", "trailer", "transfer-encoding", "upgrade",
+  ]);
+  const out: Record<string, string | string[]> = {};
+  for (const [name, value] of Object.entries(upstream.headers)) {
+    if (value === undefined || backHop.has(name)) continue;
+    out[name] = value;
+  }
+  if (out["content-type"] === undefined) out["content-type"] = "application/octet-stream";
+  res.writeHead(upstream.statusCode ?? 502, out);
+  await pipeline(upstream, res);
+}
 
-  // Connect to the address that was checked, not to `url.hostname`. `fetch(url)` would
-  // resolve the name a second time and reopen the DNS-rebinding window the check closed.
-  await new Promise<void>((resolve, reject) => {
-    const upstream = httpRequest(
+/** One request to the address that was checked, with the name only in the `Host` header. */
+function plainRequest(
+  url: URL,
+  address: string,
+  port: number,
+  method: string,
+  headers: Record<string, string>,
+  body: Buffer,
+): Promise<import("node:http").IncomingMessage> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
       {
-        protocol: "http:",
-        hostname: decision.addr,
-        port: decision.port,
+        method,
+        // the vetted address, so a virtual host still works and a second lookup cannot
+        // answer with something else
+        host: address,
+        port,
         path: `${url.pathname}${url.search}`,
-        method: req.method ?? "GET",
-        headers,
+        headers: { ...headers, host: url.host },
       },
-      (answer) => {
-        report(true, decision.by);
-        res.writeHead(answer.statusCode ?? 502, {
-          "content-type": answer.headers["content-type"] ?? "application/octet-stream",
-        });
-        pipeline(answer, res).then(() => resolve(), reject);
-      },
+      resolve,
     );
-    upstream.on("error", (err) => {
-      report(false, err.message);
-      if (!res.headersSent) {
-        res.writeHead(502, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: `上游连不上：${err.message}` }));
-        resolve();
-      } else {
-        res.destroy();
-        reject(err);
-      }
-    });
-    if (body.length > 0) upstream.write(body);
-    upstream.end();
+    req.on("error", reject);
+    req.end(body.length === 0 ? undefined : body);
   });
 }
