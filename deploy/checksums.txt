@@ -1,0 +1,8 @@
+# SHA-256 of the release tarballs the image installs. Copied from each release's own
+# checksum file (gh_<version>_checksums.txt / SHA256SUMS), keyed by the exact filename
+# Dockerfile downloads. A version bump without a new line here must fail the build.
+# Each RUN looks up its filename with awk, then feeds `<sum>  <file>` to sha256sum -c.
+62ccf747115ddc61237efffdde66a3c8f70ba249433dc64f70801089b59c59c8  gh_2.103.2_linux_amd64.tar.gz
+4c3e99a50bd8b181a3fe9d69b25dd978bac768148d88f01507c6b4d1ef61a443  gh_2.103.2_linux_arm64.tar.gz
+df870ba0e344cb7b3358d8d8f19397b8b8d225a8669784736ad68a5c2169d53b  pi-linux-x64.tar.gz
+5d5711b48600756473682e86360b026b11abf7591e5d112eb411d4da2c100d9a  pi-linux-arm64.tar.gz

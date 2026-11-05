@@ -61,6 +61,29 @@ export function postJson(
 }
 
 /**
+ * The same request, except a dead socket comes back as a reply the model can read.
+ *
+ * `postJson` rejects on ENOENT / ECONNREFUSED / timeout on purpose — the caller decides
+ * what that means. Every tool caller means the same thing, though: a host that is briefly
+ * down is a sentence ("宿主上的服务没起来"), not an exception that ends the waking with
+ * no words at all. `say-mute` used to say so in its own try/catch while `book`, `recall`
+ * and `websearch` threw; one place for that decision keeps them from drifting again.
+ */
+export async function postJsonOrError(
+  socketPath: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+  timeoutMs = 70_000,
+): Promise<UdsReply> {
+  try {
+    return await postJson(socketPath, path, body, headers, timeoutMs);
+  } catch (err) {
+    return { status: 0, body: JSON.stringify({ error: (err as Error).message }) };
+  }
+}
+
+/**
  * GET a path over the socket and stream the body into a file. Bytes do not survive a
  * JSON round trip, and the tool that fetches a file has to end with the file on disk
  * anyway, so it is written as it arrives rather than held in memory.

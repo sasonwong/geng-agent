@@ -1,5 +1,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { cleanupRepos, commit, repo, scan } from "../tools/gate/fixture.ts";
 
 // 规则表（tools/gate/patterns.mjs）的测试。与 gate.test.ts 里那三条结构检查分开：
@@ -162,6 +164,23 @@ test("a fake id first on the line does not hide the real one after it", () => {
   assert.equal(r.code, 0);
   assert.match(r.out, /gate: ok（1 个文件，1 个提交身份，1 条低级别警告）/);
   assert.match(r.out, /警告 长数字 ID: notes\.md:1/);
+});
+
+test("a published checksum manifest is not a machine fingerprint", () => {
+  // deploy/checksums.txt 里全是上游发布包的校验和。豁免的是这一份清单，不是
+  // 「64 位 hex」这个形状——同一串写到笔记里仍要被拦。
+  const hash = ["a1", "b2"].join("").repeat(16);
+  const manifest = repo();
+  mkdirSync(join(manifest, "deploy"), { recursive: true });
+  commit(manifest, { "deploy/checksums.txt": `${hash}  pi-linux-x64.tar.gz\n` });
+  assert.equal(scan(manifest).code, 0);
+
+  const note = repo();
+  commit(note, { "notes.md": `快照 ${hash}\n` });
+  const r = scan(note);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /快照 ID: notes\.md:1/);
+  assert.equal(r.out.includes(hash), false);
 });
 
 test("a value that is an expression is not an unquoted credential", () => {

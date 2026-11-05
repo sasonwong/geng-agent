@@ -10,13 +10,13 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tool } from "./lib/tool.ts";
-import { postJson } from "./lib/uds.ts";
+import { postJsonOrError } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
 
 async function call(route: string, body: Record<string, unknown>): Promise<string> {
-  if (SOCKET === "") throw new Error("没有配置记忆端点：GENG_BOOK_SOCK 是空的。");
-  const reply = await postJson(SOCKET, route, body);
+  if (SOCKET === "") return "没有配置记忆端点：GENG_BOOK_SOCK 是空的。";
+  const reply = await postJsonOrError(SOCKET, route, body);
   let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(reply.body) as Record<string, unknown>;

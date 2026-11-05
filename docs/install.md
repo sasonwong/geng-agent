@@ -114,8 +114,14 @@ deploy/build.sh                          # 镜像：pi 的独立二进制 + gh +
 没跑过就照抄简写会 `command not found`。第 9 节的排错命令一律写全路径，因为它们要能
 直接跑、也要能直接失败。
 
-**什么时候需要重建镜像**：只有 `Dockerfile` 变了。只改 `internal/`、`cmd/` 不用重建——
-daemon 在宿主上跑，容器只装 pi 和它的工具链。
+**什么时候需要重建镜像**：`Dockerfile` 或 `deploy/checksums.txt` 变了。只改 `internal/`、
+`cmd/` 不用重建——daemon 在宿主上跑，容器只装 pi 和它的工具链。
+
+镜像里 pi 的独立二进制和 gh 都按版本钉死，下载后还要过 `deploy/checksums.txt` 里的
+SHA-256（抄自各自 release 自带的校验和文件）。`packages` 那一层装扩展包用的 npm 包也
+钉在同一个 `PI_VERSION` 上——两边版本漂了，装出来的包目录要让第一次醒来才报错。
+所以**升版本必须同时改三处**：`GH_VERSION` / `PI_VERSION` 两处 ARG，以及校验和清单里
+对应的行；少改一处，构建会直接失败，这比悄悄换掉一个二进制要好。
 
 扩展在 `image/extensions/`，构建时**不进镜像**：`book.ts`（`journal`/`discard`/`loop_open`/`loop_close`/`wait`）、
 `recall.ts`（`recall`/`open`）、`files.ts`（`download`）、`say-mute.ts`（`say`/`listen`/`forget`/`mute`/`propose`）、
@@ -678,7 +684,8 @@ secrets/bots.json        每个实例一个 bot（token 就是路由键）
 secrets/search.env       搜索的上游 key、绑定地址、每日限额（socket 就是授权，没有第二个 token）
 secrets/mail.json/.env   信箱的地址映射和收信 token
 secrets/rustic.env       备份口令——丢了快照就没了
-deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  geng-gateway.service  geng-search.service  mail-worker/
+deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt
+           geng@.service  geng-gateway.service  geng-search.service  build.sh  update.sh  mail-worker/
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。

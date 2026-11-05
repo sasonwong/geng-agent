@@ -11,19 +11,20 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tool } from "./lib/tool.ts";
-import { postJson } from "./lib/uds.ts";
+import { postJsonOrError } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
 /** The endpoint's answer as a sentence, or the host's own refusal. */
 async function send(route: string, body: Record<string, unknown>): Promise<{ ok: boolean; reply: Record<string, unknown> }> {
   if (SOCKET === "") return { ok: false, reply: { error: "没有配置记忆端点：GENG_BOOK_SOCK 是空的。" } };
+  const r = await postJsonOrError(SOCKET, route, body);
+  let reply: Record<string, unknown>;
   try {
-    const r = await postJson(SOCKET, route, body);
-    const reply = JSON.parse(r.body) as Record<string, unknown>;
-    return { ok: typeof reply.error !== "string", reply };
-  } catch (err) {
-    return { ok: false, reply: { error: (err as Error).message } };
+    reply = JSON.parse(r.body) as Record<string, unknown>;
+  } catch {
+    return { ok: false, reply: { error: `记忆端点答了 ${r.status}，但不是 JSON：${r.body.slice(0, 200)}` } };
   }
+  return { ok: typeof reply.error !== "string", reply };
 }
 
 const sayTool = tool({

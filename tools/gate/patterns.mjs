@@ -189,7 +189,9 @@ function suppressed(name, val, path) {
       return !host || SYNTHETIC.has(host[1]);
     }
     case "快照 ID":
-      if (path.endsWith("package-lock.json")) return true;
+      // 一个专门装「上游公开校验和」的文件，和 lockfile 是同一类：里面每个 64 位
+      // hex 都是发布包的名字，不是哪台机器、哪次备份。除此之外不放过任何路径。
+      if (path.endsWith("package-lock.json") || path === "deploy/checksums.txt") return true;
       return new Set(val).size <= 2; // 全零或重复字符，是占位哈希
     default:
       return false;
