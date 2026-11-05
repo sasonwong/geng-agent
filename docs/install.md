@@ -135,7 +135,14 @@ node cmd/geng/index.ts init alice
 
 ```
 OPENCODE_API_KEY=...          # 变量名跟着 provider 换（OPENAI_API_KEY / ANTHROPIC_API_KEY …）
+GENG_MODEL_UPSTREAM=https://opencode.ai/inference/go/v1
 ```
+
+`GENG_MODEL_UPSTREAM` 是**转发的目的地**：pi 现在只知道 `http://127.0.0.1:11434/model`（容器里的
+`socat`），真实地址只有宿主知道。它要跟**模型所属的 API 家族**一致——同一家 provider 的模型可以
+分属不同的 API（opencode-go 的 deepseek 系是 `openai-completions`，路径以 `/go/v1` 结尾；
+claude 系是 `anthropic-messages`，只到 `/go`）。换模型跨了家族时，这一行要跟着改，
+否则上游回 404 而 pi 只会说请求失败。
 
 `deploy/models.json` 里那行 `apiKey: "!curl -fsS --unix-socket /run/geng/book.sock http://localhost/model/key"`
 让 pi 在**每次请求时**去 daemon 取一次；daemon 从模型密钥文件里读，明文回在 socket 上。

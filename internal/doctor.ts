@@ -18,7 +18,7 @@ import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
-import { modelKeyFile, readModelKey } from "./model.ts";
+import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -119,15 +119,20 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   const leakedKey = ["OPENCODE_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "GENG_MODEL_KEY"].filter(
     (name) => (envVars[name] ?? "") !== "",
   );
+  // Both halves are needed now that the daemon is the data plane: without an upstream the
+  // proxy answers 503 and every model request fails with what looks like a network error.
+  const upstream = modelUpstream(p);
   checks.push({
     name: "模型密钥",
-    ok: key !== null && leakedKey.length === 0,
+    ok: key !== null && leakedKey.length === 0 && upstream !== null,
     detail:
       key === null
         ? `没有 ${modelKeyFile(p)}：第一轮就会没有模型可用`
         : leakedKey.length > 0
           ? `${leakedKey.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/model.env`
-          : `${key.name}（只在宿主上，容器靠 /model/key 取）`,
+          : upstream === null
+            ? "没有 GENG_MODEL_UPSTREAM：代理不知道往哪转发，每次请求都 503"
+            : `${key.name} → ${upstream}（都在宿主上，容器只是问）`,
   });
 
   // Three states, because "not configured" and "configured but wrong" look identical from
