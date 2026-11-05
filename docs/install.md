@@ -116,7 +116,9 @@ deploy/build.sh                          # 镜像：pi 的独立二进制 + gh +
 **什么时候需要重建镜像**：只有 `Dockerfile` 变了。只改 `internal/`、`cmd/` 不用重建——
 daemon 在宿主上跑，容器只装 pi 和它的工具链。
 
-扩展（`say`/`mute`/`forget`/`listen`/`recall`/`download`/`web_search`/`web_fetch`）在 `image/extensions/`，构建时**不进镜像**，
+扩展在 `image/extensions/`，构建时**不进镜像**：`book.ts`（`journal`/`discard`/`loop_open`/`loop_close`/`wait`）、
+`recall.ts`（`recall`/`open`）、`files.ts`（`download`）、`say-mute.ts`（`say`/`listen`/`forget`/`mute`/`propose`）、
+`websearch.ts`（`web_search`/`web_fetch`）。运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是这个目录里的**每一个 `.ts`**。所以改一个
 运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是这个目录里的**每一个 `.ts`**。所以改一个
 工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
 「环境变了」也不会响（那一行只说镜像变了）。
@@ -204,9 +206,10 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 
 值**从 stdin 读**（argv 会在 `ps` 里露出去），同名行原地替换、注释和别的行一个字不动。
 
-**变量名由 provider 决定，不是靠猜。** 名字写错的表现是第一次醒来就报 "No API key found"，
-看起来像 key 坏了。验证的方式是拿它去打一次真端点看状态码（401 = 能连上但没认出来，200 = 对了），
-不要靠打印它、看长度、看前缀。
+**变量名由 provider 决定，不是靠猜。** `readModelKey` 按 `GENG_MODEL_KEY` / `OPENCODE_API_KEY` /
+`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` 的顺序找第一个非空的，写哪个都行。
+名字写错的表现是每个请求都 503，而 pi 只说请求失败——看起来像网络坏了。验证的方式是拿它去打
+一次真端点看状态码（401 = 能连上但没认出来，200 = 对了），不要靠打印它、看长度、看前缀。
 
 `doctor` 的「模型密钥」会在两件事上说话：文件不存在（第一轮就没有模型可用）、
 或者 `OPENCODE_API_KEY` 之类还留在 `alice.env` 里（那个文件会进容器）。
@@ -215,9 +218,9 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 
 | 文件 | 谁写的 | 谁读它 | 缺了会怎样 |
 |---|---|---|---|
-| `secrets/<实例>.model.env` | `init`（key 从环境读，或你填） | daemon，答 `/model` | 第一轮就 `Failed to resolve API key … from shell command` |
+| `secrets/<实例>.model.env` | `init`（key 从环境读，或你填） | daemon，转发模型请求时补上 | 每个请求都 503「没有模型密钥」，pi 只说请求失败 |
 | `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 只该放代价有上限的值；模型密钥写在这儿会进容器，`doctor` 会说 |
-| `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search`（里面只要 `DEEPSEEK_API_KEY` 和 socket 路径） |
+| `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search`（这个文件只要 `DEEPSEEK_API_KEY`、socket 路径、每日限额） |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
@@ -240,7 +243,7 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 {
   "defaultProvider": "opencode-go",
   "defaultModel": "deepseek-v4.1-flash",
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "high",
   "packages": ["npm:@dietrichgebert/ponytail", "npm:@ff-labs/pi-fff"]
 }
 ```
@@ -290,7 +293,7 @@ loginctl enable-linger "$USER"
 ```bash
 systemctl --user is-active geng@alice        # active
 node cmd/geng/index.ts status --all          # alice  上次=… 下次=…
-tail -1 data/alice/daemon.log                # 第一行 key=value
+tail -1 data/alice/daemon.log                # 最后一行：一轮一行
 ```
 
 `daemon.log` 一行一轮：`#12 wake=timer sym=ok lvl=0 dur=18s tools=4 tokens=25283 cost=0.0014
@@ -445,8 +448,6 @@ socket 不存在时，daemon 干脆不挂它（docker 会把缺失的宿主路�
 
 限额在宿主这边执行，容器改不了；用完时工具返回的是人话「今天的搜索用完了」，不是错误码。
 
-限额在宿主这边执行，容器改不了；用完时工具返回的是人话「今天的搜索用完了」，不是错误码。
-
 ### 5.3 GitHub App（让它能推代码）
 
 审计发现原来的做法是把一个**永不过期**的 PAT 放进 `secrets/<inst>.env`，而那个文件是
@@ -529,9 +530,8 @@ JSON 形状不一样，只有真的读回来一次才知道。
 ## 6. 第二个实例
 
 ```bash
-node cmd/geng/index.ts init bob
-# 改 policy（改了就不用重启，下一轮生效）
-# 填 secrets/bob.env
+OPENCODE_API_KEY=sk-… node cmd/geng/index.ts init bob --model deepseek-v4.1-flash
+# 想改别的就改 data/bob/policy.json（下一轮生效，不用重启）；GitHub App 的 id 在 secrets/bob.env
 sed -e "s|@ROOT@|$PWD|g" -e "s|@NODE@|$(command -v node)|g" \
   deploy/geng@.service > ~/.config/systemd/user/geng@bob.service
 systemctl --user daemon-reload && systemctl --user enable --now geng@bob
@@ -595,7 +595,7 @@ git fetch origin && git reset --hard origin/main
 | 没有 `daemon.log` 这一行，但状态里有一轮 | `ls -l data/<inst>/daemon.log` | 它是**目录**：容器挂载把不存在的路径建成了目录 |
 | unit 127，每十秒一次 | unit 里的 `@NODE@` | node 绝对路径错（nvm 不在 systemd 的 PATH 里） |
 | 容器压根没起来，日志里也没有一轮 | 手工跑一遍完整的 `docker run` | argv 里少了一个 `-e`（比如 `TZ=…` 没带 `-e`，docker 会把它当镜像名） |
-| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（缺变量时它**不注册**自己） |
+| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（`GENG_BOOK_SOCK` 缺了，`web_search`/`say` 这一类干脆不注册自己，`journal` 则在调用时报错） |
 | 它不回复，但进程正常 | `docker ps`、`daemon.log` 最后一行的用时 | 一轮还在跑（一轮可以跑 30 分钟）；或者它**选择了不说**——只有 `say` 会送出去，正文不会 |
 | 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数；读靠 `recall`/`open` |
 | 搜不到东西 | `doctor` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |
@@ -623,9 +623,10 @@ data/<instance>/
   outbox/       它要说的话，gateway 取走
   session/      pi 的会话文件，一轮一个（可写，但纸上不提它）
   usage/ meta/ daemon.log
-secrets/<instance>.env   模型凭据、搜索地址；--env-file 注入，永不挂载
+secrets/<instance>.env   GitHub App 的两个 id；--env-file 注入，永不挂载（模型 key 不在这个文件里）
+secrets/<instance>.model.env  模型 key 与上游地址，只有宿主读；容器问，读不到
 secrets/bots.json        每个实例一个 bot（token 就是路由键）
-secrets/search.env       搜索端点的 token、绑定地址、每日限额
+secrets/search.env       搜索的上游 key、绑定地址、每日限额（socket 就是授权，没有第二个 token）
 secrets/mail.json/.env   信箱的地址映射和收信 token
 secrets/rustic.env       备份口令——丢了快照就没了
 deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  geng-gateway.service  geng-search.service  mail-worker/
@@ -633,8 +634,17 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
 
-挂载是逐条论证过的，不是攒出来的：`/state/identity.md`（唯一一个它直接写的文件）、`/work`（干活）、
-`data/<inst>/pi/settings.json`（只读，它不能换模型）。
+挂载是逐条论证过的，不是攒出来的，一共七条：
+
+| 宿主 | 容器 | 为什么 |
+|---|---|---|
+| `book/identity.md` | `/state/identity.md` | 唯一一个它直接写的文件 |
+| `workspace/` | `/work` | 干活的地方，可写 |
+| `pi/settings.json` | `~/.pi/agent/settings.json` | 只读：它不能换模型 |
+| `deploy/models.json` | `~/.pi/agent/models.json` | 只读：provider 指向容器里的 socat |
+| `session/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
+| `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 |
+| `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |
 
 书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`，

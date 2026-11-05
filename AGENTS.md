@@ -113,7 +113,7 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 ## 路径与目录
 
 - 每一条能写进代码的路径都从 `internal/paths.ts` 来。渲染进唤醒纸的路径一律**注入**
-  （`statePath`、`inboxPath`…），不在模板里写死——宿主和容器的
+  （`statePath`、`places`…），不在模板里写死——宿主和容器的
   路径不一样，写死的那一半会在另一半上指向不存在的目录。
 - 要建的目录只有一份清单：`requiredDirs(p)`。`init` 和 daemon 都调它。两份列表会在加目录
   的时候悄悄分叉，症状是"init 建了、daemon 没建"。

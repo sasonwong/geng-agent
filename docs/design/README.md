@@ -13,9 +13,9 @@
 ## 1. 形状
 
 ```
-                            ┌─ daemon@alice ─ docker run --rm ─ pi + om ─┐
-人 ◀─▶ N+1 个 bot ◀─▶ gateway ─┤─ daemon@bob   ─ docker run --rm ─ pi + om ─┤
-        (token=路由键)        └─ daemon@carol ─ docker run --rm ─ pi + om ─┘
+                            ┌─ daemon@alice ─ docker run --rm ─ pi + 工具 ─┐
+人 ◀─▶ N+1 个 bot ◀─▶ gateway ─┤─ daemon@bob   ─ docker run --rm ─ pi + 工具 ─┤
+        (token=路由键)        └─ daemon@carol ─ docker run --rm ─ pi + 工具 ─┘
                                           │
                                 data/<inst>/   ← 唯一持久的地方
 ```
@@ -63,8 +63,9 @@
 | `journal/` `open-loops/` | 它发起，宿主落盘 | id 由宿主发，它拿不到文件名 |
 | `journal/discarded/` `open-loops/closed/` | 它发起，宿主搬文件 | 丢掉的东西不删，只是换个地方待着 |
 | `waiting.json` | 它发起，宿主落盘 | 下次什么时候醒 + 为什么 |
-| `intent.json` `world.json` | daemon | write-ahead / 世界快照 |
-| `policy.json` `mute.json` `attention.json` | 人 / gateway / daemon | 容器里一个都不挂 |
+| `intent.json` | daemon | write-ahead：只在某一轮跑着的时候存在 |
+| `mute.json` `attention.json` | 它发起（`mute`/`listen`），宿主落盘 | 容器里一个都不挂 |
+| `policy.json` | 人 | 在书外面（`data/<inst>/`），容器里看不见 |
 
 **书不挂进容器。** `/state`、`/inbox`、`/people`、`/mail` 全在容器外面，写走
 `journal`/`discard`/`loop_*`/`wait`/…，读走 `recall`/`open`，两条路都是 unix socket 到 daemon。
@@ -109,14 +110,14 @@
 只给个路径，否则一次不肯读盘的醒来就等于没有自己，那正是这份材料要防的漂移。贴上时带一行
 出处（「你写下的自己（/state/identity.md）：」）：不带标签的整段文字会被读成某个人刚对它说的话。
 
-**用途是常量，状态是变量。** `/state` 里每个文件是干什么的，写在 `deploy/SYSTEM.md`（三行地图：
-identity / journal / open-loops；其余文件由接口和工具自己的说明讲）；纸上只说这一轮的状态：
+**用途是常量，状态是变量。** 每个东西是干什么的，写在 `deploy/SYSTEM.md`（身份、工具是唯一的
+入口、文件是 id、邮件只收不回）和工具自己的说明里；纸上只说这一轮的状态：
 `identity.md` 还不存在时有一行「你还没写下过自己：/state/identity.md 不存在。」，写过之后换成
 它自己的原文。
 
 这条是补出来的：`SYSTEM.md` 曾经把路径表整个删掉，理由是「`ls` 一次就看得见」——而新实例的
-`/state` 里只有两个空目录，`identity.md` 根本不存在（它只在你写过之后才存在），于是 bob 生下来
-不知道这本书有第一页。**地图讲用途，纸讲存在与否，两半不能互换**：用途只在操作者改动时变，
+`/state` 里只有 `identity.md` 的挂载点、那个文件还是空的（它只在你写过之后才有内容），于是 bob
+生下来不知道这本书有第一页。**地图讲用途，纸讲存在与否，两半不能互换**：用途只在操作者改动时变，
 所以它在常量里；存在与否每轮不同，所以它在纸上。
 
 **其余一切只给位置，不给内容。** 未闭合的事只报条数、消息只报条数、日志只给路径，
@@ -162,16 +163,17 @@ daemon 只读不搬。**消息在这一轮真正跑完之前不动**，跑完了
   → 看门狗 → 观测 → 数症状 → 按表换档 → 收尾（截尾 / 记账）→ 睡到闹钟
 ```
 
-**判定只认五个症状**：启动失败、超时、被中止、没走到收尾、同工具同参数重复 ≥3、空回复
-（后两个可以同时成立，按固定顺序取第一个）。
+**判定只认七个症状**（`internal/symptoms.ts`）：没起来、超时、被中止、没跑完、在同一处打转
+（同工具同参数 ≥3）、模型请求报错、什么都没做。顺序是固定的，先命中的那个算数——`model-error`
+排在 `empty` 前面，因为请求失败的轮次同样"什么都没做"，而那是错的解释。
 
 **四档修复，从便宜到贵，每升一档扣预算**：
 
 | 档 | 动作 |
 |---|---|
-| 1 | 贴它自己的脚印，同一轮里继续试（最便宜、最有效） |
-| 2 | 退避一倍：下一轮等更久 |
-| 3 | 认输并记账，退避三倍 |
+| 1 | 下一张纸开头告诉它上一轮怎么死的，间隔不变 |
+| 2 | 退避两倍 |
+| 3 | 退避三倍，ops 记一笔 |
 | 4+ | 停车：定时唤醒全停，只有人敲门能叫醒它 |
 
 三件不在这一列里的事，因为它们在**一轮之内**发生而不是跨轮：同工具重复到阈值时 daemon 会 steer
@@ -254,7 +256,7 @@ daemon 只读不搬。**消息在这一轮真正跑完之前不动**，跑完了
 
 ### mute
 
-`mute(target, until, why)` 把来源从 push 压成 pull，消息一条不丢。
+`mute(target, minutes, why)` 把来源从 push 压成 pull，消息一条不丢；`until` 由宿主从分钟数算出来，它写不了永久的聋。
 **直接对它说话（@ / 回复 / DM）永远穿透 mute** —— mute 挡的是环境噪音，挡不住有人当面叫它。
 所以 target 只有两个：`"*"`（全部环境噪音）和 `"chat:<id>"`（某个群的闲话）。`"dm"` 不是合法的
 target：`route()` 在查静音之前就把私聊判成“叫醒”，那个键写进去也永远不会生效，工具因此直
@@ -302,9 +304,9 @@ Worker 是唯一能读 MIME 的地方，所以解析在那边；**判断全在�
 ### 文件与图片
 
 **收**：图片、文档、音频、视频、贴纸走和文字完全相同的 route——群里没 @ 它就进
-`inbox/low`，不唤醒；私聊/@/回复才叫醒。下载到 `data/<inst>/files/`，容器里只读挂 `/files`，
-唤醒纸上报的是**个数**（「一起发来的还有 2 张图片、1 个文件，在 /files/。」），内容等它自己
-`read`。模型本身能吃图片（`input: ["text","image"]`），所以看图不需要任何提示词层的管道，
+`inbox/low`，不唤醒；私聊/@/回复才叫醒。下载到 `data/<inst>/files/`，容器里**不挂**：
+一个文件是一个 id（`F12`），纸上报的是**个数**（「一起发来的还有 2 张图片、1 个文件：用
+`recall(sources:["files"])` 看 id。」），取到手上靠 `download(id, to)`。模型本身能吃图片（`input: ["text","image"]`），所以看图不需要任何提示词层的管道，
 看不看、看几张是它自己的成本决策。
 
 **语音不下载**：这里没有把声音变成字的东西，落一个文件只是假装有内容。gateway 照样记一条，
@@ -328,7 +330,8 @@ Worker 是唯一能读 MIME 的地方，所以解析在那边；**判断全在�
 最老的先删，最新的永远留着（哪怕它自己就超了容量：删掉刚到的那个等于 daemon 替它判断什么值得留）。
 
 它自己也能删：`forget(files)` 走 socket 写 `files.forget.json`，daemon 在**下一轮醒来之前**
-执行，并且只认 `/files/` 里的裸文件名。文件在容器里是只读挂载，所以它删不掉别人发给它的东西——
+执行；它写 id（`F12`）或者老写法的 `/files/<name>` 都认，落到盘上统一成后者。文件在容器里
+根本不存在，所以它删不掉别人发给它的东西——
 删的渠道是有意的、可数的、会被写进日志和纸上的。
 
 纸上的说法（都只在真发生的时候出现）：
@@ -376,7 +379,7 @@ waiting、journal 全在盘上，纸指路，它自己读。
 - **压缩**。没有长会话就不需要压缩，也就没有"阈值到点自动丢掉 90k 细节"这种不可逆事件。
 - **`pi-observational-memory`**。它的记忆存在会话条目里，换个会话就没了；它存在的理由是
   给长会话擦屁股。既然不留长会话，它就是纯粹的额外上下文（实测占会话体积的 12%）。
-  镜像里不再装，`recall(id)` 一并消失，回查历史用 `grep`。
+  镜像里不再装；它的 `recall(id)` 也跟着消失了，现在的 `recall` 是这本书的读工具。
 - **升级阶梯里的"换新会话"两档**。每轮本来就是新的，剩下四档：喂脚印 → 等更久 → 放弃并退避 → 定时唤醒停摆。
 
 代价是明确的，不粉饰：
@@ -405,12 +408,12 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
 | `inbox/*.json` | gateway | `{id, text, from, at, chat, route}` |
-| `outbox/*.json` | 它 | `{id, messages: string[]}` |
-| `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?}` |
-| `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{at,wake,tools,inbox,talkedTo[],touched}}` |
+| `outbox/*.json` | daemon（`say` 走 socket） | `{id, messages[], chat?, files?(/work 路径), attachments?[{id,path,name}], replyTo?{chat,messageId}}` |
+| `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
+| `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{at,wake,tools,inbox,talkedTo[],touched}, knockHold?}` |
 | `meta/escalation.json` | daemon | `{level, streak, symptom, detail, updatedAt}` |
 | `meta/wakes.json` | daemon | 24 小时内的唤醒时间戳数组 |
-| `meta/cut.json` | daemon | `{kind:"timeout"\|"crashed"\|"interrupted", at, waking, reason, tools[]?, openMs?}`，只活一张纸 |
+| `meta/cut.json` | daemon | `{kind:"timeout"\|"crashed"\|"interrupted", at, waking, reason, tools[]?, openMs?, capMinutes?}`，只活一张纸 |
 
 `stateSchema` 是这些文件的版本号，由 `writeMeta` 统一盖戳。**磁盘上的版本比代码新就拒绝启动**——
 被旧代码按自己的形状覆盖一次，比重启一百次都糟。
@@ -527,9 +530,11 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 被叫醒就回哪儿"去推（需要 daemon 把 knock 的 chat 传下来），要么干脆取消默认。选了后者：
 一个必填参数比一个猜得中的默认更便宜，而且错的方向不可控。
 
-daemon 把能说话的地方以 id 的形式传下来（`GENG_PLACE_IDS`），扩展做三件事：一个地方不必写 `to`、
-两个以上必须写、写了不在名单里的当场拒。`GENG_PLACES` 那个计数仍然一并传：镜像和 daemon 是
-分开升的，比 daemon 旧的扩展只认得计数，它得继续能用。地址仍然只有 gateway 知道。
+名单不传进容器：`say` 只是把 `to` 和 `replyTo` 原样交上去，**判断在写 outbox 的那一处**——它
+同时知道名单和这次要发到哪。三件事因此只有一份实现：一个地方不必写 `to`、两个以上不写就拒、
+写了不在名单里当场拒。地址仍然只有 gateway 知道。（这里曾经把 id 清单用 `GENG_PLACE_IDS`
+注进容器，好让扩展自己判；容器里那份清单和宿主上那份会在下一次加群时不一致，而判断本来
+就只需要宿主。）
 
 **引用一条消息**（`replyTo`）解决的是同一类问题的另一半：`say` 不带 `to` 时会落到错的会话，
 但"我在回哪一句"根本没有地方可写。群里的对话常常是隔了半小时才回，对方只看到一句凭空出现的
@@ -543,8 +548,8 @@ id 直接用收件箱文件里那个 `<chat>-<message_id>`，所以不需要发�
 - **不限制它引用的频率**。像 `to` 那样的强制在"引用谁"上没有对应的正确答案，只有它自己
   知道在回哪句；写死一条规则只会让它学会绕。
 
-transcript 的**入站**行因此多了一个 `id` 字段（纯增量），出站不加——它想引用自己说过的话，
-重复一遍就行。
+transcript 的**入站**行因此多了一个 `id` 字段（纯增量）。出站也有：发送成功后 gateway 把
+Telegram 给的消息号记成 `<chat>-<message_id>`，所以它想引用自己说过的那句，也有一个 id 可写。
 
 **入站方向是同一件事的镜像，而且更亏**：人在 Telegram 里回复某条消息，是在主动说"我说的是
 这句"，而原来只读了 `reply_to_message.from.id` 一个字段（用来判"是不是在回我"），整条被引用
@@ -582,7 +587,7 @@ daemon 自己怎么上网是 `container.proxyChain`（`auto` / `off` / 一个 UR
 （它活在什么规矩下不是它要读的书；可协商的那几个值由纸印出来）、`meta/`、`usage/`、`backup/`、
 `secrets/`。
 
-policy.json 因此从 `palimpsest/` 挪到了 `data/<inst>/`：只要它还在书里，`/state` 那个 bind 就
+policy.json 因此从书里挪到了 `data/<inst>/`：只要它还在书里，`/state` 那个 bind 就
 会把它带进容器，而"给书里的文件套一个只读挂载"是在跟自己的挂载表打架。挪出去之后它既看不见
 也写不着，规则又回到了"只属于操作者"。
 
@@ -592,7 +597,7 @@ policy.json 因此从 `palimpsest/` 挪到了 `data/<inst>/`：只要它还在�
 chat**，直到这一轮结束。不做已读标记：Bot API 里没有这个方法，✓✓ 由客户端决定，bot 改不了。
 
 判据不新增状态：`meta/intent.json` **本来就只在**一轮跑着的时候存在（写前意图，成功即删，崩溃
-时下次启动移进 `meta/aborted-*.json`）。所以"正在干活"是现成的。三条约束：
+时下次启动移进 `meta/interrupted-*.json`）。所以"正在干活"是现成的。三条约束：
 
 - **只有人和它说话时才显示**：定时醒来没人等，不该冒出"正在输入"。判据是 `inbox/` 里有没有
   敲门消息。
@@ -637,7 +642,8 @@ assistant 回合开始，它就进了那一回合的上下文**；注入之后�
 ## 9. 隔离与网络
 
 - 每轮一个 `--rm` 容器，`--user` 对齐 uid，只挂子目录，`SYSTEM.md` 与 `policy.json` 单文件只读
-- 出口四条：封 `169.254.169.254`、封私网、只放 80/443、DNS 单独
+- 出口只有一条：`--network none`，出去的全部走 book socket 上的代理。名单两把钥匙（名字、地址），
+  默认放通公网、排除私网/回环/链路本地，`!` 排除永远赢
 - 网络工具三层：`curl` 永远给（腿）、搜索限额给（默认不带正文）、浏览器不给
 - **搜索和模型的 key 都不进容器**：各自走宿主上的一个 socket 路由，容器只拿到问的资格
 - 不 fork pi、不上向量库、不写代理、不上 compose
@@ -679,10 +685,10 @@ rustic，一次清醒一次快照。内容去重是免费的，**不要设计增
 
 | session | harness 写 | 只能追加 | 原始事实 |
 |---|---|---|---|
-| palimpsest | 它写 | 随便改 | 它的叙述 |
+| book | 它写 | 随便改 | 它的叙述 |
 | 快照 | daemon 写 | 不可变 | 物理冻结的每段生命 |
 
-它想改写自己的过去，只能改 palimpsest；另外两层会说另一种话。
+它想改写自己的过去，只能改书；另外两层会说另一种话。
 
 实现上的几条：
 
@@ -730,8 +736,8 @@ rustic，一次清醒一次快照。内容去重是免费的，**不要设计增
 2. ~~`init` 应该带参数~~ **已改**：`--model`、`--upstream`、`--image`、`--timeout-min` 一次写对，
    模型 key 从环境变量读进去（命令行参数会进 shell 历史，key 不能走那条路）。
 3. ~~凭据的位置~~ **已改**：GitHub 是一个 App，私钥在 `secrets/gh-app.pem`，容器里没有凭据，
-   `git` 要的时候现换一个一小时的 installation token；模型 key 在 `secrets/model.env`，
-   同样只在宿主上。两处都是"容器能问，不能存"。
+   `git` 要的时候现换一个一小时的 installation token；模型 key 在 `secrets/<实例>.model.env`
+   （每个实例一份：两个实例可以问两个 provider），同样只在宿主上。两处都是"容器能问，不能存"。
 4. **一条 bash 能吃掉整轮。** 周期上限已经抬到 30 分钟，被杀的轮现在会在下一张纸上说清楚
    “它当时在干什么”（`meta/cut.json`），但那只是事后告知。可数的症状仍然缺一个：
    `tool_execution_start` 超过 N 分钟没有对应的 `end`。
@@ -744,8 +750,9 @@ rustic，一次清醒一次快照。内容去重是免费的，**不要设计增
    `Authorization`、转发到宿主上配置的上游。容器里发生的是"问模型"，不是"拿钥匙"。
    `llm=N` 仍然数着，现在它的含义是"这一轮问了模型几次"。代价是 daemon 必须在场：它挂了，
    模型请求和记忆读写一起停——这是刻意的，数据面本来就不该有第二个副本。
-8. **多实例共用一个模型 key**，provider 侧没有分开的额度。全局账本一直推迟着——第二个实例已经来了。
-8. 之后才是那些推迟项：嵌套 pi 的可见性、`llm_call` 预算通道、计量代理。
+8. **多实例共用一个账本**：模型 key 已经每实例一份，但 provider 侧的额度还是共用的，`llm=N` 也只
+   记在各自的 `daemon.log` 里。全局账本一直推迟着——第二个实例已经来了。
+9. 之后才是那些推迟项：嵌套 pi 的可见性、`llm_call` 预算通道、计量代理。
 
 跨阶段没解决的已知问题：
 

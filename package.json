@@ -24,6 +24,7 @@
     "cmd/geng/",
     "internal/",
     "!internal/dev/",
+    "image/",
     "deploy/",
     "docs/design/",
     "README.md"
