@@ -350,18 +350,29 @@ async function main(): Promise<number> {
           console.error("--listen 只能是 all 或 mentions");
           return 2;
         }
+        // Numbers, not guesses: `Number()` never throws, so `--allow abc` used to filter
+        // down to an empty list — a bot nobody may reach, written as if it were fine —
+        // and `--chat abc` became NaN, which JSON keeps as null and the first send
+        // rejects. A typo has to stop here, before anything is written.
+        const allow = ids === null ? undefined : ids.split(",").map((x) => x.trim());
+        const allowIds = allow === undefined ? undefined : allow.map(Number);
+        if (
+          allow !== undefined &&
+          (allow.length === 0 || allow.some((x) => x === "") || allowIds?.some((n) => !Number.isSafeInteger(n)))
+        ) {
+          console.error(`--allow 必须是逗号隔开的整数 id（收到 ${ids}）`);
+          return 2;
+        }
+        const chatId = chat === null ? undefined : Number(chat);
+        if (chatId !== undefined && !Number.isSafeInteger(chatId)) {
+          console.error(`--chat 必须是一个整数 chat id（收到 ${chat}）`);
+          return 2;
+        }
         addBot(args.root, key, {
           token,
           ...(listen === null ? {} : { listen: listen as "all" | "mentions" }),
-          ...(ids === null
-            ? {}
-            : {
-                allow: ids
-                  .split(",")
-                  .map((x) => Number(x.trim()))
-                  .filter((n) => Number.isFinite(n)),
-              }),
-          ...(chat === null ? {} : { chat: Number(chat) }),
+          ...(allowIds === undefined ? {} : { allow: allowIds }),
+          ...(chatId === undefined ? {} : { chat: chatId }),
         });
         console.log(`写好 secrets/bots.json 里的 ${key}：${describeBot(readBots(args.root)[key])}`);
         console.log("接着跑 `geng gateway --check`：它会对每个 token 调一次 getMe，只有那一步能证明 token 是对的。");
@@ -369,11 +380,15 @@ async function main(): Promise<number> {
       }
       if (sub === "allow") {
         const op = args.rest[2] ?? "";
-        const ids = (args.rest[3] ?? "")
-          .split(",")
-          .map((x) => Number(x.trim()))
-          .filter((n) => Number.isFinite(n));
-        if (key === "" || (op !== "add" && op !== "rm") || ids.length === 0) {
+        // the same refusal as `bots add`: a filtered-out NaN used to look like "no ids
+        // given" and print the usage line over a typo
+        const raw = (args.rest[3] ?? "").split(",").map((x) => x.trim()).filter((x) => x !== "");
+        const ids = raw.map(Number);
+        if (raw.length === 0 || ids.some((n) => !Number.isSafeInteger(n))) {
+          console.error(`allow 的 id 必须是逗号隔开的整数（收到 ${args.rest[3] ?? ""}）`);
+          return 2;
+        }
+        if (key === "" || (op !== "add" && op !== "rm")) {
           console.error("用法：geng bots allow <instance> add|rm <id,id>");
           return 2;
         }
