@@ -10,7 +10,7 @@ import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
-import { addrAllowed, chainFrom } from "./proxy.ts";
+import { chainFrom } from "./proxy.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
 import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
@@ -42,6 +42,84 @@ function hasCmd(cmd: string): boolean {
   } catch {
     return false;
   }
+}
+
+interface V4Range {
+  low: number;
+  high: number;
+}
+
+/**
+ * An IPv4 CIDR as a closed numeric range, for the only question that needs arithmetic:
+ * does an allow rule leave any part of a dangerous range reachable? Only the IPv4-mapped
+ * block of IPv6 reaches IPv4 space; anything else in v6 is not this list's business.
+ */
+function v4Range(entry: string): V4Range | null {
+  let net: string;
+  let prefix: number;
+  if (entry.includes(":")) {
+    const dotted = /^::ffff:(\d+(?:\.\d+){3})(?:\/(\d+))?$/.exec(entry);
+    if (dotted !== null) {
+      net = dotted[1] as string;
+      prefix = dotted[2] === undefined ? 128 : Number(dotted[2]);
+    } else if (entry === "::ffff:0:0/96") {
+      net = "0.0.0.0";
+      prefix = 96;
+    } else {
+      return null;
+    }
+    if (prefix < 96) return null;
+    prefix -= 96;
+  } else {
+    const [n, p] = entry.split("/");
+    net = n ?? "";
+    prefix = p === undefined ? 32 : Number(p);
+  }
+  const octets = net.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) return null;
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > 32) return null;
+  const base =
+    (((octets[0] as number) << 24) | ((octets[1] as number) << 16) | ((octets[2] as number) << 8) | (octets[3] as number)) >>> 0;
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  const low = (base & mask) >>> 0;
+  return { low, high: (low | (~mask >>> 0)) >>> 0 };
+}
+
+const inRange = (ip: number, r: V4Range): boolean => ip >= r.low && ip <= r.high;
+
+/**
+ * Whether any part of `danger` stays reachable under the rules: the allow entries that
+ * overlap it, minus every deny entry, measured rather than guessed. Probing only the
+ * range's base address let `127.0.1.0/24` hide — it does not contain `127.0.0.1`, but it
+ * is loopback all the same.
+ */
+function rangeOpenUnder(danger: string, rules: string[]): boolean {
+  const d = v4Range(danger);
+  if (d === null) return false;
+  const denyRanges = rules
+    .filter((r) => r.startsWith("!"))
+    .map((r) => v4Range(r.slice(1)))
+    .filter((r): r is V4Range => r !== null);
+  for (const raw of rules) {
+    if (raw.startsWith("!")) continue; // a deny closes, it never opens
+    const a = v4Range(raw);
+    if (a === null) continue;
+    const low = Math.max(a.low, d.low);
+    const high = Math.min(a.high, d.high);
+    if (low > high) continue;
+    // The uncovered part of [low, high] has its boundaries among these points, so testing
+    // them is testing the whole set: each deny contributes its own edges and neighbours.
+    const points = new Set<number>([low, high]);
+    for (const n of denyRanges) {
+      for (const edge of [n.low, n.high, n.low - 1, n.high + 1]) {
+        if (edge >= low && edge <= high) points.add(edge);
+      }
+    }
+    for (const ip of points) {
+      if (!denyRanges.some((n) => inRange(ip, n))) return true;
+    }
+  }
+  return false;
 }
 
 export function checkInstance(root: string, instance: string, fix: boolean): Check[] {
@@ -217,7 +295,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       ["192.168.0.0/16", "内网"],
     ];
     const open = dangerous
-      .filter(([cidr]) => addrAllowed(cidr.split("/")[0] as string, policy.container.proxyAllowCidrs).ok)
+      .filter(([cidr]) => rangeOpenUnder(cidr, policy.container.proxyAllowCidrs))
       .map(([cidr, why]) => `${cidr}（${why}）`);
     if (open.length > 0) {
       checks.push({

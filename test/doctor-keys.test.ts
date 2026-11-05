@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { keyFiles, scanLogBodies } from "../internal/doctor.ts";
+import { checkInstance, keyFiles, scanLogBodies } from "../internal/doctor.ts";
+import { defaultPolicy } from "../internal/policy.ts";
 
 function tree(build: (root: string) => void): string {
   const root = mkdtempSync(join(tmpdir(), "geng-doctor-"));
@@ -107,5 +108,69 @@ test("scanLogBodies: 报十条就够了，但要说还有几条没列出来", ()
   const scan = scanLogBodies(root);
   assert.equal(scan.hits.length, 10);
   assert.equal(scan.more, 2);
+  rmSync(root, { recursive: true, force: true });
+});
+
+// The dangerous-range warning used to probe only the base address: `127.0.1.0/24` does
+// not contain `127.0.0.1`, so loopback was open and the check stayed quiet.
+test("a narrower allow rule that overlaps a dangerous range is still flagged", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-doctor-"));
+  const policy = join(root, "data", "alice", "policy.json");
+  mkdirSync(join(root, "data", "alice"), { recursive: true });
+  const base = defaultPolicy();
+  writeFileSync(
+    policy,
+    JSON.stringify({ ...base, container: { ...base.container, proxyAllowCidrs: ["127.0.1.0/24"] } }),
+  );
+
+  const flagged = checkInstance(root, "alice", false).find((c) => c.name === "代理能进内网");
+  assert.ok(flagged, "窄一点的 loopback 规则也要触发警告");
+  assert.match(flagged!.detail, /127\.0\.0\.0\/8/);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("an allow list that touches none of the ranges stays quiet", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-doctor-"));
+  const policy = join(root, "data", "alice", "policy.json");
+  mkdirSync(join(root, "data", "alice"), { recursive: true });
+  const base = defaultPolicy();
+  writeFileSync(
+    policy,
+    JSON.stringify({ ...base, container: { ...base.container, proxyAllowCidrs: ["192.0.2.0/24"] } }),
+  );
+
+  const flagged = checkInstance(root, "alice", false).find((c) => c.name === "代理能进内网");
+  assert.equal(flagged, undefined);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("the default rules open the internet and close the ranges: no warning", () => {
+  // 0.0.0.0/0 with a deny per range is the default; the warning must not fire on it
+  const root = mkdtempSync(join(tmpdir(), "geng-doctor-"));
+  const policy = join(root, "data", "alice", "policy.json");
+  mkdirSync(join(root, "data", "alice"), { recursive: true });
+  writeFileSync(policy, JSON.stringify(defaultPolicy()));
+
+  const flagged = checkInstance(root, "alice", false).find((c) => c.name === "代理能进内网");
+  assert.equal(flagged, undefined);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a range only partly closed by a deny still warns", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-doctor-"));
+  const policy = join(root, "data", "alice", "policy.json");
+  mkdirSync(join(root, "data", "alice"), { recursive: true });
+  const base = defaultPolicy();
+  writeFileSync(
+    policy,
+    JSON.stringify({
+      ...base,
+      container: { ...base.container, proxyAllowCidrs: ["0.0.0.0/0", "!10.9.0.0/16"] },
+    }),
+  );
+
+  const flagged = checkInstance(root, "alice", false).find((c) => c.name === "代理能进内网");
+  assert.ok(flagged, "只挡住一段的内网仍然是开的");
+  assert.match(flagged!.detail, /10\.0\.0\.0\/8/);
   rmSync(root, { recursive: true, force: true });
 });
