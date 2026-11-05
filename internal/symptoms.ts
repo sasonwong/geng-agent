@@ -19,7 +19,10 @@ export function classify(r: RpcResult): Symptom {
   if (r.timedOut) return "timeout";
   if (r.aborted) return "aborted";
   if (!r.settled) return "unsettled";
-  if (r.repeat !== null && r.repeat.count >= 3) return "repeat";
+  // Any repeat the watcher reported is a repeat: it only reports at
+  // `cycle.repeatThreshold`, and a second copy of that number here made a policy of 2
+  // steer the round while the symptom said nothing happened.
+  if (r.repeat !== null) return "repeat";
   // Before "empty": a round whose request failed also has nothing to show for it, and
   // "什么都没做" would be the wrong explanation for the same silence.
   if (r.endedOnModelError === true) return "model-error";

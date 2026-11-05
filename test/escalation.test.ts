@@ -36,6 +36,9 @@ test("classify reads only countable things", () => {
     classify(rpc({ repeat: { name: "read", preview: "", count: 3 } })),
     "repeat",
   );
+  // the threshold is policy (`repeatThreshold` may be 2), and the watcher only reports at
+  // it: classifying by a fixed 3 meant a steering round logged as "什么都没做"
+  assert.equal(classify(rpc({ repeat: { name: "read", preview: "", count: 2 } })), "repeat");
 });
 
 test("a good waking resets everything", () => {
