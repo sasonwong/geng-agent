@@ -204,6 +204,9 @@ export async function handleConnect(
   chain: Chain | null = null,
   report: (ok: boolean, why?: string) => void = () => {},
 ): Promise<void> {
+  // `checkTarget` resolves the name as part of the address check, so its `addr` is the
+  // one that was vetted. Resolving again below would be a second lookup whose answer
+  // nothing checks — the shape of a rebinding window.
   const decision = await checkTarget(raw, rule, chain !== null);
   if (!decision.ok || decision.host === undefined || decision.port === undefined) {
     const why = decision.why ?? "?";
@@ -212,23 +215,14 @@ export async function handleConnect(
     socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
-  report(true);
   if (chain !== null) {
     // The daemon lifts its own proxy's weight: the name check already ran, and resolving
     // here would fail on a host that has no DNS of its own.
-    tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log);
+    tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log, report);
     return;
   }
-  const resolved = await resolveChecked(decision.host, rule.cidrs);
-  if ("why" in resolved) {
-    log(`proxy 拒绝 ${raw}：${resolved.why}`);
-    report(false, resolved.why);
-    socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
-    return;
-  }
-  report(true, resolved.by);
-  const upstream = tcpConnect(decision.port, resolved.addr, () => {
-    tunnelDone(socket, upstream, head, log, raw);
+  const upstream = tcpConnect(decision.port, decision.addr as string, () => {
+    tunnelDone(socket, upstream, head, log, raw, report, decision.by);
   });
 }
 
@@ -242,13 +236,19 @@ function tunnelDone(
   head: Buffer,
   log: (line: string) => void,
   label: string,
+  report: (ok: boolean, why?: string) => void,
+  by?: string,
 ): void {
   upstream.on("error", (err) => {
     log(`proxy ${label} 连不上：${err.message}`);
+    report(false, err.message);
     socket.destroy();
   });
   socket.on("error", () => upstream.destroy());
   socket.on("close", () => upstream.destroy());
+  // "出去" means a connection exists, so it is said here and nowhere earlier: a chain
+  // proxy that refused would otherwise be logged as a successful trip.
+  report(true, by);
   socket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
   if (head.length > 0) upstream.write(head);
   upstream.pipe(socket);
@@ -261,17 +261,19 @@ function tunnel(
   chain: Chain,
   o: { connect: string; then: string },
   log: (line: string) => void,
+  report: (ok: boolean, why?: string) => void,
 ): void {
   const host = chain.host;
   const port = chain.port;
   const upstream = tcpConnect(port, host);
   if (chain.kind === "socks5") {
-    socks5(upstream, socket, head, chain, o, log);
+    socks5(upstream, socket, head, chain, o, log, report);
     return;
   }
   let ready = false;
   upstream.on("error", (err) => {
     log(`proxy ${o.connect} 连不上 ${host}:${port}：${err.message}`);
+    report(false, err.message);
     socket.destroy();
   });
   upstream.on("data", function first(chunk: Buffer) {
@@ -280,7 +282,9 @@ function tunnel(
     if (!text.includes("\r\n\r\n")) return;
     upstream.removeListener("data", first);
     if (!/^HTTP\/1\.[01] 2\d\d/.test(text)) {
-      log(`proxy 上游拒绝了 ${o.then}：${text.split("\r\n")[0] ?? "?"}`);
+      const line = text.split("\r\n")[0] ?? "?";
+      log(`proxy 上游拒绝了 ${o.then}：${line}`);
+      report(false, `上游代理：${line}`);
       socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
       upstream.destroy();
       return;
@@ -288,7 +292,7 @@ function tunnel(
     ready = true;
     // the upstream may have sent bytes of the tunnel in the same chunk
     const rest = chunk.subarray(text.indexOf("\r\n\r\n") + 4);
-    tunnelDone(socket, upstream, head, log, o.connect);
+    tunnelDone(socket, upstream, head, log, o.connect, report);
     if (rest.length > 0) upstream.unshift(rest);
   });
   upstream.on("connect", () => {
@@ -308,11 +312,13 @@ function socks5(
   chain: Extract<Chain, { kind: "socks5" }>,
   o: { connect: string; then: string },
   log: (line: string) => void,
+  report: (ok: boolean, why?: string) => void,
 ): void {
   const [host, portText] = o.then.split(":");
   const port = Number(portText);
   upstream.on("error", (err) => {
     log(`proxy ${o.connect} 连不上 ${chain.host}:${chain.port}：${err.message}`);
+    report(false, err.message);
     socket.destroy();
   });
   upstream.on("connect", () => {
@@ -329,9 +335,10 @@ function socks5(
       const method = buffered[1];
       buffered = buffered.subarray(2);
       if (method === 0xff) {
-        log(`proxy 上游不接受我们的认证方式`),
-          socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n"),
-          upstream.destroy();
+        log("proxy 上游不接受我们的认证方式");
+        report(false, "上游代理不接受认证方式");
+        socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+        upstream.destroy();
         return;
       }
       if (method === 2) {
@@ -355,6 +362,7 @@ function socks5(
       buffered = buffered.subarray(2);
       if (!ok) {
         log("proxy 上游的 SOCKS 认证没过");
+        report(false, "上游代理的 SOCKS 认证没过");
         socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
         upstream.destroy();
         return;
@@ -373,11 +381,12 @@ function socks5(
     upstream.removeAllListeners("data");
     if (rep !== 0) {
       log(`proxy 上游拒绝了 ${o.then}（SOCKS 应答 ${rep}）`);
+      report(false, `上游代理：SOCKS 应答 ${rep}`);
       socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
       upstream.destroy();
       return;
     }
-    tunnelDone(socket, upstream, head, log, o.connect);
+    tunnelDone(socket, upstream, head, log, o.connect, report);
     if (rest.length > 0) upstream.unshift(rest);
   };
 

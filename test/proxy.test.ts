@@ -311,3 +311,42 @@ test("plain http is proxied too, and refused by the same address rules", async (
     target.close();
   }
 });
+
+test("one connection is one report, and it is said only once the tunnel is up", async () => {
+  // A socket pair, so the proxy has a client end to speak into without a container.
+  const pair = async (): Promise<{ mine: import("node:net").Socket; peer: import("node:net").Socket }> => {
+    let resolvePeer!: (s: import("node:net").Socket) => void;
+    const ready = new Promise<import("node:net").Socket>((r) => (resolvePeer = r));
+    const server = createTcp((s) => resolvePeer(s));
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", () => r()));
+    const mine = connect((server.address() as { port: number }).port, "127.0.0.1");
+    const peer = await ready;
+    server.close();
+    return { mine, peer };
+  };
+
+  const target = createTcp((s) => s.end("hello"));
+  await new Promise<void>((r) => target.listen(0, "127.0.0.1", () => r()));
+  const port = (target.address() as { port: number }).port;
+
+  const { mine, peer } = await pair();
+  const reports: [boolean, string | undefined][] = [];
+  await handleConnect(
+    `127.0.0.1:${port}`,
+    peer,
+    Buffer.alloc(0),
+    { allow: ["*"], cidrs: ["127.0.0.0/8"] },
+    () => {},
+    null,
+    (ok, why) => reports.push([ok, why]),
+  );
+  await new Promise((r) => setTimeout(r, 200));
+  mine.destroy();
+  target.close();
+
+  // net=N is a count of places it went: two lines for one connection would double it,
+  // and it used to be exactly that on the direct path (the chained path reported once,
+  // which is why nobody saw it).
+  assert.equal(reports.length, 1, JSON.stringify(reports));
+  assert.equal(reports[0]?.[0], true);
+});
