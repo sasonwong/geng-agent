@@ -8,7 +8,7 @@
  * The socket is mounted read-only into the container, so a tool cannot replace it, and
  * a host-side process is the only thing on the other end.
  */
-import { createWriteStream } from "node:fs";
+import { createWriteStream, renameSync, rmSync } from "node:fs";
 import { request } from "node:http";
 
 export interface UdsReply {
@@ -71,22 +71,55 @@ export function getToFile(
   dest: string,
 ): Promise<{ status: number; bytes: number }> {
   return new Promise((resolve, reject) => {
-    const req = request({ socketPath, path, method: "GET" }, (res) => {
-      if (res.statusCode !== 200) {
-        let body = "";
-        res.setEncoding("utf8");
-        res.on("data", (c: string) => {
-          body += c;
-        });
-        res.on("end", () => reject(new Error(`取不到：${body.slice(0, 300)}`)));
-        return;
+    // A partial download must never sit at the destination looking like the whole file,
+    // and a file that was already there must not be deleted by a failed replacement.
+    const part = `${dest}.geng-part-${process.pid}`;
+    let settled = false;
+    const fail = (err: Error): void => {
+      if (settled) return;
+      settled = true;
+      try {
+        rmSync(part, { force: true });
+      } catch {
+        // the cleanup is best effort; the name says what it is
       }
-      const out = createWriteStream(dest);
-      res.pipe(out);
-      out.on("finish", () => resolve({ status: 200, bytes: out.bytesWritten }));
-      out.on("error", reject);
-    });
-    req.on("error", reject);
+      reject(err);
+    };
+    const req = request(
+      { socketPath, path, method: "GET", signal: AbortSignal.timeout(120_000) },
+      (res) => {
+        if (res.statusCode !== 200) {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (c: string) => {
+            body += c;
+          });
+          res.on("end", () => fail(new Error(`取不到：${body.slice(0, 300)}`)));
+          return;
+        }
+        rmSync(part, { force: true });
+        const out = createWriteStream(part);
+        let bytes = 0;
+        res.on("data", (c: Buffer) => {
+          bytes += c.length;
+        });
+        res.pipe(out);
+        res.on("error", fail);
+        out.on("error", fail);
+        out.on("finish", () => {
+          if (settled) return;
+          settled = true;
+          try {
+            renameSync(part, dest);
+            resolve({ status: 200, bytes });
+          } catch (err) {
+            settled = false;
+            fail(err as Error);
+          }
+        });
+      },
+    );
+    req.on("error", fail);
     req.end();
   });
 }

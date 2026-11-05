@@ -92,6 +92,22 @@ test("the socket carries the same answers as the handler", async () => {
     assert.equal((JSON.parse(reply.body) as { id: string }).id, "L1");
     // 0600: the directory keeps others out, the mode is the reminder
     assert.equal((await import("node:fs")).statSync(sock).mode & 0o777, 0o600);
+    // a malformed escape throws synchronously in the route; the answer is the daemon's
+    const malformed = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = request(
+        { socketPath: sock, path: "/files/%E4%AF", method: "GET" },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (c: string) => (body += c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    assert.equal(malformed.status, 400);
+    assert.match(JSON.parse(malformed.body).error, /URL 编码/);
   } finally {
     server.close();
   }

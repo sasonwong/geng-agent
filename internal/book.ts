@@ -460,18 +460,35 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // leaves the book, so `download` names a file by id and chooses where it lands.
     const url = req.url ?? "";
     if (req.method === "GET" && url.startsWith("/files/")) {
-      const wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      let wanted: string;
+      try {
+        wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      } catch {
+        // malformed percent-escapes throw synchronously, and an uncaught throw here takes
+        // the daemon down in the middle of a round over a string the agent typed
+        reply(400, { error: "文件名不是合法的 URL 编码" });
+        return;
+      }
       const hit = fileById(o.paths, wanted);
       if (hit === null) {
         reply(404, { error: `没有这个文件：${wanted}` });
         return;
       }
       try {
+        const bytes = statSync(hit.path).size;
         res.writeHead(200, {
           "content-type": "application/octet-stream",
-          "content-length": String(statSync(hit.path).size),
+          "content-length": String(bytes),
         });
-        createReadStream(hit.path).pipe(res);
+        const stream = createReadStream(hit.path);
+        // The stat says the file is there, but the read can still fail after the headers
+        // have gone out: an unhandled `error` on a stream is another way to kill the daemon.
+        stream.on("error", (err) => {
+          log(`book ${url} 读到一半断了：${err.message}`);
+          if (res.headersSent) res.destroy();
+          else reply(500, { error: `读不出来：${err.message}` });
+        });
+        stream.pipe(res);
       } catch (err) {
         reply(500, { error: `读不出来：${(err as Error).message}` });
       }
@@ -487,14 +504,16 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       req.on("data", (c: Buffer) => {
         size += c.length;
         if (size > MAX_MODEL_BODY) {
-          req.destroy();
+          // destroying the socket without an answer is indistinguishable from the daemon
+          // dying; a refusal the caller can read is the diagnostic difference
           reply(413, { error: "请求体太大" });
+          req.destroy();
           return;
         }
         chunks.push(c);
       });
       req.on("end", () => {
-        proxyModel(o.paths, req, res, Buffer.concat(chunks)).catch(guard);
+        if (size <= MAX_MODEL_BODY) proxyModel(o.paths, req, res, Buffer.concat(chunks)).catch(guard);
       });
       req.on("error", guard);
       return;
@@ -508,16 +527,18 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       req.on("data", (c: Buffer) => {
         size += c.length;
         if (size > MAX_MODEL_BODY) {
-          req.destroy();
           reply(413, { error: "请求体太大" });
+          req.destroy();
           return;
         }
         chunks.push(c);
       });
       req.on("end", () => {
-        forwardPlain(req, res, Buffer.concat(chunks), rule(), chain(), (ok, why) =>
-          o.onNetwork?.({ target: url, ok, why }),
-        ).catch(guard);
+        if (size <= MAX_MODEL_BODY) {
+          forwardPlain(req, res, Buffer.concat(chunks), rule(), chain(), (ok, why) =>
+            o.onNetwork?.({ target: url, ok, why }),
+          ).catch(guard);
+        }
       });
       req.on("error", guard);
       return;
@@ -547,9 +568,13 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     req.setEncoding("utf8");
     req.on("data", (c: string) => {
       body += c;
-      if (body.length > MAX_BODY) req.destroy();
+      if (body.length > MAX_BODY) {
+        reply(413, { error: "请求体太大" });
+        req.destroy();
+      }
     });
     req.on("end", () => {
+      if (body.length > MAX_BODY) return;
       handle(req, body).then((r) => reply(r.status, r.body)).catch(guard);
     });
     req.on("error", guard);

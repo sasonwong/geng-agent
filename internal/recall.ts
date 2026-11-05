@@ -397,6 +397,12 @@ export interface OpenResult {
 export function openText(p: Paths, id: string, offset: number): OpenResult {
   const item = find(p, id.trim());
   if (!item) return { found: false, text: `没有这一件：${id}。用 recall 看有哪些。` };
+  if (offset >= item.body.length) {
+    return {
+      found: true,
+      text: `${item.id}  ${item.source}  ${stamp(item.at)}\n\n这一件一共 ${item.body.length} 字，offset=${offset} 已经在结尾后面了。`,
+    };
+  }
   const page = item.body.slice(offset, offset + PAGE);
   const rest = item.body.length - offset - page.length;
   const out = [`${item.id}  ${item.source}  ${stamp(item.at)}`, ""];

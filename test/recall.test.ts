@@ -74,6 +74,8 @@ test("a long thing is paged, and says how to carry on", () => {
   const first = openText(p, "J20260302-1", 0);
   assert.match(first.text, /还有 1000 字，offset=8000 接着读/);
   assert.match(openText(p, "J20260302-1", 8_000).text, /甲$/);
+  // an offset past the end says where the end is, not "这一件没有正文"
+  assert.match(openText(p, "J20260302-1", 9_000).text, /offset=9000 已经在结尾后面了/);
   // an id nothing has is a refusal, not an empty page
   assert.equal(openText(p, "J00000000-9", 0).found, false);
 });
