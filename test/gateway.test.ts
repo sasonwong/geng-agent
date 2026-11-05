@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { knownPlaces, noteChat, readChats, route } from "../internal/gateway.ts";
+import { keepFailed, knownPlaces, noteChat, readChats, route, sendEach } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/state.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -157,4 +157,44 @@ test("a pure whitelist drops a stranger before anything is kept", () => {
       JSON.stringify(shape),
     );
   }
+});
+
+test("a batch that dies on its second sentence says one sentence landed", async () => {
+  const landed: string[] = [];
+  const r = await sendEach(["a", "b", "c"], async (t) => {
+    if (t === "b") throw new Error("timeout");
+    landed.push(t);
+  });
+  assert.deepEqual(landed, ["a"]);
+  assert.equal(r.sent, 1, "三条发出去一条: 报三条就是又把后半批弄丢了");
+  assert.equal((r.error as Error).message, "timeout");
+});
+
+test("a batch that lands reports all of it", async () => {
+  assert.deepEqual(await sendEach([1, 2, 3], async () => {}), { sent: 3 });
+});
+
+test("the ack keeps exactly what did not go out, and nothing else", () => {
+  const dir = mkdtempSync(join(tmpdir(), "geng-failed-"));
+  const item = {
+    file: join(dir, "1-abc.json"),
+    id: "1-abc",
+    messages: ["甲", "乙", "丙"],
+    files: ["/work/a.md", "/work/b.md"],
+    chat: -1001234,
+    replyTo: { chat: -1001234, messageId: 12 },
+  };
+  assert.equal(keepFailed(dir, item, 1, 1), true);
+  const kept = JSON.parse(readFileSync(join(dir, "failed", "1-abc.json"), "utf8"));
+  assert.deepEqual(kept.messages, ["乙", "丙"]);
+  assert.deepEqual(kept.files, ["/work/b.md"], "已经发出去的那个附件不能跟着回队");
+  assert.deepEqual(kept.replyTo, { chat: -1001234, messageId: 12 });
+  assert.equal(kept.chat, -1001234);
+});
+
+test("everything landed: the ack leaves no failed copy behind", () => {
+  const dir = mkdtempSync(join(tmpdir(), "geng-failed-"));
+  const item = { file: join(dir, "1-abc.json"), id: "1-abc", messages: ["甲"], files: ["/work/a.md"] };
+  assert.equal(keepFailed(dir, item, 1, 1), false);
+  assert.deepEqual(readdirSync(dir).filter((f) => f !== "failed"), []);
 });

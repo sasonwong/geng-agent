@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { attentionActive, readAttention } from "./attention.ts";
 import { Tripwire } from "./tripwire.ts";
 import { quoteFor, quotedOf } from "./quote.ts";
@@ -11,6 +11,7 @@ import { attachmentOf, hostPathForWorkPath, placeholderFor, safeName } from "./a
 import { markSeen, newestKnock, peekInbox } from "./inbox.ts";
 import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./mail.ts";
 import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, writeOps } from "./mute.ts";
+import type { OutboxItem } from "./mute.ts";
 import { loadPolicy } from "./policy.ts";
 import { readBots, type Bots } from "./bots.ts";
 import { readJson, writeJson } from "./state.ts";
@@ -191,6 +192,61 @@ export function mergeBots(
   return { bots, notes };
 }
 
+/**
+ * Runs a batch one item at a time and reports how far it got, instead of throwing the
+ * count away with the error. A batch that dies on its second sentence has one sentence
+ * delivered and the rest unsent, and the sweep has to be able to say which.
+ */
+export async function sendEach<T>(
+  items: readonly T[],
+  send: (item: T) => Promise<void>,
+): Promise<{ sent: number; error?: unknown }> {
+  let sent = 0;
+  for (const item of items) {
+    try {
+      await send(item);
+    } catch (error) {
+      return { sent, error };
+    }
+    sent += 1;
+  }
+  return { sent };
+}
+
+/** One line for ops: whatever was thrown, as words a person can read. */
+function why(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Puts what a half-sent batch still owes next to the outbox that acked it. `failed/` is a
+ * record, not a queue: nothing reads it back, so replaying it is somebody's `mv`.
+ */
+export function keepFailed(dir: string, item: OutboxItem, sentTexts: number, sentFiles: number): boolean {
+  const messages = item.messages.slice(sentTexts);
+  const files = (item.files ?? []).slice(sentFiles);
+  if (messages.length === 0 && files.length === 0) return false;
+  writeJson(join(dir, "failed", basename(item.file)), {
+    id: item.id,
+    messages,
+    ...(files.length === 0 ? {} : { files }),
+    ...(item.chat === undefined ? {} : { chat: item.chat }),
+    ...(item.replyTo === undefined ? {} : { replyTo: item.replyTo }),
+  });
+  return true;
+}
+
+/**
+ * What became of one outbox item. `retry` is the sweep's old `false`: the item stays where
+ * it is because acking it cannot change anything (a tripwire pause, a chat it may not
+ * speak into). The third shape is what the old boolean could not say — part of the batch
+ * went out, part did not, and the rest is no longer this function's to forget.
+ */
+type Delivery =
+  | { ok: true }
+  | { ok: false; retry: true }
+  | { ok: false; retry: false; sentTexts: number; sentFiles: number; error: string };
+
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const root = o.root;
@@ -251,62 +307,73 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     want?: number,
     files: string[] = [],
     replyTo?: { chat: number; messageId: number },
-  ): Promise<boolean> => {
+  ): Promise<Delivery> => {
     const cfg = bots[key];
-    if (!cfg) return false;
+    if (!cfg) return { ok: false, retry: true };
     const mine = (chats[key] ??= { known: {} });
     // bots.json can pin the home; otherwise the first chat it ever heard from is home,
     // and a later group must be named explicitly to be spoken into
     const home = cfg.chat ?? mine.home;
     const chat = want ?? home;
-    if (typeof chat !== "number") return false;
+    if (typeof chat !== "number") return { ok: false, retry: true };
     if (want !== undefined && !mine.known?.[String(want)]) {
       writeOps(ops, "gateway", `${key} 要发给不认识的 chat ${want}，没发。`);
-      return true; // acknowledged: retrying will never make it known
+      return { ok: true }; // acknowledged: retrying will never make it known
     }
-    if (trip(key, texts)) return false;
+    if (trip(key, texts)) return { ok: false, retry: true };
     // a quote only means something inside the chat it came from; a mismatched one is
     // dropped rather than sent into the wrong conversation
     const reply = quoteFor(chat, replyTo);
-    const ids: (number | undefined)[] = [];
-    for (const text of texts) {
-      if (reply === undefined) {
-        ids.push((await sendMessage(cfg.token, chat, text))[0]);
-        continue;
-      }
-      try {
-        ids.push((await sendMessage(cfg.token, chat, text, undefined, reply))[0]);
-      } catch {
-        // a deleted message must not take the words down with it
-        ids.push((await sendMessage(cfg.token, chat, text))[0]);
-      }
-    }
     const p = instanceData(key);
-    for (const given of files) {
+    // One line lands per sentence, not one block at the end: a batch that dies halfway
+    // must not leave a transcript that says nothing happened, because the hole it leaves
+    // is indistinguishable from a message the other side never got.
+    const words = await sendEach(texts, async (text) => {
+      let id: number | undefined;
+      if (reply === undefined) {
+        id = (await sendMessage(cfg.token, chat, text))[0];
+      } else {
+        try {
+          id = (await sendMessage(cfg.token, chat, text, undefined, reply))[0];
+        } catch {
+          // a deleted message must not take the words down with it
+          id = (await sendMessage(cfg.token, chat, text))[0];
+        }
+      }
+      if (p === null) return;
+      // The id Telegram gave this text: `<chat>-<message_id>`, the same shape the inbox
+      // uses, so a line of its own can be pointed at later just like anyone else's.
+      // Absent only if the send answered without one.
+      appendSaid(p.data, chat, {
+        at: new Date().toISOString(),
+        dir: "out",
+        text,
+        ...(id === undefined ? {} : { id: `${chat}-${id}` }),
+      });
+    });
+    if (words.error !== undefined) {
+      return { ok: false, retry: false, sentTexts: words.sent, sentFiles: 0, error: why(words.error) };
+    }
+    const attachments = await sendEach(files, async (given) => {
       // the path came from inside the container, so it can be anything it likes: only
       // /work is its own, and only files that exist there are sent
       const host = hostPathForWorkPath(p?.workspace ?? "", given);
       if (host === null) {
         writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
-        continue;
+        return;
       }
       await sendFile(cfg.token, chat, host);
+    });
+    if (attachments.error !== undefined) {
+      return {
+        ok: false,
+        retry: false,
+        sentTexts: words.sent,
+        sentFiles: attachments.sent,
+        error: why(attachments.error),
+      };
     }
-    if (p) {
-      for (const [i, text] of texts.entries()) {
-        // The id Telegram gave the first part of this text: `<chat>-<message_id>`, the
-        // same shape the inbox uses, so a line of its own can be pointed at later just
-        // like anyone else's. Absent only if the send answered without one.
-        const id = ids[i];
-        appendSaid(p.data, chat, {
-          at: new Date().toISOString(),
-          dir: "out",
-          text,
-          ...(id === undefined ? {} : { id: `${chat}-${id}` }),
-        });
-      }
-    }
-    return true;
+    return { ok: true };
   };
 
   const handleUpdate = async (key: string, me: BotIdentity, update: TgUpdate): Promise<void> => {
@@ -631,18 +698,36 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
         }
         const dir = key === "ops" ? outboxDir(join(root, "data", "_ops")) : outboxDir(join(root, "data", key));
         for (const item of readOutbox(dir)) {
-          if (item.messages.length === 0) {
+          if (item.messages.length === 0 && (item.files ?? []).length === 0) {
             ackOutbox(dir, item.file);
             continue;
           }
+          let d: Delivery;
           try {
-            if (await deliver(key, item.messages, item.chat, item.files, item.replyTo)) {
-              ackOutbox(dir, item.file);
-            }
+            d = await deliver(key, item.messages, item.chat, item.files, item.replyTo);
           } catch (err) {
-            writeOps(ops, "gateway", `发给 ${key} 失败：${(err as Error).message}`);
-            ackOutbox(dir, item.file);
+            // Not a send failure: something threw before it could say how far it got. The
+            // file is the only copy of what it wanted to say, so it stays where it is for
+            // a person to see. Acking it here is the loss this branch exists to prevent.
+            writeOps(ops, "gateway", `发给 ${key} 出错，整批留在 outbox：${why(err)}`);
+            continue;
           }
+          if (d.ok) {
+            ackOutbox(dir, item.file);
+            continue;
+          }
+          if (d.retry) continue;
+          // What did not go out stays a record. It is not retried: a timeout can mean
+          // Telegram already took the message, and a duplicate in a numbered transcript
+          // is worse than a gap somebody can see and replay by hand.
+          keepFailed(dir, item, d.sentTexts, d.sentFiles);
+          writeOps(
+            ops,
+            "gateway",
+            `发给 ${key} 失败：${d.error}。已发 ${d.sentTexts}/${item.messages.length} 句、` +
+              `${d.sentFiles}/${(item.files ?? []).length} 个文件；没发的在 outbox/failed/。`,
+          );
+          ackOutbox(dir, item.file);
         }
       }
       await new Promise<void>((r) => setTimeout(r, 2_000));
