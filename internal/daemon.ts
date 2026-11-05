@@ -8,6 +8,7 @@ import { buildPacket, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { pendingMail } from "./mail.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
+import { chainFrom } from "./proxy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict, STATE_SCHEMA } from "./schema.ts";
 import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
@@ -299,8 +300,15 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         minWakeMs: policy.cycle.minWakeMinutes * 60_000,
         places: knownPlaces(paths.root, o.instance).map((p) => p.id),
         proxy: { allow: policy.container.proxyAllow },
-        onNetwork: () => {
+        chain: chainFrom(policy.container.proxyChain),
+        onNetwork: (event) => {
           netCalls += 1;
+          // Its own file: one line per connection, so `net=N` on the round line stays a
+          // number and this stays readable when something went looking.
+          appendLine(
+            paths.netLog,
+            `${new Date().toISOString()} ${event.ok ? "出去" : "拒绝"} ${event.target}${event.why ? `（${event.why}）` : ""}`,
+          );
         },
         // pi asks for the key on every model request, so this should track the number of
         // calls. A round whose count is higher fetched the key for something else — the

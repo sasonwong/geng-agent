@@ -53,6 +53,7 @@ export interface Paths {
   journal: string;
   journalDiscarded: string;
   secrets: string;
+  netLog: string;
   ghAppKey: string;
   systemMd: string;
   /** The tools, from the checkout rather than the image: mounting them read-only means
@@ -111,6 +112,8 @@ export function makePaths(root: string, instance: string): Paths {
     journal,
     journalDiscarded: join(journal, "discarded"),
     secrets: join(r, "secrets", `${instance}.env`),
+    // outbound connections, one line each: too many for daemon.log, too useful to drop
+    netLog: join(data, "net.log"),
     // never mounted, never in an env file: the daemon signs with it and nothing else reads it
     ghAppKey: join(r, "secrets", "gh-app.pem"),
     systemMd: join(r, "deploy", "SYSTEM.md"),

@@ -142,7 +142,7 @@ export function buildCommand(
       "/work",
     ];
     // The search endpoint is a unix socket, not a port on the bridge: nothing on the
-    // network can reach it, which is why the egress rules no longer need an exception.
+    // network can reach it, which is why nothing else has to be opened for it.
     // Mounted only when the file is there — docker materialises a missing host path as a
     // directory, and a directory at that path fails at connect time with a shape nobody
     // recognises.
@@ -165,10 +165,9 @@ export function buildCommand(
         `GENG_BOOK_SOCK=${BOOK_SOCKET_IN_CONTAINER}`,
       );
     }
-    // `network` is now an opt-in to direct egress, not the default. The default is a
-    // container with no interface but loopback: everything leaves through the proxy on the
-    // book socket, so "it went somewhere" is a line in the log rather than a route.
-    args.push("--network", policy.container.network ?? "none");
+    // There is no direct network at all. Everything leaves through the proxy on the book
+    // socket, so "it went somewhere" is a line in net.log rather than a route.
+    args.push("--network", "none");
     // secrets are injected, never mounted
     if (existsSync(paths.secrets)) args.push("--env-file", paths.secrets);
     args.push(

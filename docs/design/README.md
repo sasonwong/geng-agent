@@ -573,9 +573,10 @@ transcript 的**入站**行因此多了一个 `id` 字段（纯增量），出�
 也是 pi 写 `trust.json` 的地方）。
 
 **网络**：容器没有网络（`--network none`）。出去的路只有两条，都在 book socket 上：
-模型流量（daemon 补 key 转发）和 HTTP 代理（放行名单在 `policy.json` 的 `container.proxyAllow`）。
-代理先查名字，再解析，任何一个答案是私网就拒绝——代理能摸到宿主自己的网络，比没有代理更糟。
-每一次通过代理的连接都在轮次日志里记成 `net=N`。
+模型流量（daemon 补 key 转发）和 HTTP/SOCKS 代理。代理默认放通所有公网目的地——挡的不是
+"能去哪"，是"能摸到宿主的哪儿"：每个目标先解析，任何答案是私网/回环/链路本地就拒绝。
+daemon 自己怎么上网是 `container.proxyChain`（`auto` / `off` / 一个 URL）。
+每次连接记一行 `data/<inst>/net.log`，轮次行里只有 `net=N` 这个数。
 
 **看不见的**：`daemon.log`（纸上的「上一轮」「24 小时醒了 N 次」已经说过）、`policy.json`
 （它活在什么规矩下不是它要读的书；可协商的那几个值由纸印出来）、`meta/`、`usage/`、`backup/`、
@@ -728,9 +729,9 @@ rustic，一次清醒一次快照。内容去重是免费的，**不要设计增
    现在完全不出现在检查里，于是"没配"和"配好了但没动静"一模一样。两件具体的事：
    **policy 与模板逐字段比**（`data/<inst>/policy.json` 是 `init` 时的副本，模板改了它不会跟；
    一次真实的例子是超时停在 20 分钟而模板已经 30），以及**逐项报"未配置 + 一条命令"**。
-2. **`init` 应该带参数。** 现在它拷模板，于是每个新实例都要手工把 `runner` 改回 `docker`、
-   把 `container.network` 填上——漏了就跑在本机 pi 上，看起来完全正常。`--runner`、`--network`、
-   `--timeout-min`、`--provider`/`--model` 应该一次写对。
+2. **`init` 应该带参数。** 现在它拷模板，于是每个新实例都要手工把 `runner` 改回 `docker`——
+   漏了就跑在本机 pi 上，看起来完全正常。`--runner`、`--timeout-min`、`--provider`/`--model`
+   应该一次写对。
 3. ~~凭据的位置~~ **已改**：GitHub 是一个 App，私钥在 `secrets/gh-app.pem`，容器里没有凭据，
    `git` 要的时候现换一个一小时的 installation token；模型 key 在 `secrets/model.env`，
    同样只在宿主上。两处都是"容器能问，不能存"。

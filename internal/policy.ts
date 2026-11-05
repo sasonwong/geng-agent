@@ -28,9 +28,13 @@ export interface Policy {
     memory: string;
     cpus: string;
     pidsLimit: number;
-    /** null means no network at all: the container reaches the world through the proxy. */
-    network: string | null;
-    /** Hosts the proxy will open a connection to. Suffix match: `github.com` covers its subdomains. */
+    /**
+     * How the daemon reaches the outside world itself: "auto" (its own environment),
+     * "off" (direct, even if the environment says otherwise), or a proxy URL
+     * (`http://`, `socks5://`, with optional user:pass).
+     */
+    proxyChain: string;
+    /** Hosts the proxy may reach. `["*"]` is every public host; `[]` is none. */
     proxyAllow: string[];
   };
 }
@@ -48,18 +52,11 @@ export function defaultPolicy(): Policy {
       memory: "2g",
       cpus: "1.5",
       pidsLimit: 512,
-      network: null,
-      // small on purpose: a list that grows by default is a list nobody reads
-      proxyAllow: [
-        "github.com",
-        "api.github.com",
-        "raw.githubusercontent.com",
-        "registry.npmjs.org",
-        "pypi.org",
-        "files.pythonhosted.org",
-        "proxy.golang.org",
-        "sum.golang.org",
-      ],
+      proxyChain: "auto",
+      // Every public destination, deliberately: the thing worth blocking is the host's own
+      // network, and that is refused by address regardless of this list. Narrow it when the
+      // instance should reach a known few.
+      proxyAllow: ["*"],
     },
   };
 }
@@ -120,7 +117,14 @@ export function loadPolicy(file: string): Policy {
       memory: str(container.memory, "container.memory"),
       cpus: str(container.cpus, "container.cpus"),
       pidsLimit: num(container.pidsLimit, "container.pidsLimit", 16),
-      network: typeof container.network === "string" && container.network !== "" ? container.network : null,
+      proxyChain: (() => {
+        const raw = typeof container.proxyChain === "string" ? container.proxyChain.trim() : d.container.proxyChain;
+        if (raw === "" || raw === "auto" || raw === "off") return raw === "" ? "auto" : raw;
+        if (!/^(https?|socks5h?):\/\//.test(raw)) {
+          throw new ExpectedError(`policy: container.proxyChain 要是 auto、off 或 http(s)/socks5 URL，收到 ${raw}`);
+        }
+        return raw;
+      })(),
       proxyAllow:
         container.proxyAllow === undefined
           ? d.container.proxyAllow
@@ -129,8 +133,8 @@ export function loadPolicy(file: string): Policy {
               // "let it go anywhere" already means, and it is a different field with a
               // different consequence.
               const list = Array.isArray(container.proxyAllow) ? container.proxyAllow : [];
-              if (list.some((x) => x === "*" || String(x).includes("/"))) {
-                throw new ExpectedError("policy: container.proxyAllow 只收主机名，不收 * 或 URL");
+              if (list.some((x) => String(x).includes("/") || String(x).includes(":"))) {
+                throw new ExpectedError("policy: container.proxyAllow 只收主机名（\"*\" 表示全部），不收 URL 或端口");
               }
               return list.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
             })(),

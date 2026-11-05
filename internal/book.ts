@@ -6,7 +6,7 @@ import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
-import { handleConnect, type ProxyRule } from "./proxy.ts";
+import { handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
 import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -22,7 +22,7 @@ import { readJson, readText, writeJson, writeText } from "./fs.ts";
  *
  * Why a unix socket and not a port: the container does not need a network address to reach
  * a host process, and a port is reachable by everything on the bridge — which then needs a
- * token, and an exception in the egress rules, to stay safe. The file is the boundary.
+ * token, and a firewall exception, to stay safe. The file is the boundary.
  *
  * Served by the daemon, but written as a library that takes `Paths`: `runner: "local"` and
  * the dev commands run the same code, and a tool that only exists when systemd is around
@@ -53,7 +53,9 @@ export interface BookOptions {
    */
   onKeyFetch?: () => void;
   /** Called once per proxied connection: the only evidence that it went somewhere. */
-  onNetwork?: () => void;
+  onNetwork?: (event: { target: string; ok: boolean; why?: string }) => void;
+  /** How the daemon itself reaches the network: null for direct. */
+  chain?: Chain | null;
 }
 
 export interface HandlerOptions {
@@ -421,9 +423,6 @@ export function startBookServer(o: BookOptions): Promise<Server> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const sock = socketPath(o.paths);
   const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs, places: o.places });
-  // Calls into the daemon count against the round: `net=N` on the log line is what makes
-  // "it went somewhere" a number instead of a guess.
-  const net = (): void => o.onNetwork?.();
 
   const rule = o.proxy ?? { allow: [] };
   const server = createServer((req, res) => {
@@ -515,9 +514,11 @@ export function startBookServer(o: BookOptions): Promise<Server> {
   });
 
   server.on("connect", (req, socket, head) => {
-    net();
-    handleConnect(req.url ?? "", socket, head, rule, log).catch((err: unknown) => {
-      log(`proxy ${req.url ?? "?"} 出错：${(err as Error).message}`);
+    const target = req.url ?? "";
+    const report = (ok: boolean, why?: string): void => o.onNetwork?.({ target, ok, why });
+    handleConnect(target, socket, head, rule, log, o.chain ?? null, report).catch((err: unknown) => {
+      log(`proxy ${target} 出错：${(err as Error).message}`);
+      report(false, (err as Error).message);
       socket.destroy();
     });
   });

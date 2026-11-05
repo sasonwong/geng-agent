@@ -10,7 +10,7 @@ import { readJson, readText, writeJson } from "./fs.ts";
  * path. Quota is enforced here, where the agent can't edit the counter.
  *
  * A unix socket rather than a port on the bridge: a port is reachable by anything on
- * the network, and needed an exception in the egress rules to be usable at all. The
+ * the network, and needed an exception in a firewall to be usable at all. The
  * socket needs neither an exception nor a token — the filesystem already says who may
  * connect, and a second copy of a secret in the container's environment protects nothing.
  */

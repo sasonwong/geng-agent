@@ -46,6 +46,7 @@ export function isPublicAddress(ip: string): boolean {
 /** `github.com` allows itself and `codeload.github.com`, never `evil-github.com`. */
 export function hostAllowed(host: string, allow: string[]): boolean {
   const want = host.toLowerCase().replace(/\.$/, "");
+  if (allow.includes("*")) return true;
   return allow.some((raw) => {
     const entry = raw.toLowerCase().replace(/\.$/, "");
     return want === entry || want.endsWith(`.${entry}`);
@@ -70,21 +71,45 @@ export async function resolvePublic(host: string): Promise<{ addr: string } | { 
   return { addr: (found[0] as { address: string }).address };
 }
 
+export type Chain =
+  | { kind: "http"; host: string; port: number; auth?: string }
+  | { kind: "socks5"; host: string; port: number; auth?: { user: string; pass: string } };
+
 /**
- * Where the daemon itself sends its connections. On a machine with direct internet this is
- * unset and the proxy connects itself; behind one, the chain is the daemon's own env — the
- * container should not have to know which world the host lives in.
+ * Where the daemon sends its own connections.
+ *
+ * `auto` follows the daemon's environment, because the machine that runs it may itself be
+ * behind a proxy and the environment is where that fact usually lives. `off` is a
+ * decision, not an absence: it means direct even when `HTTPS_PROXY` is set, which is what
+ * a leftover systemd `Environment=` looks like otherwise. A URL overrides both.
  */
-export function chainProxy(): { host: string; port: number } | null {
-  const raw = process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? "";
+export function chainFrom(value: string): Chain | null {
+  const wanted = value.trim();
+  const raw =
+    wanted === "" || wanted === "auto"
+      ? (process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.ALL_PROXY ?? "")
+      : wanted === "off"
+        ? ""
+        : wanted;
   if (raw.trim() === "") return null;
+  let url: URL;
   try {
-    const url = new URL(raw);
-    const port = url.port === "" ? (url.protocol === "https:" ? 443 : 80) : Number(url.port);
-    return url.hostname === "" ? null : { host: url.hostname, port };
+    url = new URL(raw);
   } catch {
     return null;
   }
+  const port = url.port === "" ? (url.protocol === "socks5:" || url.protocol === "socks5h:" ? 1080 : 80) : Number(url.port);
+  if (url.hostname === "") return null;
+  const user = decodeURIComponent(url.username);
+  const pass = decodeURIComponent(url.password);
+  if (url.protocol === "socks5:" || url.protocol === "socks5h:") {
+    return { kind: "socks5", host: url.hostname, port, ...(user === "" ? {} : { auth: { user, pass } }) };
+  }
+  if (url.protocol === "http:" || url.protocol === "https:") {
+    const auth = user === "" ? undefined : `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
+    return { kind: "http", host: url.hostname, port, ...(auth === undefined ? {} : { auth }) };
+  }
+  return null;
 }
 
 export interface Decision {
@@ -118,26 +143,32 @@ export async function handleConnect(
   head: Buffer,
   rule: ProxyRule,
   log: (line: string) => void,
+  chain: Chain | null = null,
+  report: (ok: boolean, why?: string) => void = () => {},
 ): Promise<void> {
-  const decision = await checkTarget(raw, rule, chainProxy() !== null);
+  const decision = await checkTarget(raw, rule, chain !== null);
   if (!decision.ok || decision.host === undefined || decision.port === undefined) {
-    log(`proxy 拒绝 ${raw}：${decision.why ?? "?"}`);
+    const why = decision.why ?? "?";
+    log(`proxy 拒绝 ${raw}：${why}`);
+    report(false, why);
     socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
-  const chain = chainProxy();
+  report(true);
   if (chain !== null) {
     // The daemon lifts its own proxy's weight: the name check already ran, and resolving
     // here would fail on a host that has no DNS of its own.
-    tunnel(socket, head, chain.host, chain.port, { connect: raw, then: `${decision.host}:${decision.port}` }, log);
+    tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log);
     return;
   }
   const resolved = await resolvePublic(decision.host);
   if ("why" in resolved) {
     log(`proxy 拒绝 ${raw}：${resolved.why}`);
+    report(false, resolved.why);
     socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
+  report(true);
   const upstream = tcpConnect(decision.port, resolved.addr, () => {
     tunnelDone(socket, upstream, head, log, raw);
   });
@@ -169,12 +200,17 @@ function tunnelDone(
 function tunnel(
   socket: Duplex,
   head: Buffer,
-  host: string,
-  port: number,
+  chain: Chain,
   o: { connect: string; then: string },
   log: (line: string) => void,
 ): void {
+  const host = chain.host;
+  const port = chain.port;
   const upstream = tcpConnect(port, host);
+  if (chain.kind === "socks5") {
+    socks5(upstream, socket, head, chain, o, log);
+    return;
+  }
   let ready = false;
   upstream.on("error", (err) => {
     log(`proxy ${o.connect} 连不上 ${host}:${port}：${err.message}`);
@@ -198,6 +234,109 @@ function tunnel(
     if (rest.length > 0) upstream.unshift(rest);
   });
   upstream.on("connect", () => {
-    upstream.write(`CONNECT ${o.then} HTTP/1.1\r\nHost: ${o.then}\r\n\r\n`);
+    const auth = chain.auth === undefined ? "" : `Proxy-Authorization: ${chain.auth}\r\n`;
+    upstream.write(`CONNECT ${o.then} HTTP/1.1\r\nHost: ${o.then}\r\n${auth}\r\n`);
+  });
+}
+
+/**
+ * SOCKS5, because a proxy that is only spoken to as HTTP is half a proxy: the one on this
+ * machine is SOCKS, and `ALL_PROXY=socks5://…` is how people write it.
+ */
+function socks5(
+  upstream: import("node:net").Socket,
+  socket: Duplex,
+  head: Buffer,
+  chain: Extract<Chain, { kind: "socks5" }>,
+  o: { connect: string; then: string },
+  log: (line: string) => void,
+): void {
+  const [host, portText] = o.then.split(":");
+  const port = Number(portText);
+  upstream.on("error", (err) => {
+    log(`proxy ${o.connect} 连不上 ${chain.host}:${chain.port}：${err.message}`);
+    socket.destroy();
+  });
+  upstream.on("connect", () => {
+    upstream.write(chain.auth === undefined ? Buffer.from([5, 1, 0]) : Buffer.from([5, 1, 2]));
+  });
+
+  type Phase = "method" | "auth" | "connect";
+  let phase: Phase = "method";
+  let buffered = Buffer.alloc(0);
+
+  const step = (): void => {
+    if (phase === "method") {
+      if (buffered.length < 2) return;
+      const method = buffered[1];
+      buffered = buffered.subarray(2);
+      if (method === 0xff) {
+        log(`proxy 上游不接受我们的认证方式`),
+          socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n"),
+          upstream.destroy();
+        return;
+      }
+      if (method === 2) {
+        if (chain.auth === undefined) {
+          socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+          upstream.destroy();
+          return;
+        }
+        const { user, pass } = chain.auth;
+        upstream.write(Buffer.concat([Buffer.from([1, user.length]), Buffer.from(user), Buffer.from([pass.length]), Buffer.from(pass)]));
+        phase = "auth";
+        return;
+      }
+      phase = "connect";
+      askConnect();
+      return;
+    }
+    if (phase === "auth") {
+      if (buffered.length < 2) return;
+      const ok = buffered[1] === 0;
+      buffered = buffered.subarray(2);
+      if (!ok) {
+        log("proxy 上游的 SOCKS 认证没过");
+        socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+        upstream.destroy();
+        return;
+      }
+      phase = "connect";
+      askConnect();
+      return;
+    }
+    // connect reply: VER REP RSV ATYP BND.ADDR BND.PORT
+    if (buffered.length < 4) return;
+    const rep = buffered[1];
+    const atyp = buffered[3];
+    const addrLen = atyp === 1 ? 4 : atyp === 4 ? 16 : buffered.length >= 5 ? (buffered[4] as number) + 1 : 99;
+    if (buffered.length < 4 + addrLen + 2) return;
+    const rest = buffered.subarray(4 + addrLen + 2);
+    upstream.removeAllListeners("data");
+    if (rep !== 0) {
+      log(`proxy 上游拒绝了 ${o.then}（SOCKS 应答 ${rep}）`);
+      socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      upstream.destroy();
+      return;
+    }
+    tunnelDone(socket, upstream, head, log, o.connect);
+    if (rest.length > 0) upstream.unshift(rest);
+  };
+
+  const askConnect = (): void => {
+    if (host === undefined || !Number.isFinite(port)) {
+      socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+      upstream.destroy();
+      return;
+    }
+    const name = Buffer.from(host);
+    upstream.write(
+      Buffer.concat([Buffer.from([5, 1, 0, 3, name.length]), name, Buffer.from([port >> 8, port & 0xff])]),
+    );
+  };
+
+  upstream.on("data", (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    step();
   });
 }

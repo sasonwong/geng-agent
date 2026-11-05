@@ -6,7 +6,7 @@
 
 | 类别 | 举例 | 特点 |
 |---|---|---|
-| **宿主前置** | docker、`agent-net`、egress 规则、linger | 一次性，有的要 sudo，**改回来麻烦** |
+| **宿主前置** | docker、linger | 一次性，有的要 sudo |
 | **每实例** | `geng init`、一个 user unit、一份凭据 | 加一个实例就重复一遍 |
 | **可选能力** | 网关、搜索、邮件、备份 | 不装就等于没有，且**不会有任何报错** |
 
@@ -22,71 +22,9 @@
 | node 的**绝对路径** | systemd 的 PATH 里没有 nvm；`env node` 会让 unit 每十秒以 127 退出 | `command -v node` 记下来 |
 | docker + 当前用户在 `docker` 组 | 每轮醒来是一个 `--rm` 容器 | `docker ps`（不是 `sudo docker ps`） |
 | `rustic`、`flock`、`rsync` | 备份、单实例锁、迁移 | `rustic --version`、`flock --help` |
-| `deploy/egress.sh` | 建 `agent-net`，封掉元数据地址和私网段；装成 `geng-egress` unit 才活得过重启 | `sudo iptables -S DOCKER-USER \| grep br-`（有输出才算装上） |
 
 **docker 组要重新登录一次才生效。** 刚 `usermod -aG docker` 完就 `docker ps` 会报 socket 权限，
 那不是装错了。
-
-### egress 规则（只有选择直连时才需要）
-
-**默认不需要这一节。** 容器默认 `--network none`：没有接口、没有路由、没有 DNS，唯一出口是
-book socket 上的 HTTP 代理（见下）。这一节只在你想让容器**绕过代理直连**时用——
-`policy.json` 里把 `container.network` 填成一个网桥名，然后按这里的规则给它封网。
-
-规则只存在于 iptables 里，**重启就没了，而且没了不报错**：容器照常工作，只是元数据地址和私网段
-又通了。所以它装成 system unit（要 root，不是 user unit），每次开机重新写一遍：
-
-```bash
-cd ~/geng-agent
-sed -e "s|@ROOT@|$PWD|g" deploy/geng-egress.service \
-  | sudo tee /etc/systemd/system/geng-egress.service >/dev/null
-sudo systemctl daemon-reload
-sudo systemctl enable --now geng-egress
-sudo iptables -S DOCKER-USER | grep br-        # 有输出 = 规则真的在
-systemctl is-enabled geng-egress               # enabled = 下次开机会重写
-```
-
-`sudo systemctl reload geng-egress` 重跑一次（改过 `egress.sh` 之后用它）；全部撤掉用
-`sudo systemctl disable --now geng-egress` 加 `sudo iptables -F DOCKER-USER`。
-
-它做三件事，顺序有意义：**先**封云元数据地址和私网段（`10/8`、`172.16/12`、`192.168/16`），
-**再**放行 80/443/53，**最后**一条兜底 DROP。顺序反了（比如用 `-I` 逐条插到最前面），兜底会先命中，
-容器就完全没有 TCP 了。
-
-- 规则**只作用于 `-i br-<agent-net 的 id>`**，所以同机跑别的服务不受影响
-- 重跑是安全的：它先删掉提到这个网桥的规则再按顺序重加，不会叠
-- 私网是**整段封死**的，没有例外。容器够到宿主靠的不是网络：搜索端点是 unix socket，
-  daemon 把那个文件挂进容器（见 5.2）。**不要**为了省事把整段私网放开，也不要再加按端口的例外
-
-直连模式下验证（两条都要，缺一条就说明规则位置错了）：
-
-```bash
-docker run --rm --network agent-net geng-agent:latest sh -lc 'curl -sS -m 5 -o /dev/null -w "%{http_code}\n" https://api.github.com'   # 应该出 200/301
-docker run --rm --network agent-net geng-agent:latest sh -lc 'curl -sS -m 5 http://169.254.169.254/ ; echo exit=$?'                    # 应该超时
-```
-
-> 「连不上」和「被封住」在容器里长得一样。所以 `geng doctor <inst> --probe` 两边都测：
-> **直连必须失败，代理必须通**。只测否定的一侧，一个没有任何出口的容器也会全绿。
-
-### 出口代理（容器怎么上网）
-
-容器没有网络。要出去的东西只有三类：模型请求（`socat 11434 → book.sock`，daemon 补 key）、
-搜索（另一个 socket）、以及所有 HTTPS（`socat 3128 → book.sock`，daemon 做 HTTP 代理）。
-
-放行名单是 `policy.json` 的 `container.proxyAllow`，默认八项（github、npm、pypi、golang）。
-要加一个主机就写进去——它是**后缀匹配**：`github.com` 覆盖 `codeload.github.com`，
-但 `evil-github.com` 不匹配。
-
-代理在放行**之前**还会解析那个名字，任何一个答案是私网/回环/链路本地就拒绝；连接用的是被检查过
-的那个地址。这是为了让代理不变成通往宿主自己网络的洞——那比没有代理更糟。
-
-```bash
-node cmd/geng/index.ts doctor --instance alice --probe    # 「只有代理能出去」那一行
-```
-
-被拒绝的主机会在 `daemon.log` 留一行（`proxy 拒绝 pi.dev:443：pi.dev 不在放行名单里`），
-所以「它想连哪儿」是可读的，不是猜的。pi 自己会去拉模型目录（`pi.dev`），默认被拒——
-用镜像里自带的目录，模型列表因此不会在半夜静默变化。
 
 ### 代理（可选）
 
@@ -98,7 +36,47 @@ node cmd/geng/index.ts doctor --instance alice --probe    # 「只有代理能�
 | 构建里的 apt / npm | `DOCKER_BUILD_PROXY=http://…:PORT deploy/build.sh`——构建容器在桥接网络里看不见 `127.0.0.1`，所以脚本只在设了它时才切 `--network=host` |
 | 网关连 Telegram | unit 里的 `NODE_USE_ENV_PROXY=1`（Node 的 `fetch` 默认不读 `HTTP(S)_PROXY`） |
 
-**agent 容器本身不需要代理**：它只连模型和网络搜索，出口由 egress 规则管。
+**agent 容器本身不需要配代理**：它没有网络，模型和搜索走 socket，其余 HTTPS 走容器里的 3128。
+
+### 出口代理（容器怎么上网）
+
+容器是 `--network none`：没有接口、没有路由、没有 DNS。出去的路只有两条，都在 book socket 上：
+
+```
+127.0.0.1:11434   模型请求   daemon 补上 provider 的 key，转发到上游
+127.0.0.1:3128     HTTP 代理  CONNECT 到放行名单里的主机
+```
+
+```jsonc
+"container": {
+  // 不写 = auto：用 daemon 自己环境里的 HTTPS_PROXY/ALL_PROXY；没有就直连
+  "proxyChain": "auto",
+  // "proxyChain": "http://127.0.0.1:10808"    // 链式，忽略环境
+  // "proxyChain": "socks5://user:pass@host:1080"  // SOCKS5（带认证也行）
+  // "proxyChain": "off"                        // 直连，即使环境里有代理
+  "proxyAllow": ["*"]                          // 是否放行目的地，见下
+}
+```
+
+`off` 是给"环境里残留了一行 `HTTPS_PROXY`"准备的：写 `auto` 会照它走，写 `off` 才是不走。
+
+**`proxyAllow` 默认 `["*"]`：放通所有公网目的地。** 放行的是目的地这件事本身，不是权限——
+连上 github.com 之后能做什么，由容器里的凭据决定，代理不管。真正挡的是**宿主自己的网络**：
+每个目标先解析，任何一个答案是私网/回环/链路本地就拒绝，连接用的是检查过的那个地址。
+`[]` 是全部拒绝（新实例要"先什么都不放"，就这么写）。
+
+每一次连接都记一行 `data/<inst>/net.log`：
+
+```
+2026-11-05T01:39:31.000Z 出去 github.com:443
+2026-11-05T01:39:31.400Z 拒绝 pi.dev:443（pi.dev 不在放行名单里）
+```
+
+它自己一个文件，因为一次 `git clone` 就是十几行；轮次行里仍然只有 `net=N` 这个数。
+
+```bash
+node cmd/geng/index.ts doctor --instance alice --probe   # 「只有代理能出去」：直连必须失败、代理必须通
+```
 
 ---
 
@@ -138,14 +116,16 @@ node cmd/geng/index.ts init alice
 
 ### 3.1 改 policy（这一步不能忘）
 
-`init` 拷的是模板，所以它写出来的是 **`runner: "local"` + `container.network: null`**。
-生产要改成：
+`init` 拷的是模板，所以它写出来的是 **`runner: "local"`**——那意味着每轮直接跑宿主的 pi：
+没有容器、没有只读文件系统、没有出口代理。生产要改成：
 
 ```json
-{ "runner": "docker", "container": { "network": "agent-net" } }
+{ "runner": "docker" }
 ```
 
-漏了会怎样：**每轮都会跑起来，只是跑在本机的 pi 上**——没有容器、没有只读挂载、没有 egress 规则。
+就这一个字段。网络不用配：容器默认没有网络，出口只有 book socket 上的代理。
+
+漏了会怎样：**每轮都会跑起来，只是跑在本机的 pi 上**——没有容器、没有只读文件系统、没有出口代理。
 它看起来完全正常，你看不出来。
 
 同一个文件里值得先看一眼的还有 `cycle.timeoutSec`（默认 1800 = 30 分钟）、`timezone`、
@@ -606,7 +586,7 @@ secrets/bots.json        每个实例一个 bot（token 就是路由键）
 secrets/search.env       搜索端点的 token、绑定地址、每日限额
 secrets/mail.json/.env   信箱的地址映射和收信 token
 secrets/rustic.env       备份口令——丢了快照就没了
-deploy/    SYSTEM.md  settings.json  policy.json  geng@.service  geng-egress.service  egress.sh  mail-worker/
+deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  geng-gateway.service  geng-search.service  mail-worker/
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。

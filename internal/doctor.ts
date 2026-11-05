@@ -18,6 +18,7 @@ import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
+import { chainFrom } from "./proxy.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
 import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
@@ -167,13 +168,16 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 
   if (policy.runner === "docker") {
     checks.push({ name: "docker", ok: hasCmd("docker"), detail: "run 需要 docker 可执行" });
+    const allowAll = policy.container.proxyAllow.includes("*");
+    const chain = chainFrom(policy.container.proxyChain);
     checks.push({
-      name: "出口网络",
-      ok: policy.container.network === null,
+      name: "出口代理",
+      ok: policy.container.proxyAllow.length > 0,
       detail:
-        policy.container.network === null
-          ? `没有直接网络：出口只有代理，放行 ${policy.container.proxyAllow.length} 个主机`
-          : `container.network=${policy.container.network}：容器绕过代理直连，代理只对遵守 HTTP_PROXY 的工具生效`,
+        policy.container.proxyAllow.length === 0
+          ? "proxyAllow 是空的：容器没有任何出口（git、npm 都会失败）"
+          : `${allowAll ? "放通所有公网目的地" : `放行 ${policy.container.proxyAllow.join("、")}`}` +
+            `；daemon 自己${chain === null ? "直连" : `走 ${chain.kind} ${chain.host}:${chain.port}`}`,
       warnOnly: true,
     });
   } else {
