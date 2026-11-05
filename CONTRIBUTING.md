@@ -93,9 +93,10 @@
 
 ## 门槛
 
-本地跑的和 CI 跑的是同两条命令：
+本地跑的和 CI 跑的是同样三条命令：
 
 ```bash
+npm run gate      # 符号链接、主机路径、提交身份、凭据形状（扫的是 git index，先 add）
 npm run check     # tsc --noEmit
 npm test          # node --test
 ```

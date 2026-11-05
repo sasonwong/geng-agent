@@ -30,7 +30,8 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 测试放 `test/`，不进 `internal/`——`internal/` 会被发布，测试不会。
 
 只给"不平凡且有破坏性"的逻辑写断言，不追求覆盖率。已覆盖：session 尾部截断、
-`waiting.json` 的解析、重复调用计数、issue 与 outbox 的原子写、gate 脚本本身。
+`waiting.json` 的解析、重复调用计数、日志轮转、代理的两把钥匙、book 端点的每条路由、
+gate 脚本本身。
 要加测试时按这个标准挑，别给 getter 写测试。验收标准不是覆盖率，是"连跑一周不自燃"。
 
 **新加的测试要证明它会红。** 改完就拿旧代码跑一遍：把被测的实现改回原来的行为（或者干脆掏空那
@@ -40,7 +41,7 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 **失败先怀疑测试素材。** 缺一个字段、少一个换行、两个时间都是 epoch、拿
 `Array.prototype.join` 拼出一条非法 JSON——这些看起来和代码 bug 一模一样，而且都真实发生过。
 
-**示例值按构造合成，不从运行现场抄。** 聊天 ID 用 `fakeChat(n)` 生成，handle 用 `@someone`，
+**示例值按构造合成，不从运行现场抄。** 聊天 ID 写成 `-1001234567890` 这种一眼假的数，handle 用 `@someone`，
 邮箱用 `something@example.invalid`。仓库是公开的，而 `data/` 里的东西是真实世界的抄录——
 一旦抄进 `test/` 或文档，它就成了永久公开的东西，而且删不掉（见 `CONTRIBUTING.md`）。
 
@@ -118,7 +119,7 @@ node cmd/geng-dev/index.ts packet --instance <name>   # 不花钱地跑一遍唤
 - 要建的目录只有一份清单：`requiredDirs(p)`。`init` 和 daemon 都调它。两份列表会在加目录
   的时候悄悄分叉，症状是"init 建了、daemon 没建"。
 - **预览不能碰状态**：`--dry`、`geng-dev packet` 这类路径不写 lastwake、不 append daemon.log、
-  不动收件箱（用 `peekInbox`，不用会搬文件的 `takeInbox`）。预览不是一轮，这条靠代码路径保证，
+  不动收件箱（用 `peekInbox`，不用会搬文件的 `markSeen`）。预览不是一轮，这条靠代码路径保证，
   不靠自觉。
 
 ## policy 字段

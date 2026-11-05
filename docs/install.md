@@ -118,9 +118,8 @@ daemon 在宿主上跑，容器只装 pi 和它的工具链。
 
 扩展在 `image/extensions/`，构建时**不进镜像**：`book.ts`（`journal`/`discard`/`loop_open`/`loop_close`/`wait`）、
 `recall.ts`（`recall`/`open`）、`files.ts`（`download`）、`say-mute.ts`（`say`/`listen`/`forget`/`mute`/`propose`）、
-`websearch.ts`（`web_search`/`web_fetch`）。运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是这个目录里的**每一个 `.ts`**。所以改一个
-运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是这个目录里的**每一个 `.ts`**。所以改一个
-工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
+`websearch.ts`（`web_search`/`web_fetch`）。运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是
+这个目录里的**每一个 `.ts`**。所以改一个工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
 「环境变了」也不会响（那一行只说镜像变了）。
 
 容器里改不了、删不了这些文件——工具必须不可变，否则它就能改自己和人对谈的方式。
@@ -167,9 +166,7 @@ OPENCODE_API_KEY=sk-... node cmd/geng/index.ts init alice --model …
 一个坏掉却不说的模式，不如没有。
 
 第一次跑之前建镜像就行（见第 2 节）。网络不用配：容器没有网络，出口只有 book socket 上的代理。
-
-漏了会怎样：**每轮都会跑起来，只是跑在本机的 pi 上**——没有容器、没有只读文件系统、没有出口代理。
-它看起来完全正常，你看不出来。
+看得见的地方没有"忘了配"这一档——镜像不在就是每轮 `start-failed`，`daemon.log` 当场说话。
 
 同一个文件里值得先看一眼的还有 `cycle.timeoutSec`（默认 1800 = 30 分钟）、`timezone`、
 `files.maxMb`。这些是**框**，只有时机和阈值是它自己能改的（见第 7 节）。
@@ -192,9 +189,9 @@ GENG_MODEL_UPSTREAM=https://opencode.ai/inference/go/v1
 claude 系是 `anthropic-messages`，只到 `/go`）。换模型跨了家族时，这一行要跟着改，
 否则上游回 404 而 pi 只会说请求失败。
 
-`deploy/models.json` 里那行 `apiKey: "!curl -fsS --unix-socket /run/geng/book.sock http://localhost/model/key"`
-让 pi 在**每次请求时**去 daemon 取一次；daemon 从模型密钥文件里读，明文回在 socket 上。
-所以密钥只在三处存在：宿主上的文件、socket 上的一瞬、pi 发出去的那个请求头里。**`env` 里没有它。**
+`deploy/models.json` 把 provider 的地址指向容器里的 `http://127.0.0.1:11434/model`，`apiKey` 只是一个
+占位符（`"local"`）：pi 发出去的请求里没有任何真凭据，daemon 在转发时补上 `Authorization`。所以密钥
+只在两处存在：宿主上的那个文件，和宿主到 provider 的那一段。**容器里、`env` 里、socket 上都没有它。**
 
 `secrets/alice.env`（600）——`--env-file` 注入，容器里 `env` 能读到。**现在它不需要放任何凭据**：
 搜索走 socket（能不能连上就是授权），模型和 GitHub 的凭据都在宿主上。
@@ -226,10 +223,10 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
 | `secrets/gh-app.pem` + `<inst>.env` 里的两个 id | 你 | daemon 换 installation token | `git push` 要求密码；**别的都不受影响**（见 5.3） |
 
-两处是**同一个值要在两个地方逐字相同**，也是抄错率最高的两处：
+抄错率最高的是这两类：
 
-1. `mail.env` 里的 `GENG_MAIL_TOKEN` = Cloudflare Worker 里的同名 secret
-2. 每个 bot 的 token = `bots.json` 里那串（它只出现在一个地方，但错一个字符就是 401）
+1. **同一个值要在两个地方逐字相同**：`mail.env` 里的 `GENG_MAIL_TOKEN` = Cloudflare Worker 里的同名 secret
+2. **只在 `bots.json` 里出现一次、但错一个字符就是 401**：每个 bot 的 token
 
 抄错的后果都是**同一种**：那边看起来正常，这边安静地什么都不发生。所以拿不到可靠信号时，
 判据永远是**拿它去打一次真端点看状态码**（401 = 能连上但没认出来，200 = 对了），
@@ -300,7 +297,7 @@ tail -1 data/alice/daemon.log                # 最后一行：一轮一行
 timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是时间线、
 花费账和归属记录——**journald 永远不进备份**。
 
-> 第一次醒来之前 `daemon.log` 是空的、`status` 说"从未"、`book/` 里只有 `journal/`：
+> 第一次醒来之前 `daemon.log` 是空的、`status` 说"从未"、`book/` 里有 `journal/` 和 `open-loops/`（都是空的）：
 > 那是刚出生，不是坏了。它自己设的第一个闹钟到点才醒。
 
 ### 改配置不用重启
@@ -439,7 +436,7 @@ node cmd/geng/index.ts search                # 前台；常驻用 deploy/geng-se
 
 ```bash
 node cmd/geng/index.ts doctor alice        # 「搜索接线」：没配是 warn，配了但 socket 不在是 FAIL
-ss -ltn | grep 8787                        # 必须空：它已经不占端口了
+ss -lx | grep search.sock                  # 有（socket 在听）；ss -ltn 里一个端口都不该有
 ```
 
 第三点要进容器看：纸上有没有「今天还能搜 N 次」。**没有这一行就说明扩展没注册**——宿主上的
@@ -466,7 +463,7 @@ GENG_GH_INSTALLATION_ID=7890
 
 容器里没有 token，也没有会过期的 token：`git` 要凭据时，`/usr/local/bin/geng-gh-credential`
 去 `book.sock` 上问一次（`GET /gh/token`，明文，因为读它的是 `git` 不是模型），daemon 用私钥
-签一个 JWT 换 installation token，缓存到过期前五分钟。**一次唤醒换一个**，谁都没有长期凭据。
+签一个 JWT 换 installation token，缓存到过期前五分钟——**一小时一个，多轮共用**，谁都没有长期凭据。
 
 ```bash
 node cmd/geng/index.ts doctor --instance alice     # 「GitHub App」那一行
@@ -647,7 +644,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 | `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |
 
 书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
-读走 `recall`/`open`，写走 `journal`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`，
+读走 `recall`/`open`，写走 `journal`/`discard`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`/`say`，
 两条路都是 unix socket 到 daemon，所以账本数得清每一次。`daemon.log`、`meta/`、`usage/`、
 `secrets/`、`policy.json` 都不在里面。
 
@@ -659,10 +656,10 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 command -v node && node --version          # ≥ 22.18
 docker ps                                  # 不需要 sudo
 node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
-# 其中四条是"漏配"的唯一出口：模型密钥 / 搜索接线 / 邮件接线 / bot 接线
-#   配好且对 = ok，配了但不对 = FAIL，没配 = warn
+# 其中五条是"漏配"的唯一出口：搜索接线 / 邮件接线 / bot 接线 / GitHub App / 备份
+#   配好且对 = ok，配了但不对 = FAIL，没配 = warn（模型密钥是 FAIL：没有它没有模型可用）
 # 「policy 跟模板」报的是模板有、这份副本没有的键——它在用没人选过的默认值
-node cmd/geng/index.ts doctor alice --probe   # 直连必须断开、代理必须通、policy 写不进去
+node cmd/geng/index.ts doctor alice --probe   # 直连必须断开、代理必须通、容器里看不见 policy.json
 #   （--probe 要有 daemon 在跑：代理是它答的，没有它只能测到"直连断了"）
 node cmd/geng/index.ts status --all        # 上次=… 下次=…
 tail -3 data/alice/daemon.log              # 有行就是跑过
