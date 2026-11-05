@@ -11,19 +11,19 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Whether a live process holds this pidfile. Read by the dev commands, whose flock check
+ *  in the unit does not cover a daemon started by hand — that one only leaves this. */
+export function pidLockHeld(file: string): boolean {
+  const existing = readJson<{ pid?: number }>(file, {});
+  return typeof existing.pid === "number" && existing.pid !== process.pid && alive(existing.pid);
+}
+
 /**
  * The systemd unit holds an flock, which only protects the systemd path. A manual
  * `geng daemon` start would slip past it, so the daemon also claims a pidfile.
  * Not a real lock (racy by nature), but it catches the case that actually happens:
  * someone starting a second copy by hand.
  */
-/** Whether a live process holds this pidfile. Read by the dev commands, which the flock
- *  in the unit does not cover: a daemon started by hand only leaves this. */
-export function pidLockHeld(file: string): boolean {
-  const existing = readJson<{ pid?: number }>(file, {});
-  return typeof existing.pid === "number" && existing.pid !== process.pid && alive(existing.pid);
-}
-
 export function acquirePidLock(file: string): () => void {
   const existing = readJson<{ pid?: number }>(file, {});
   if (pidLockHeld(file)) {

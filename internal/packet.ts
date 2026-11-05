@@ -402,8 +402,8 @@ export function buildPacket(input: PacketInput): string {
   } else {
     // A fact, not an instruction, and not the same line as the map in SYSTEM.md: the map
     // says what the file is for, this says it is still missing. Without it a new instance
-    // never learns the file exists — `ls /state` shows two empty directories, because the
-    // only way identity.md comes to exist is that it writes one.
+    // never learns the file exists — `/state` holds one mount point with nothing behind it,
+    // because the only way identity.md comes to have content is that it writes one.
     out.push("", `你还没写下过自己：${statePath}/identity.md 不存在。`);
   }
 

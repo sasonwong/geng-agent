@@ -23,8 +23,8 @@ export interface Paths {
   inbox: string;
   inboxSeen: string;
   inboxLow: string;
-  /** Every mail it ever received, one file each. Mounted read-only and never moved:
-   * "read" is a list in its own book, not a place files are put. */
+  /** Every mail it ever received, one file each. Never mounted and never moved: "read" is
+   * a list in its own book, not a place files are put. */
   mail: string;
   /** The mail ids it has declared read, written only by the `mail` tool. */
   mailRead: string;

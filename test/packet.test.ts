@@ -64,8 +64,8 @@ test("birth packet says only what is new, and nothing about who it is", () => {
   assert.doesNotMatch(text, /被自己定的闹钟叫醒|最近 24 小时醒了/);
   assert.match(text, /你可以什么都不做，那不算失败/);
   assert.match(text, /没人在跟你说话/);
-  // the one thing it cannot see by looking: `ls /state` on a new instance shows two empty
-  // directories and no identity.md, because the only way that file comes to exist is it
+  // the one thing it cannot see by looking: `/state` on a new instance is one empty mount
+  // point, because the only way that file comes to have content is it
   assert.match(text, /你还没写下过自己：\/state\/identity\.md 不存在。/);
   // the constants (paths, waiting.json instructions) are the system prompt's job now
   assert.doesNotMatch(text, /waiting\.json/);

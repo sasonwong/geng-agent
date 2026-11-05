@@ -347,8 +347,6 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     warnOnly: true,
   });
 
-  // A directory here is not a cosmetic problem: docker materialises a missing bind-mount
-  // target as a directory, and then every line the daemon appends fails with EISDIR.
   const schema = onDiskSchema(p);
   const conflict = schemaConflict(schema);
   checks.push({
@@ -373,6 +371,8 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     warnOnly: true,
   });
 
+  // A directory here is not a cosmetic problem: docker materialises a missing bind-mount
+  // target as a directory, and then every line the daemon appends fails with EISDIR.
   const logIsFile = (() => {
     try {
       return statSync(p.daemonLog).isFile();
@@ -483,7 +483,7 @@ const SECRET_SHAPES: Array<[RegExp, string]> = [
   [/\b\d{8,10}:[A-Za-z0-9_-]{35}\b/, "Telegram bot token"],
 ];
 
-/** daemon.log is appended to forever and never rotated: read the tail, not the file. */
+/** daemon.log rotates at 20 000 lines but is still the biggest thing here: read the tail. */
 const LOG_TAIL_LIMIT = 8 * 1024 * 1024;
 
 function tailText(file: string): { text: string; truncated: boolean } | null {

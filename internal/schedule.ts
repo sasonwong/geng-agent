@@ -90,6 +90,9 @@ export interface KnockHold {
   untilMs: number;
 }
 
+/** The only rung with no timer behind it still needs a floor with teeth. */
+export const PARKED_FLOOR_MS = 12 * 60 * 60_000;
+
 /**
  * How long a message that has already been handed over must wait before it may knock again.
  *
@@ -99,9 +102,6 @@ export interface KnockHold {
  * otherwise a message nobody can answer keeps waking it forever, because the message only
  * counts as read when a round ends cleanly. New messages are unaffected either way.
  */
-/** The only rung with no timer behind it still needs a floor with teeth. */
-export const PARKED_FLOOR_MS = 12 * 60 * 60_000;
-
 export function knockFloorMs(
   clean: boolean,
   minMs: number,

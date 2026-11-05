@@ -5,7 +5,7 @@ import { makePaths, requiredDirs } from "./paths.ts";
 import { readJson } from "./fs.ts";
 
 // Everything in this file is `--env-file` into the container, so nothing secret goes here.
-// It holds only what the container is allowed to see: a GitHub app id, a bot chat id.
+// It holds only what the container is allowed to see: the two GitHub App ids.
 const SECRETS_TEMPLATE = `# geng: things the container is allowed to see.
 # Injected with \`docker run --env-file\` — never mounted, never in data/, never in backups.
 # The model key does NOT belong here: it goes in secrets/<instance>.model.env, which the container
@@ -101,6 +101,6 @@ export function initInstance(root: string, instance: string, opts: InitOptions =
   }
   chmodSync(rusticEnv, 0o600);
 
-  // Deliberately absent: identity.md, open-loops.json, waiting.json.
+  // Deliberately absent: identity.md, a file under open-loops/, waiting.json.
   // If any of these exist, the first waking is not a birth.
 }

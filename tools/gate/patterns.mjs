@@ -137,9 +137,6 @@ const PLACEHOLDERS = [
   "${", "$(", "%s", "noreply",
 ];
 
-/** 空着。真值复现时加进来，好让它重新被报出来。 */
-const EXCEPTIONS = new Set();
-
 /**
  * 比这个长的行多半是压过/打包过的产物。取舍不是「跳过」，而是「只跳一部分」：
  *
@@ -160,7 +157,7 @@ function suppressed(name, val, path) {
       return SYNTHETIC.has(val) || allSameDigit.test(val);
     case "会话 ID 赋值": {
       const nums = val.match(/-?\d{5,}/g) ?? [];
-      return nums.length > 0 && nums.every((n) => SYNTHETIC.has(n) && !EXCEPTIONS.has(n));
+      return nums.length > 0 && nums.every((n) => SYNTHETIC.has(n));
     }
     case "对话文件名里的真实 ID": {
       const nums = val.match(/-?\d{6,}/g) ?? [];
