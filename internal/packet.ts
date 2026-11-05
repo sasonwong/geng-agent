@@ -15,6 +15,18 @@ const LOOP_AGE_FLOOR_MS = 60 * 60 * 1000;
 
 export type WakeReason = "timer" | "knock" | "nudge";
 
+/**
+ * What woke it, once the inbox has been read.
+ *
+ * A loud message that landed between the alarm firing and the page being built is still a
+ * knock, so the planned reason is not the last word. Ambient chatter is not: `inbox/low`
+ * is handed over on a waking that was already happening, and counting it here made a timer
+ * page say "有人敲门，所以你现在醒了" — a statement about a wake nobody caused.
+ */
+export function reasonAfterInbox(planned: WakeReason, loud: number): WakeReason {
+  return loud > 0 ? "knock" : planned;
+}
+
 export interface PacketInput {
   paths: Paths;
   nowMs: number;

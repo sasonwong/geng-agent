@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
-import { buildPacket, type PacketInput } from "../internal/packet.ts";
+import { buildPacket, reasonAfterInbox, type PacketInput } from "../internal/packet.ts";
 import { makePaths } from "../internal/paths.ts";
 import { writeText } from "../internal/fs.ts";
 import { mkdtempSync } from "node:fs";
@@ -55,6 +55,16 @@ function fixture(): {
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
 }
+
+test("ambient chatter is handed over, but it did not wake it", () => {
+  // inbox/low is what the page shows under "还有 N 条不叫醒你的"; folding it into the
+  // reason made a timer page say 有人敲门 for a wake nobody caused
+  assert.equal(reasonAfterInbox("timer", 0), "timer");
+  assert.equal(reasonAfterInbox("nudge", 0), "nudge");
+  assert.equal(reasonAfterInbox("timer", 2), "knock");
+  // a planned knock stays one even if the message it was planned from is gone by now
+  assert.equal(reasonAfterInbox("knock", 0), "knock");
+});
 
 test("birth packet says only what is new, and nothing about who it is", () => {
   const { input } = fixture();

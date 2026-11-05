@@ -4,7 +4,7 @@ import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { modelFailures } from "./session.ts";
 import { markSeen, peekInbox, quarantine } from "./inbox.ts";
 import { clockArmed, clockNotice, freshForSteer, handedOver, INJECT_CAP, injectionText, type LiveMsg } from "./inject.ts";
-import { buildPacket, type WakeReason } from "./packet.ts";
+import { buildPacket, reasonAfterInbox, type WakeReason } from "./packet.ts";
 import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { pendingMail } from "./mail.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -411,7 +411,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // read-only /state/inbox) until this wake has actually finished with them.
     const lowInbox = peekInbox(paths.inboxLow);
     const inbox = [...peekInbox(paths.inbox), ...lowInbox];
-    if (inbox.length > 0) reason = "knock";
+    // only the loud half can change why this wake happened; the ambient half is handed
+    // over on a waking that was already happening (see reasonAfterInbox)
+    reason = reasonAfterInbox(reason, inbox.length - lowInbox.length);
 
     const nowMs = Date.now();
     // The system prompt carries the two facts that only change when the operator does
