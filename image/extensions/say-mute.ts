@@ -130,7 +130,22 @@ const sayTool = defineTool({
         details: undefined,
       };
     }
-    const files = (params.files ?? []).filter((f) => f.trim() !== "");
+    const files = (params.files ?? []).map((f) => f.trim()).filter((f) => f !== "");
+    // The gateway only sends files under /work; anything else is refused there with a note
+    // in _ops, which is the operator's channel and not this agent's. Refusing here is the
+    // only place the answer arrives while it can still copy the file into /work.
+    const stray = files.filter((f) => !f.startsWith("/work/") || !existsSync(f));
+    if (stray.length > 0) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `附件只发 /work 里存在的文件：${stray.join("、")} 不行。先 cp 到 /work 再发。`,
+          },
+        ],
+        details: undefined,
+      };
+    }
     const id = nextId();
     writeAtomic(
       join(OUTBOX, `${id}.json`),
