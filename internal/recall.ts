@@ -259,35 +259,16 @@ function sessionItems(p: Paths): Item[] {
   );
 }
 
-/** The path a listed file actually has: the index sits between the id and the name. */
-function statOf(p: Paths, id: string, name: string): string {
-  let mtime = 0;
-  for (const entry of readdirSync(p.filesDir)) {
-    if (entry.startsWith(`${id}-`) && entry.endsWith(`-${name}`)) {
-      mtime = statSync(join(p.filesDir, entry)).mtimeMs;
-    }
-  }
-  return new Date(mtime).toISOString();
-}
-
 /** Files carry no text, so what a listing can say is what they are called and how big. */
 function fileItems(p: Paths): Item[] {
-  return listFiles(p).map((f) => {
-    let at = "";
-    try {
-      at = statOf(p, f.id, f.name);
-    } catch {
-      at = "";
-    }
-    return {
-      id: f.id,
-      source: "files" as const,
-      at,
-      // a small file in KB rounds to 1 and reads as bigger than it is
-      header: `${f.name}（${f.bytes < 1024 ? `${f.bytes} 字节` : `${Math.round(f.bytes / 1024)} KB`}）`,
-      body: `${f.name}\n${f.bytes} 字节\n用 download("${f.id}", "/work/...") 取到手上，或者 say(files:["${f.id}"]) 直接发出去。`,
-    };
-  });
+  return listFiles(p).map((f) => ({
+    id: f.id,
+    source: "files" as const,
+    at: new Date(f.mtimeMs).toISOString(),
+    // a small file in KB rounds to 1 and reads as bigger than it is
+    header: `${f.name}（${f.bytes < 1024 ? `${f.bytes} 字节` : `${Math.round(f.bytes / 1024)} KB`}）`,
+    body: `${f.name}\n${f.bytes} 字节\n用 download("${f.id}", "/work/...") 取到手上，或者 say(files:["${f.id}"]) 直接发出去。`,
+  }));
 }
 
 function collect(p: Paths, source: Source): Item[] {

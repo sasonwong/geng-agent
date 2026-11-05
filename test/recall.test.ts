@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
@@ -123,6 +123,21 @@ test("a file in the listing keeps its original name, and its size is what it is"
   assert.match(listing, /F2 {2}files .*report\.txt（3 KB）/);
   // and the body says how to get it and how to send it, because a file has no text to show
   assert.match(openText(p, "F1", 0).text, /download\("F1", "\/work\/\.\.\."\)/);
+});
+
+// 时间那一列是它判断「这是刚收到的还是上周的」的唯一依据，而它现在来自 `listFiles` 顺手
+// 做的那一次 stat。以前是照着 id 和名字拼一个猜测的名字回目录里再找一个——同一件事两个
+// 读者、每个文件一次全目录扫描，找不到时还会留 0（1970）。这条钉住日期仍然是对的。
+test("a listed file carries the date it arrived, never 1970", () => {
+  const p = fixture();
+  mkdirSync(p.filesDir, { recursive: true });
+  const file = join(p.filesDir, "F1-0-report.txt");
+  writeFileSync(file, "hello");
+  const when = new Date("2026-03-02T09:30:00Z");
+  utimesSync(file, when, when);
+  const listing = recallText(p, { sources: ["files"] });
+  assert.match(listing, /^F1 {2}files {2}2026-03-02 09:30/m);
+  assert.equal(listing.includes("1970"), false);
 });
 
 test("a discarded entry is still listed, and says it no longer counts", () => {
