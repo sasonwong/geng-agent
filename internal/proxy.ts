@@ -364,8 +364,9 @@ function tunnelDone(
   report: (ok: boolean, why?: string) => void,
   by?: string,
 ): void {
-  // The socket's error handler is attached where the socket is created, not here: by the
-  // time this runs a failure has already been reported once.
+  // Both ends die together, and each end's failure is one event, not two: `report` is the
+  // `once` from handleConnect, so an error that arrives after "出去" cannot be logged a
+  // second time as if the tunnel had never opened.
   socket.on("error", () => upstream.destroy());
   socket.on("close", () => upstream.destroy());
   // "出去" means a connection exists, so it is said here and nowhere earlier: a chain
