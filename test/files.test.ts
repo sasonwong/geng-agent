@@ -60,3 +60,19 @@ test("a malformed request deletes nothing", () => {
   assert.deepEqual(parseForget({ files: "x" }), []);
   assert.deepEqual(parseForget({ files: ["/files/a", 3] }), ["/files/a"]);
 });
+
+test("a dry run reports what it would do and leaves every file in place", () => {
+  const d = dir();
+  put(d, "old.bin", 600, 10);
+  put(d, "new.bin", 600, 1);
+
+  const pruned = pruneFiles(d, { maxMb: 1, maxAgeDays: 0 }, NOW, true);
+  assert.equal(pruned.removed, 1, "预览也要说出会删几个");
+  assert.equal(Math.round((NOW - (pruned.oldestRemovedMs ?? 0)) / day), 10);
+  assert.equal(filesUsage(d).count, 2, "预览不能真删");
+
+  const forgot = forgetFiles(d, ["/files/old.bin"], true);
+  assert.equal(forgot, 1, "预览也要说出会忘掉几个");
+  assert.equal(filesUsage(d).count, 2, "预览不能真忘");
+  assert.equal(statSync(join(d, "old.bin")).size, 600 * 1024);
+});

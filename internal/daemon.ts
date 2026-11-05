@@ -265,11 +265,19 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     process.on("SIGINT", onSignal);
   }
 
-  const swept = await sweepOrphans(paths.instance);
-  if (swept > 0) log(`清扫了 ${swept} 个孤儿容器`);
-  for (const file of listSessionFiles(paths.sessionDir)) {
-    const report = repairTail(file, true);
-    if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
+  // A preview must not kill containers it is only looking at: the sweep is a start's job.
+  if (!o.dry) {
+    const swept = await sweepOrphans(paths.instance);
+    if (swept > 0) log(`清扫了 ${swept} 个孤儿容器`);
+    for (const file of listSessionFiles(paths.sessionDir)) {
+      const report = repairTail(file, true);
+      if (report.repairedLines > 0) log(`修复 session 尾部：${file} 丢掉了 ${report.repairedLines} 行`);
+    }
+  } else {
+    for (const file of listSessionFiles(paths.sessionDir)) {
+      const report = repairTail(file, false);
+      if (report.repairedLines > 0) log(`session 尾部有破损（预览没修）：${file} 有 ${report.repairedLines} 行不完整`);
+    }
   }
 
   // The book endpoint is up for as long as the daemon is, because a tool call can arrive
@@ -344,20 +352,28 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // derived from the policy, so it is read after the reload above rather than once
     const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
     // Only while it is not running: a file vanishing under a read is the failure this
-    // must not have. Its own requests go first, then the cap.
+    // must not have. Its own requests go first, then the cap. `dry` counts what a start
+    // would take without taking it — the packet says the same thing either way.
     const forgot = forgetFiles(
       paths.filesDir,
       parseForget(readJson<unknown>(paths.filesForget, null)),
+      o.dry === true,
     );
-    rmSync(paths.filesForget, { force: true });
+    if (!o.dry) rmSync(paths.filesForget, { force: true });
     // A message nothing can read is moved aside instead of being skipped forever. Before
     // this, one caption-less document knocked 58 times in an hour and handed over nothing.
     const junk = [
-      ...quarantine(paths.inbox, paths.inboxSeen),
-      ...quarantine(paths.inboxLow, paths.inboxSeen),
+      ...quarantine(paths.inbox, paths.inboxSeen, o.dry === true),
+      ...quarantine(paths.inboxLow, paths.inboxSeen, o.dry === true),
     ];
-    if (junk.length > 0) log(`丢弃了 ${junk.length} 条读不出来的消息：${junk.join("、")}`);
-    const pruned = pruneFiles(paths.filesDir, policy.files, Date.now());
+    if (junk.length > 0) {
+      log(
+        o.dry
+          ? `（预览）下次启动会隔离 ${junk.length} 条读不出来的消息：${junk.join("、")}`
+          : `丢弃了 ${junk.length} 条读不出来的消息：${junk.join("、")}`,
+      );
+    }
+    const pruned = pruneFiles(paths.filesDir, policy.files, Date.now(), o.dry === true);
     const filesUsed = filesUsage(paths.filesDir);
 
     let meta = readMeta(paths);

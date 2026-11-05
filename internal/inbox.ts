@@ -93,10 +93,15 @@ export function markSeen(dirs: string[], seenDir: string, files: string[]): void
  * peekInbox skipped the content, so every waking handed over nothing and the file stayed.
  * Anything unparseable is moved aside once, with a line in the log.
  */
-export function quarantine(dir: string, seenDir: string): string[] {
+export function quarantine(dir: string, seenDir: string, dry = false): string[] {
   const bad: string[] = [];
   for (const f of jsonFiles(dir)) {
     if (parseFile(dir, f) !== null) continue;
+    if (dry) {
+      // a preview reports what a start would move aside, without moving it
+      bad.push(f);
+      continue;
+    }
     try {
       renameSync(join(dir, f), join(seenDir, `${f}.bad`));
       bad.push(f);

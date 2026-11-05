@@ -55,9 +55,10 @@ export interface PruneResult {
 
 /**
  * Oldest first, until both limits hold. The newest are never touched: they are what this
- * waking might want to look at.
+ * waking might want to look at. `dry` counts what a real call would take without taking
+ * it: a preview must say the same thing a start would say, over the same directory.
  */
-export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): PruneResult {
+export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number, dry = false): PruneResult {
   let names: string[];
   try {
     names = readdirSync(dir).filter((f) => !f.startsWith("."));
@@ -87,14 +88,17 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): Pru
   for (const e of entries.slice(0, -1)) {
     const tooOld = ageMs !== null && nowMs - e.mtimeMs > ageMs;
     if (!tooOld && total <= capBytes) break;
-    try {
-      rmSync(join(dir, e.name), { force: true });
-      total -= e.size;
-      removed += 1;
-      oldestRemovedMs ??= e.mtimeMs;
-    } catch {
-      // a file that would not go is retried next waking
+    if (!dry) {
+      try {
+        rmSync(join(dir, e.name), { force: true });
+      } catch {
+        // a file that would not go is retried next waking
+        continue;
+      }
     }
+    total -= e.size;
+    removed += 1;
+    oldestRemovedMs ??= e.mtimeMs;
   }
   return { removed, oldestRemovedMs };
 }
@@ -104,7 +108,7 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): Pru
  * container never has the directory: it holds ids, so erasing what a person sent is a
  * request the host carries out, on its own clock, in the ledger of the round.
  */
-export function forgetFiles(dir: string, requested: string[]): number {
+export function forgetFiles(dir: string, requested: string[], dry = false): number {
   let removed = 0;
   for (const given of requested) {
     const name = bareName(given);
@@ -113,12 +117,15 @@ export function forgetFiles(dir: string, requested: string[]): number {
     // a name that matched nothing used to be counted as a removal — the page then said
     // "按你说的删了 3 个文件" over a directory it had emptied one file from.
     if (!existsSync(join(dir, name))) continue;
-    try {
-      rmSync(join(dir, name), { force: true });
-      removed += 1;
-    } catch {
-      // a file that would not go is retried next waking
+    if (!dry) {
+      try {
+        rmSync(join(dir, name), { force: true });
+      } catch {
+        // a file that would not go is retried next waking
+        continue;
+      }
     }
+    removed += 1;
   }
   return removed;
 }
