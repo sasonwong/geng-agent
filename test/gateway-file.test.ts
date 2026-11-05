@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { ensureDirs } from "../internal/fs.ts";
-import { storeAttachment } from "../internal/gateway.ts";
+import { alreadyStored, storeAttachment } from "../internal/gateway.ts";
 import type { Attachment } from "../internal/attach.ts";
 import { fileById, listFiles } from "../internal/ids.ts";
 import { openText } from "../internal/recall.ts";
@@ -39,6 +39,19 @@ test("what came with a telegram message lands where download and say can name it
   } finally {
     globalThis.fetch = real;
   }
+});
+
+test("a redelivered message keeps the file the first delivery stored", () => {
+  // Telegram redelivers when a round crashed between handling and recording the offset.
+  // Re-fetching the media allocated a second id: the record moved to the new copy and the
+  // first one stayed on disk — counted, listed, downloadable, and named by nothing.
+  const kept = alreadyStored({
+    attachments: [{ kind: "photo", id: "F1", name: "photo.jpg", bytes: 3 }],
+  });
+  assert.equal(kept?.id, "F1");
+  // nothing stored yet, or a first attempt that failed (a note and no id) is retried
+  assert.equal(alreadyStored(null), undefined);
+  assert.equal(alreadyStored({ attachments: [{ kind: "photo", note: "没取到" }] }), undefined);
 });
 
 test("a download that fails says so, and leaves no id behind", async () => {

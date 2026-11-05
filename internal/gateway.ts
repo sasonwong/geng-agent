@@ -157,6 +157,23 @@ export async function storeAttachment(
 }
 
 /**
+ * What a redelivered message keeps: the file the first delivery already stored.
+ *
+ * Telegram hands a message over again when a round crashed between handling it and
+ * recording the offset, and the media behind `<chat>-<message_id>` cannot have changed.
+ * Re-fetching it allocated a second id, so the inbox record's pointer moved to the new copy
+ * and the first one stayed behind — stored, counted by the size cap, reachable by
+ * `download` and listed by `recall`, with nothing pointing at it.
+ *
+ * A first delivery that failed (`note: 没取到`, no id) has nothing to keep, so a
+ * redelivery retries the download.
+ */
+export function alreadyStored(previous: { attachments?: Attachment[] } | null): Attachment | undefined {
+  const had = previous?.attachments?.[0];
+  return had !== undefined && had.id !== undefined ? had : undefined;
+}
+
+/**
  * A failed send is not a lost message and not an infinite retry.
  *
  * The sweep hands every outbox item back every two seconds, so acknowledging a failed one
@@ -402,7 +419,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
     // text, or a caption on an attachment; anything else still has to be accounted for
     const words = message.text ?? message.caption ?? "";
-    const att = attachmentOf(message);
+    let att = attachmentOf(message);
     if (words === "" && att === null) {
       // A sticker is an attachment (`attachmentOf`), so it never reaches this branch: what
       // lands here is a poll, a location, a dice — something with neither words nor a file.
@@ -450,17 +467,23 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       return;
     }
 
-    // fetch first, so the message is never announced without the thing it came with
-    if (att) await storeAttachment(p, key, cfg.token, att, ops);
-
     const dir = decision.high ? p.inbox : p.inboxLow;
-    const quoted = quotedOf(message.chat.id, message.reply_to_message, nameOf);
     const id = `${message.chat.id}-${message.message_id}`;
-    const at = new Date().toISOString();
     const file = join(dir, `${id}.json`);
     // a redelivered message (crash between handling and recording the offset) lands on
     // the same file: rewrite it, but do not log the same words twice
     const redelivered = existsSync(file);
+    // fetch first, so the message is never announced without the thing it came with —
+    // unless the first delivery already did (see alreadyStored)
+    if (att) {
+      const had = redelivered
+        ? alreadyStored(readJson<{ attachments?: Attachment[] } | null>(file, null))
+        : undefined;
+      if (had !== undefined) att = had;
+      else await storeAttachment(p, key, cfg.token, att, ops);
+    }
+    const quoted = quotedOf(message.chat.id, message.reply_to_message, nameOf);
+    const at = new Date().toISOString();
     writeJson(file, {
       id,
       text: words,
