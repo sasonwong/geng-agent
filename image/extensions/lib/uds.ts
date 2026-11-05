@@ -8,7 +8,7 @@
  * The socket is mounted read-only into the container, so a tool cannot replace it, and
  * a host-side process is the only thing on the other end.
  */
-import { createWriteStream } from "node:fs";
+import { createWriteStream, rmSync } from "node:fs";
 import { request } from "node:http";
 
 export interface UdsReply {
@@ -69,24 +69,47 @@ export function getToFile(
   socketPath: string,
   path: string,
   dest: string,
+  timeoutMs = 70_000,
 ): Promise<{ status: number; bytes: number }> {
   return new Promise((resolve, reject) => {
-    const req = request({ socketPath, path, method: "GET" }, (res) => {
-      if (res.statusCode !== 200) {
-        let body = "";
-        res.setEncoding("utf8");
-        res.on("data", (c: string) => {
-          body += c;
+    // postJson has a deadline; this one did not. A host that stopped answering left the
+    // download tool hanging until the daemon's wall-clock timeout killed the whole round.
+    let settled = false;
+    const once = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      fn();
+    };
+    // Nothing usable was written if the stream broke: a half file at `dest` would later
+    // be sent out as if it were the attachment.
+    const discard = (err: Error): void => {
+      rmSync(dest, { force: true });
+      once(() => reject(err));
+    };
+    const req = request(
+      { socketPath, path, method: "GET", signal: AbortSignal.timeout(timeoutMs) },
+      (res) => {
+        if (res.statusCode !== 200) {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (c: string) => {
+            body += c;
+          });
+          res.on("end", () => once(() => reject(new Error(`取不到：${body.slice(0, 300)}`))));
+          res.on("error", (err) => discard(err));
+          return;
+        }
+        const out = createWriteStream(dest);
+        res.pipe(out);
+        out.on("finish", () => once(() => resolve({ status: 200, bytes: out.bytesWritten })));
+        out.on("error", discard);
+        res.on("error", (err) => {
+          out.destroy();
+          discard(err);
         });
-        res.on("end", () => reject(new Error(`取不到：${body.slice(0, 300)}`)));
-        return;
-      }
-      const out = createWriteStream(dest);
-      res.pipe(out);
-      out.on("finish", () => resolve({ status: 200, bytes: out.bytesWritten }));
-      out.on("error", reject);
-    });
-    req.on("error", reject);
+      },
+    );
+    req.on("error", discard);
     req.end();
   });
 }

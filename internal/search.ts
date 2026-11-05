@@ -189,12 +189,17 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
     if (operation === null) return send(404, { error: "unknown path" });
 
     let body = "";
+    let over = false;
     req.setEncoding("utf8");
     req.on("data", (c: string) => {
+      if (over) return; // drain the rest; do not parse a truncated body
       body += c;
-      if (body.length > 64 * 1024) req.destroy();
+      if (body.length > 64 * 1024) over = true;
     });
     req.on("end", () => {
+      // destroy() closes the socket under the answer, and leaves the client with a
+      // connection reset instead of a reason. Answer once, on a whole stream.
+      if (over) return send(413, { error: "请求体太大" });
       let params: Record<string, unknown>;
       try {
         params = JSON.parse(body || "{}");
@@ -231,10 +236,19 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
             log(`${operation} 上游 ${response.status}: ${text.slice(0, 200)}`);
             return send(502, { error: `上游 ${response.status}`, remaining: remaining() });
           }
+          // Everything that can throw happens before the headers go out. A malformed
+          // upstream answer used to throw inside res.end() after writeHead(200), and
+          // the catch then called writeHead(502) on an already-sent response — an
+          // ERR_HTTP_HEADERS_SENT in a fire-and-forget promise, with nobody to catch it.
+          const payload = JSON.stringify({ data: JSON.parse(text), remaining: charge() });
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ data: JSON.parse(text), remaining: charge() }));
+          res.end(payload);
         } catch (err) {
           log(`${operation} 出错：${(err as Error).message}`);
+          if (res.headersSent) {
+            res.destroy();
+            return;
+          }
           send(502, { error: (err as Error).message, remaining: remaining() });
         }
       })();

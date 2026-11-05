@@ -4,7 +4,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bookHandler, socketPath, startBookServer } from "../internal/book.ts";
+import { EventEmitter } from "node:events";
+import { bookHandler, fileIdFromUrl, readBody, socketPath, startBookServer } from "../internal/book.ts";
 import { knownPlaces } from "../internal/gateway.ts";
 import { countLoops } from "../internal/packet.ts";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
@@ -489,4 +490,45 @@ test("model traffic is proxied: the key goes upstream, never to the container", 
     upstream.closeAllConnections();
     await new Promise<void>((r) => upstream.close(() => r()));
   }
+});
+
+test("a malformed escape on /files/ is a bad request, not a dead daemon", () => {
+  // decodeURIComponent throws URIError on a stray `%`. It used to run straight in the
+  // server's synchronous callback, so one bad GET from the container killed the daemon.
+  assert.equal(fileIdFromUrl("/files/%"), null);
+  assert.equal(fileIdFromUrl("/files/%ZZ"), null);
+  assert.equal(fileIdFromUrl("/files/F12"), "F12");
+  assert.equal(fileIdFromUrl("/files/%46%31%32"), "F12");
+});
+
+test("an oversized body gets a 413, and a half-read body is never parsed", () => {
+  const drive = (chunks: (string | Buffer)[], max: number, asText: boolean) => {
+    let destroyed = 0;
+    const req = Object.assign(new EventEmitter(), {
+      setEncoding: () => {},
+      destroy: () => {
+        destroyed += 1;
+      },
+    });
+    const statuses: number[] = [];
+    const values: (string | Buffer)[] = [];
+    readBody(req as never, max, asText, (s) => statuses.push(s), (v) => values.push(v));
+    for (const c of chunks) req.emit("data", c);
+    req.emit("end");
+    return { statuses, values, destroyed };
+  };
+
+  const small = drive(["ab", "cd"], 32, true);
+  assert.deepEqual(small.values, ["abcd"], "a whole body reaches the handler");
+  assert.deepEqual(small.statuses, []);
+  assert.equal(small.destroyed, 0);
+
+  const over = drive(["x".repeat(40), "more"], 32, true);
+  assert.deepEqual(over.statuses, [413], "one request, one answer");
+  assert.deepEqual(over.values, [], "the handler must not parse a truncated body");
+  assert.equal(over.destroyed, 0, "destroy() closes the socket under the 413 we just wrote");
+
+  const bytes = drive([Buffer.from("a"), Buffer.from("b")], 32, false);
+  assert.equal(String(bytes.values[0]), "ab");
+  assert.deepEqual(bytes.statuses, []);
 });

@@ -429,6 +429,57 @@ export function socketPath(paths: Paths): string {
   return join(paths.run, BOOK_SOCKET);
 }
 
+/**
+ * Read one request body, cap it, and answer 413 when it is over the cap.
+ *
+ * `req.destroy()` closes the socket underneath the very response we are about to write:
+ * the client sees a reset instead of a status, and the `error` event it raises reaches
+ * the guard, which answers with a second, contradictory 500. Draining the remainder and
+ * answering on `end` keeps one request to one answer — and stops a half-read JSON body
+ * from being parsed as if it were whole.
+ */
+/**
+ * `/files/F12` → `F12`, or null when the escape is malformed. Kept outside the request
+ * callback so the rule is testable without a socket: a bad `%` used to throw inside the
+ * synchronous callback and take the daemon down with it.
+ */
+export function fileIdFromUrl(url: string): string | null {
+  try {
+    return decodeURIComponent(url.slice("/files/".length)).trim();
+  } catch {
+    return null;
+  }
+}
+
+export function readBody(
+  req: IncomingMessage,
+  max: number,
+  asText: boolean,
+  reply: (status: number, body: unknown) => void,
+  done: (value: Buffer | string) => void,
+): void {
+  const chunks: (Buffer | string)[] = [];
+  let size = 0;
+  let over = false;
+  if (asText) req.setEncoding("utf8");
+  req.on("data", (c: Buffer | string) => {
+    if (over) return; // drain, do not buffer
+    size += c.length;
+    if (size > max) {
+      over = true;
+      return;
+    }
+    chunks.push(c);
+  });
+  req.on("end", () => {
+    if (over) {
+      reply(413, { error: "请求体太大" });
+      return;
+    }
+    done(asText ? (chunks as string[]).join("") : Buffer.concat(chunks as Buffer[]));
+  });
+}
+
 export function startBookServer(o: BookOptions): Promise<Server> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const sock = socketPath(o.paths);
@@ -450,7 +501,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       // A proxied response that failed halfway has already sent its headers. Writing an
       // error over it throws ERR_HTTP_HEADERS_SENT, and an uncaught throw here takes the
       // daemon down in the middle of the round it was serving.
-      if (res.headersSent) {
+      if (res.headersSent || res.writableEnded) {
         res.destroy();
         return;
       }
@@ -460,7 +511,14 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // leaves the book, so `download` names a file by id and chooses where it lands.
     const url = req.url ?? "";
     if (req.method === "GET" && url.startsWith("/files/")) {
-      const wanted = decodeURIComponent(url.slice("/files/".length)).trim();
+      // A malformed `%` escape makes decodeURIComponent throw. This is a synchronous
+      // callback, so an uncaught URIError here took the whole daemon down — one bad GET
+      // on the socket, from anything in the container, was enough.
+      const wanted = fileIdFromUrl(url);
+      if (wanted === null) {
+        reply(400, { error: "文件名不是合法的百分号编码" });
+        return;
+      }
       const hit = fileById(o.paths, wanted);
       if (hit === null) {
         reply(404, { error: `没有这个文件：${wanted}` });
@@ -482,19 +540,8 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // body is read whole (a request is JSON; a response is a stream, handled below).
     if (url === "/model" || url.startsWith("/model/")) {
       o.onModelRequest?.();
-      const chunks: Buffer[] = [];
-      let size = 0;
-      req.on("data", (c: Buffer) => {
-        size += c.length;
-        if (size > MAX_MODEL_BODY) {
-          req.destroy();
-          reply(413, { error: "请求体太大" });
-          return;
-        }
-        chunks.push(c);
-      });
-      req.on("end", () => {
-        proxyModel(o.paths, req, res, Buffer.concat(chunks)).catch(guard);
+      readBody(req, MAX_MODEL_BODY, false, reply, (value) => {
+        proxyModel(o.paths, req, res, value as Buffer).catch(guard);
       });
       req.on("error", guard);
       return;
@@ -503,19 +550,8 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // would fall through to the JSON routes and come back 405, which reads as "the proxy is
     // broken" in the middle of a container that has no other way out.
     if (/^http:\/\//i.test(url)) {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      req.on("data", (c: Buffer) => {
-        size += c.length;
-        if (size > MAX_MODEL_BODY) {
-          req.destroy();
-          reply(413, { error: "请求体太大" });
-          return;
-        }
-        chunks.push(c);
-      });
-      req.on("end", () => {
-        forwardPlain(req, res, Buffer.concat(chunks), rule(), chain(), (ok, why) =>
+      readBody(req, MAX_MODEL_BODY, false, reply, (value) => {
+        forwardPlain(req, res, value as Buffer, rule(), chain(), (ok, why) =>
           o.onNetwork?.({ target: url, ok, why }),
         ).catch(guard);
       });
@@ -543,14 +579,8 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       reply(405, { error: "只接受 POST" });
       return;
     }
-    let body = "";
-    req.setEncoding("utf8");
-    req.on("data", (c: string) => {
-      body += c;
-      if (body.length > MAX_BODY) req.destroy();
-    });
-    req.on("end", () => {
-      handle(req, body).then((r) => reply(r.status, r.body)).catch(guard);
+    readBody(req, MAX_BODY, true, reply, (value) => {
+      handle(req, value as string).then((r) => reply(r.status, r.body)).catch(guard);
     });
     req.on("error", guard);
   });

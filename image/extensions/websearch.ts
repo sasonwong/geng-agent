@@ -21,7 +21,9 @@ async function call(path: string, body: Record<string, unknown>): Promise<string
   }
   const left = typeof payload.remaining === "number" ? `（今天还剩 ${payload.remaining} 次）` : "";
   if (payload.error) return `${payload.error}${left}`;
-  return JSON.stringify(payload.data) + left;
+  // JSON.stringify(undefined) returns undefined, not a string: a reply with no `data`
+  // used to hand pi a tool result whose text was not a string at all.
+  return `${payload.data === undefined ? "搜索端点没有回内容" : JSON.stringify(payload.data)}${left}`;
 }
 
 const searchTool = tool({
