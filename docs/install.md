@@ -115,7 +115,7 @@ daemon 在宿主上跑，容器只装 pi 和它的工具链。
 扩展在 `image/extensions/`，构建时**不进镜像**：`book.ts`（`journal`/`discard`/`loop_open`/`loop_close`/`wait`）、
 `recall.ts`（`recall`/`open`）、`files.ts`（`download`）、`say-mute.ts`（`say`/`listen`/`forget`/`mute`/`propose`）、
 `websearch.ts`（`web_search`/`web_fetch`）。运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是
-这个目录里的**每一个 `.ts`**。所以改一个工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
+这个目录**顶层**的每一个 `.ts`（`lib/` 里的共用代码不是扩展，也不会被加载）。所以改一个工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
 「环境变了」也不会响（那一行只说镜像变了）。
 
 容器里改不了、删不了这些文件——工具必须不可变，否则它就能改自己和人对谈的方式。
@@ -290,8 +290,9 @@ tail -1 data/alice/daemon.log                # 最后一行：一轮一行
 ```
 
 `daemon.log` 一行一轮：`#12 wake=timer sym=ok lvl=0 dur=18s tools=4 tokens=25283 cost=0.0014
-timedout=no ctx=0.68% cache=19328/25283 inbox=0 backup=ok(...)`。它同时是时间线、
-花费账和归属记录——**journald 永远不进备份**。
+timedout=no ctx=0.68% cache=19328/25283 inbox=0 llm=4 net=1 backup=ok(...)`。`fix=`（绕圈时
+的 steer/compact、`clock`）、`inj=`（运行中插进去的消息）、`pruned=`、`forgot=` 只在那件事
+发生时才出现。它同时是时间线、花费账和归属记录——**journald 永远不进备份**。
 
 > 第一次醒来之前 `daemon.log` 是空的、`status` 说"从未"、`book/` 里有 `journal/` 和 `open-loops/`（都是空的）：
 > 那是刚出生，不是坏了。它自己设的第一个闹钟到点才醒。

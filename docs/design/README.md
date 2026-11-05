@@ -69,7 +69,7 @@
 
 **书不挂进容器。** `/state`、`/inbox`、`/people`、`/mail` 全在容器外面，写走
 `journal`/`discard`/`loop_*`/`wait`/…，读走 `recall`/`open`，两条路都是 unix socket 到 daemon。
-"谁写"因此不是权限位的问题，是路由的问题：一个事实只有一个入口，入口在账本里留一行。
+"谁写"因此不是权限位的问题，是路由的问题：一个事实只有一个入口，而入口只有宿主上的那一份代码。
 唯一直接写文件的例外是 `identity.md`——它是一页它随时重画的东西，不是一次动作。
 
 ## 4. 唤醒纸
@@ -413,7 +413,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
-| `inbox/*.json` | gateway | `{id, text, from, at, chat, route}` |
+| `inbox/*.json` | gateway | `{id, text, from, at, chat, route, attachments?[{kind,id?,name?,note?,bytes?}], quote?{id,from?,text?}}` |
 | `outbox/*.json` | daemon（`say` 走 socket） | `{id, messages[], chat?, files?(/work 路径), attachments?[{id,path,name}], replyTo?{chat,messageId}}` |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
 | `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{at,wake,tools,inbox,talkedTo[],touched}, knockHold?}` |
@@ -421,7 +421,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `meta/wakes.json` | daemon | 24 小时内的唤醒时间戳数组 |
 | `meta/cut.json` | daemon | `{kind:"timeout"\|"crashed"\|"interrupted", at, waking, reason, tools[]?, openMs?, capMinutes?}`，只活一张纸 |
 
-`stateSchema` 是这些文件的版本号，由 `writeMeta` 统一盖戳。**磁盘上的版本比代码新就拒绝启动**——
+`stateSchema` 是 `meta/state.json` 的版本号，由 `writeMeta` 统一盖戳——一份形状只有一个版本号，别的文件没有它的副本。**磁盘上的版本比代码新就拒绝启动**——
 被旧代码按自己的形状覆盖一次，比重启一百次都糟。
 
 ### 乙类：它的书（永不冻结，永不迁移）
@@ -605,8 +605,9 @@ policy.json 因此从书里挪到了 `data/<inst>/`：只要它还在书里，`/
 有人在等的时候，gateway 每 4 秒发一次 `sendChatAction: typing`，显示在**最新那条敲门消息所在的
 chat**，直到这一轮结束。不做已读标记：Bot API 里没有这个方法，✓✓ 由客户端决定，bot 改不了。
 
-判据不新增状态：`book/intent.json` **本来就只在**一轮跑着的时候存在（写前意图，成功即删，崩溃
-时下次启动移进 `meta/interrupted-*.json`）。所以"正在干活"是现成的。三条约束：
+判据不新增状态：`book/intent.json` **本来就只在**一轮跑着的时候存在（写前意图，成功即删；
+被 SIGTERM 打断时改名为 `meta/interrupted-*.json`，硬崩溃则留在原地，下次启动读成「上一轮
+断了」再清掉）。所以"正在干活"是现成的。三条约束：
 
 - **只有人和它说话时才显示**：定时醒来没人等，不该冒出"正在输入"。判据是 `inbox/` 里有没有
   敲门消息。

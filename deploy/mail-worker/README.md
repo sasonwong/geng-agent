@@ -31,8 +31,9 @@ npx wrangler login                      # 一次，凭据落在仓库外
 ./deploy.sh https://geng-mail.example.com
 ```
 
-`deploy.sh` 做四件事：`npm ci` → `wrangler deploy` → 把 URL 推成 secret → 从 `GENG_MAIL_TOKEN`
-（或仓库根 `secrets/mail.env`）取 token 推成 secret，最后 `secret list` 给你看一眼。
+`deploy.sh` 依次做：`npm ci` → 确认 `wrangler whoami` 有凭据 → `wrangler deploy` → 把 URL
+推成 secret → 从 `GENG_MAIL_TOKEN`（或仓库根 `secrets/mail.env`）取 token 推成 secret →
+`secret list` 给你看一眼。
 两个 secret 都**不**放进 `wrangler.jsonc`：写进配置文件就得进 git，而 `--var` 传的普通变量
 下一次不带参数部署就会丢；secret 在 Cloudflare 上跨部署保留。
 
