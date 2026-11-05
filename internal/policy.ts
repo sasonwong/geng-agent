@@ -34,8 +34,17 @@ export interface Policy {
      * (`http://`, `socks5://`, with optional user:pass).
      */
     proxyChain: string;
-    /** Hosts the proxy may reach. `["*"]` is every public host; `[]` is none. */
+    /**
+     * Host names the proxy may reach. `["*"]` is every name; a `!` prefix excludes one.
+     * Deny always wins, whatever the order.
+     */
     proxyAllow: string[];
+    /**
+     * Addresses the proxy may reach, after the name is resolved. Same `!` syntax. The
+     * default is every address except the private, loopback and link-local ranges — those
+     * are written out rather than assumed, so opening one is a line somebody deleted.
+     */
+    proxyAllowCidrs: string[];
   };
 }
 
@@ -53,10 +62,24 @@ export function defaultPolicy(): Policy {
       cpus: "1.5",
       pidsLimit: 512,
       proxyChain: "auto",
-      // Every public destination, deliberately: the thing worth blocking is the host's own
-      // network, and that is refused by address regardless of this list. Narrow it when the
-      // instance should reach a known few.
       proxyAllow: ["*"],
+      // `0.0.0.0/0` minus the ranges that are not "the internet". Written as data, not as a
+      // rule in code: to let it reach a private network, delete the line — and then it is
+      // in the diff.
+      proxyAllowCidrs: [
+        "0.0.0.0/0",
+        "::/0",
+        "!0.0.0.0/8",
+        "!10.0.0.0/8",
+        "!100.64.0.0/10",
+        "!127.0.0.0/8",
+        "!169.254.0.0/16",
+        "!172.16.0.0/12",
+        "!192.168.0.0/16",
+        "!::1/128",
+        "!fc00::/7",
+        "!fe80::/10",
+      ],
     },
   };
 }
@@ -133,10 +156,28 @@ export function loadPolicy(file: string): Policy {
               // "let it go anywhere" already means, and it is a different field with a
               // different consequence.
               const list = Array.isArray(container.proxyAllow) ? container.proxyAllow : [];
-              if (list.some((x) => String(x).includes("/") || String(x).includes(":"))) {
-                throw new ExpectedError("policy: container.proxyAllow 只收主机名（\"*\" 表示全部），不收 URL 或端口");
+              if (list.some((x) => String(x).replace(/^!/, "").includes("/") || String(x).replace(/^!/, "").includes(":"))) {
+                throw new ExpectedError("policy: container.proxyAllow 只收主机名（\"*\" 表示全部，\"!name\" 排除），不收网段、URL 或端口");
               }
               return list.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+            })(),
+      proxyAllowCidrs:
+        container.proxyAllowCidrs === undefined
+          ? d.container.proxyAllowCidrs
+          : (() => {
+              const list = Array.isArray(container.proxyAllowCidrs) ? container.proxyAllowCidrs : [];
+              return list
+                .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+                .map((x) => x.trim())
+                .map((entry) => {
+                  const body = entry.startsWith("!") ? entry.slice(1) : entry;
+                  // A name here would never match an address, and the silence would look
+                  // like the proxy ignoring the rule.
+                  if (!/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(body) || !body.includes("/") && !body.includes(".") && !body.includes(":")) {
+                    throw new ExpectedError(`policy: container.proxyAllowCidrs 只收网段或地址，收到 ${entry}`);
+                  }
+                  return entry;
+                });
             })(),
     },
   };

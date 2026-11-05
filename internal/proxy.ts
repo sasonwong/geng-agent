@@ -1,6 +1,8 @@
 import { connect as tcpConnect } from "node:net";
 import { lookup } from "node:dns/promises";
 import type { Duplex } from "node:stream";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 /**
  * An HTTP proxy served on the book socket, so the container can reach the network without
@@ -16,59 +18,81 @@ import type { Duplex } from "node:stream";
  * link-local range, and the connection is made to the address that was checked.
  */
 export interface ProxyRule {
-  /** Host names it may reach, matched as itself or as a suffix of `.name`. */
+  /** Host names it may reach, matched as itself or as a suffix of `.name`. `!` excludes. */
   allow: string[];
+  /** Address ranges, checked after resolution. `!` excludes, and an exclusion always wins. */
+  cidrs: string[];
 }
 
-const PRIVATE_V4 = [
-  /^10\./,
-  /^127\./,
-  /^0\./,
-  /^169\.254\./,
-  /^172\.(1[6-9]|2\d|3[01])\./,
-  /^192\.168\./,
-  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
-];
-
-export function isPublicAddress(ip: string): boolean {
-  if (ip.includes(":")) {
-    const low = ip.toLowerCase();
-    if (low === "::1" || low === "::" || low.startsWith("fe80:") || low.startsWith("fc") || low.startsWith("fd")) {
-      return false;
-    }
-    // an IPv4-mapped address is the v4 check again
-    const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(low);
-    return mapped ? isPublicAddress(mapped[1] as string) : true;
+/** An IPv4 or IPv6 address as bytes, so a prefix is a byte comparison. */
+function bytesOf(ip: string): { bytes: Buffer; bits: number } | null {
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip);
+  if (v4) {
+    const parts = [v4[1], v4[2], v4[3], v4[4]].map((x) => Number(x));
+    if (parts.some((n) => n > 255)) return null;
+    return { bytes: Buffer.from(parts as number[]), bits: 32 };
   }
-  return !PRIVATE_V4.some((re) => re.test(ip));
+  if (!ip.includes(":")) return null;
+  const [head, tail] = ip.split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail === undefined ? [] : tail ? tail.split(":") : [];
+  if (tail === undefined && left.length !== 8) return null;
+  const groups = [...left, ...(tail === undefined ? [] : Array(8 - left.length - right.length).fill("0")), ...right];
+  if (groups.length !== 8) return null;
+  const bytes = Buffer.alloc(16);
+  for (const [i, group] of groups.entries()) {
+    const value = Number.parseInt(group === "" ? "0" : group, 16);
+    if (!Number.isFinite(value) || value > 0xffff) return null;
+    bytes[i * 2] = value >> 8;
+    bytes[i * 2 + 1] = value & 0xff;
+  }
+  return { bytes, bits: 128 };
+}
+
+/** Does `ip` fall inside `cidr`? A bare address is its own /32 or /128. */
+export function inCidr(ip: string, cidr: string): boolean {
+  const [net, prefixText] = cidr.split("/");
+  const a = bytesOf(ip.replace(/^\[|\]$/g, ""));
+  const b = bytesOf((net ?? "").replace(/^\[|\]$/g, ""));
+  if (a === null || b === null || a.bits !== b.bits) return false;
+  const prefix = prefixText === undefined ? a.bits : Number(prefixText);
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > a.bits) return false;
+  const full = Math.floor(prefix / 8);
+  for (let i = 0; i < full; i++) if (a.bytes[i] !== b.bytes[i]) return false;
+  const rest = prefix % 8;
+  if (rest === 0) return true;
+  const mask = (0xff << (8 - rest)) & 0xff;
+  return ((a.bytes[full] as number) & mask) === ((b.bytes[full] as number) & mask);
+}
+
+/** `!` entries are exclusions and they win: order never changes the answer. */
+function entries(rule: string[]): { allow: string[]; deny: string[] } {
+  return {
+    allow: rule.filter((e) => !e.startsWith("!")),
+    deny: rule.filter((e) => e.startsWith("!")).map((e) => e.slice(1)),
+  };
 }
 
 /** `github.com` allows itself and `codeload.github.com`, never `evil-github.com`. */
-export function hostAllowed(host: string, allow: string[]): boolean {
+export function hostAllowed(host: string, rule: string[]): boolean {
   const want = host.toLowerCase().replace(/\.$/, "");
-  if (allow.includes("*")) return true;
-  return allow.some((raw) => {
-    const entry = raw.toLowerCase().replace(/\.$/, "");
-    return want === entry || want.endsWith(`.${entry}`);
-  });
+  const { allow, deny } = entries(rule);
+  const matches = (entry: string): boolean => {
+    if (entry === "*") return true;
+    const name = entry.toLowerCase().replace(/\.$/, "");
+    return want === name || want.endsWith(`.${name}`);
+  };
+  if (deny.some(matches)) return false;
+  return allow.some(matches);
 }
 
-/** The address to connect to, or the reason not to. */
-export async function resolvePublic(host: string): Promise<{ addr: string } | { why: string }> {
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(host) || host.includes(":")) {
-    return isPublicAddress(host) ? { addr: host } : { why: `${host} 不是公网地址` };
-  }
-  let found: { address: string }[];
-  try {
-    found = await lookup(host, { all: true });
-  } catch (err) {
-    return { why: `${host} 解析不了：${(err as Error).message}` };
-  }
-  if (found.length === 0) return { why: `${host} 没有地址` };
-  // every address it resolves to has to be public: one private answer is enough to say no
-  const bad = found.find((a) => !isPublicAddress(a.address));
-  if (bad) return { why: `${host} 指向 ${bad.address}` };
-  return { addr: (found[0] as { address: string }).address };
+/** The address half. Named `addrAllowed`, not "public", because it is only what the rules say. */
+export function addrAllowed(ip: string, rule: string[]): { ok: boolean; by?: string } {
+  const { allow, deny } = entries(rule);
+  const denied = deny.find((entry) => inCidr(ip, entry));
+  if (denied !== undefined) return { ok: false, by: `!${denied}` };
+  const allowed = allow.find((entry) => inCidr(ip, entry));
+  return allowed === undefined ? { ok: false } : { ok: true, by: allowed };
 }
 
 export type Chain =
@@ -79,9 +103,9 @@ export type Chain =
  * Where the daemon sends its own connections.
  *
  * `auto` follows the daemon's environment, because the machine that runs it may itself be
- * behind a proxy and the environment is where that fact usually lives. `off` is a
- * decision, not an absence: it means direct even when `HTTPS_PROXY` is set, which is what
- * a leftover systemd `Environment=` looks like otherwise. A URL overrides both.
+ * behind a proxy and the environment is where that fact usually lives. `off` is a decision,
+ * not an absence: it means direct even when `HTTPS_PROXY` is set, which is what a leftover
+ * systemd `Environment=` looks like otherwise. A URL overrides both.
  */
 export function chainFrom(value: string): Chain | null {
   const wanted = value.trim();
@@ -112,6 +136,40 @@ export function chainFrom(value: string): Chain | null {
   return null;
 }
 
+/**
+ * The address to connect to, or why not. Every answer has to pass the address rules: a name
+ * that resolves to one allowed and one forbidden address is the shape of a rebinding
+ * attack, and "one of them was fine" is not a defence.
+ */
+export async function resolveChecked(
+  host: string,
+  cidrs: string[],
+): Promise<{ addr: string; by?: string } | { why: string }> {
+  let found: string[];
+  if (bytesOf(host) !== null) {
+    found = [host];
+  } else {
+    try {
+      found = (await lookup(host, { all: true })).map((a) => a.address);
+    } catch (err) {
+      return { why: `${host} 解析不了：${(err as Error).message}` };
+    }
+    if (found.length === 0) return { why: `${host} 没有地址` };
+  }
+  let by: string | undefined;
+  for (const address of found) {
+    const verdict = addrAllowed(address, cidrs);
+    if (!verdict.ok) {
+      return {
+        why: `${host} 指向 ${address}${verdict.by === undefined ? "，不在 proxyAllowCidrs 里" : `，命中 ${verdict.by}`}`,
+      };
+    }
+    by ??= verdict.by;
+  }
+  const addr = found[0] as string;
+  return by === undefined ? { addr } : { addr, by };
+}
+
 export interface Decision {
   ok: boolean;
   why?: string;
@@ -121,16 +179,16 @@ export async function checkTarget(
   raw: string,
   rule: ProxyRule,
   skipAddressCheck = false,
-): Promise<Decision & { host?: string; port?: number }> {
+): Promise<Decision & { host?: string; port?: number; addr?: string; by?: string }> {
   const match = /^\[?([^\]]+?)\]?:(\d+)$/.exec(raw.trim());
   if (match === null) return { ok: false, why: `看不懂的目标：${raw}` };
   const host = match[1] as string;
   const port = Number(match[2]);
   if (!hostAllowed(host, rule.allow)) return { ok: false, why: `${host} 不在放行名单里`, host, port };
   if (skipAddressCheck) return { ok: true, host, port };
-  const resolved = await resolvePublic(host);
+  const resolved = await resolveChecked(host, rule.cidrs);
   if ("why" in resolved) return { ok: false, why: resolved.why, host, port };
-  return { ok: true, host, port };
+  return { ok: true, host, port, addr: resolved.addr, by: resolved.by };
 }
 
 /**
@@ -161,14 +219,14 @@ export async function handleConnect(
     tunnel(socket, head, chain, { connect: raw, then: `${decision.host}:${decision.port}` }, log);
     return;
   }
-  const resolved = await resolvePublic(decision.host);
+  const resolved = await resolveChecked(decision.host, rule.cidrs);
   if ("why" in resolved) {
     log(`proxy 拒绝 ${raw}：${resolved.why}`);
     report(false, resolved.why);
     socket.end("HTTP/1.1 403 Forbidden\r\n\r\n");
     return;
   }
-  report(true);
+  report(true, resolved.by);
   const upstream = tcpConnect(decision.port, resolved.addr, () => {
     tunnelDone(socket, upstream, head, log, raw);
   });
@@ -339,4 +397,71 @@ function socks5(
     buffered = Buffer.concat([buffered, chunk]);
     step();
   });
+}
+
+/**
+ * Plain HTTP through the proxy: the client sends `GET http://host/path HTTP/1.1`, and the
+ * proxy makes the request. Most traffic is https and arrives as CONNECT, but an agent that
+ * fetches an `http://` URL would otherwise get a 405 from the book router and no
+ * explanation — a silent hole in the middle of a proxy that is supposed to be the only way
+ * out.
+ */
+export async function forwardPlain(
+  req: import("node:http").IncomingMessage,
+  res: import("node:http").ServerResponse,
+  body: Buffer,
+  rule: ProxyRule,
+  chain: Chain | null,
+  report: (ok: boolean, why?: string) => void,
+): Promise<void> {
+  const raw = req.url ?? "";
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: `看不懂的地址：${raw}` }));
+    report(false, "看不懂的地址");
+    return;
+  }
+  if (url.protocol !== "http:") {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "只有 http:// 走这条路；https 用 CONNECT" }));
+    report(false, "非 http 的绝对地址");
+    return;
+  }
+  // A chain proxy that speaks HTTP wants the same absolute-form request, but piping a
+  // response back through one is more machinery than this is worth: say it plainly.
+  if (chain !== null) {
+    res.writeHead(502, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "配了链式代理时不代理明文 HTTP：请用 https" }));
+    report(false, "链式代理下的明文 HTTP");
+    return;
+  }
+  const decision = await checkTarget(`${url.hostname}:${url.port === "" ? "80" : url.port}`, rule);
+  if (!decision.ok) {
+    res.writeHead(403, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: decision.why ?? "拒绝" }));
+    report(false, decision.why);
+    return;
+  }
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(req.headers)) {
+    const lower = name.toLowerCase();
+    if (typeof value !== "string" || lower === "host" || lower === "connection" || lower === "content-length") continue;
+    headers[lower] = value;
+  }
+  const upstream = await fetch(url.toString(), {
+    method: req.method ?? "GET",
+    headers,
+    body: body.length === 0 ? undefined : new Uint8Array(body),
+  });
+  report(true, decision.by);
+  const out: Record<string, string> = { "content-type": upstream.headers.get("content-type") ?? "application/octet-stream" };
+  res.writeHead(upstream.status, out);
+  if (upstream.body === null) {
+    res.end();
+    return;
+  }
+  await pipeline(Readable.fromWeb(upstream.body as Parameters<typeof Readable.fromWeb>[0]), res);
 }

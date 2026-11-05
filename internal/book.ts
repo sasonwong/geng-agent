@@ -6,7 +6,7 @@ import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
-import { handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
+import { forwardPlain, handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
 import { keyCanMute } from "./mute.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -424,7 +424,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
   const sock = socketPath(o.paths);
   const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs, places: o.places });
 
-  const rule = o.proxy ?? { allow: [] };
+  const rule = o.proxy ?? { allow: [], cidrs: [] };
   const server = createServer((req, res) => {
     const reply = (status: number, body: unknown): void => {
       res.writeHead(status, { "content-type": "application/json" });
@@ -476,6 +476,29 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       });
       req.on("end", () => {
         proxyModel(o.paths, req, res, Buffer.concat(chunks)).catch(guard);
+      });
+      req.on("error", guard);
+      return;
+    }
+    // A proxy client names the whole URL in the request line. Without this the request
+    // would fall through to the JSON routes and come back 405, which reads as "the proxy is
+    // broken" in the middle of a container that has no other way out.
+    if (/^http:\/\//i.test(url)) {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      req.on("data", (c: Buffer) => {
+        size += c.length;
+        if (size > MAX_MODEL_BODY) {
+          req.destroy();
+          reply(413, { error: "请求体太大" });
+          return;
+        }
+        chunks.push(c);
+      });
+      req.on("end", () => {
+        forwardPlain(req, res, Buffer.concat(chunks), rule, o.chain ?? null, (ok, why) =>
+          o.onNetwork?.({ target: url, ok, why }),
+        ).catch(guard);
       });
       req.on("error", guard);
       return;

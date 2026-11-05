@@ -299,7 +299,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         log,
         minWakeMs: policy.cycle.minWakeMinutes * 60_000,
         places: knownPlaces(paths.root, o.instance).map((p) => p.id),
-        proxy: { allow: policy.container.proxyAllow },
+        proxy: { allow: policy.container.proxyAllow, cidrs: policy.container.proxyAllowCidrs },
         chain: chainFrom(policy.container.proxyChain),
         onNetwork: (event) => {
           netCalls += 1;

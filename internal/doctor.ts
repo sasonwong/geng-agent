@@ -18,7 +18,7 @@ import { readBots, botProblems } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
-import { chainFrom } from "./proxy.ts";
+import { addrAllowed, chainFrom } from "./proxy.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
 import { modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
@@ -168,18 +168,38 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 
   if (policy.runner === "docker") {
     checks.push({ name: "docker", ok: hasCmd("docker"), detail: "run 需要 docker 可执行" });
-    const allowAll = policy.container.proxyAllow.includes("*");
+    const allowAllNames = policy.container.proxyAllow.includes("*");
     const chain = chainFrom(policy.container.proxyChain);
     checks.push({
       name: "出口代理",
-      ok: policy.container.proxyAllow.length > 0,
+      ok: policy.container.proxyAllow.length > 0 && policy.container.proxyAllowCidrs.length > 0,
       detail:
-        policy.container.proxyAllow.length === 0
-          ? "proxyAllow 是空的：容器没有任何出口（git、npm 都会失败）"
-          : `${allowAll ? "放通所有公网目的地" : `放行 ${policy.container.proxyAllow.join("、")}`}` +
+        policy.container.proxyAllow.length === 0 || policy.container.proxyAllowCidrs.length === 0
+          ? "名单里有空的一项：容器没有任何出口（git、npm 都会失败）"
+          : `${allowAllNames ? "放通所有名字" : `放行 ${policy.container.proxyAllow.join("、")}`}` +
+            `，地址 ${policy.container.proxyAllowCidrs.length} 条` +
             `；daemon 自己${chain === null ? "直连" : `走 ${chain.kind} ${chain.host}:${chain.port}`}`,
       warnOnly: true,
     });
+    // The three ranges an operator should never open by accident, each with its own reason.
+    const dangerous: [string, string][] = [
+      ["127.0.0.0/8", "容器能摸宿主上所有 loopback 服务"],
+      ["169.254.0.0/16", "云元数据：那条路通向凭据"],
+      ["172.17.0.0/16", "同机的其他容器"],
+      ["10.0.0.0/8", "内网"],
+      ["192.168.0.0/16", "内网"],
+    ];
+    const open = dangerous
+      .filter(([cidr]) => addrAllowed(cidr.split("/")[0] as string, policy.container.proxyAllowCidrs).ok)
+      .map(([cidr, why]) => `${cidr}（${why}）`);
+    if (open.length > 0) {
+      checks.push({
+        name: "代理能进内网",
+        ok: false,
+        warnOnly: true,
+        detail: open.join("；"),
+      });
+    }
   } else {
     checks.push({ name: "pi 可执行", ok: hasCmd("pi"), detail: "local runner 直接调用 pi" });
   }

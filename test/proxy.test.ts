@@ -1,8 +1,14 @@
 import { test } from "node:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { request } from "node:http";
+import { makePaths } from "../internal/paths.ts";
+import { startBookServer, socketPath } from "../internal/book.ts";
 import assert from "node:assert/strict";
 import { createServer as createHttp } from "node:http";
 import { connect, createServer as createTcp } from "node:net";
-import { chainFrom, hostAllowed, isPublicAddress, checkTarget, handleConnect } from "../internal/proxy.ts";
+import { addrAllowed, chainFrom, hostAllowed, inCidr, resolveChecked, checkTarget, handleConnect } from "../internal/proxy.ts";
 
 test("a host is allowed by itself or as a subdomain, never as a suffix of something else", () => {
   const allow = ["github.com", "npmjs.org"];
@@ -15,17 +21,41 @@ test("a host is allowed by itself or as a subdomain, never as a suffix of someth
   assert.equal(hostAllowed("example.com", allow), false);
 });
 
-test("a proxy that can reach the host's own network is worse than no proxy", () => {
-  for (const ip of ["127.0.0.1", "10.1.2.3", "172.17.0.1", "192.168.1.1", "169.254.169.254", "::1", "fd00::1"]) {
-    assert.equal(isPublicAddress(ip), false, `${ip} 是内网地址`);
+test("the private ranges are excluded by the rules, not by a hardcoded idea of private", () => {
+  const rule = ["0.0.0.0/0", "!10.0.0.0/8", "!127.0.0.0/8", "!169.254.0.0/16", "::/0", "!fc00::/7"];
+  for (const ip of ["10.1.2.3", "127.0.0.1", "169.254.169.254", "fd00::1"]) {
+    assert.deepEqual(addrAllowed(ip, rule).ok, false, `${ip} 要被排除`);
   }
-  assert.equal(isPublicAddress("192.0.2.7"), true, "文档段是公网段，只是不能路由");
-  // an IPv4-mapped loopback is still loopback
-  assert.equal(isPublicAddress("::ffff:127.0.0.1"), false);
+  for (const ip of ["192.0.2.7", "140.82.112.3", "2606:50c0::1"]) {
+    assert.deepEqual(addrAllowed(ip, rule).ok, true, `${ip} 是公网`);
+  }
+  // a rule that says nothing allows nothing: silence is not permission
+  assert.equal(addrAllowed("192.0.2.7", []).ok, false);
+  // `!` wins over `*`, whatever the order
+  assert.equal(addrAllowed("192.0.2.7", ["*", "!192.0.2.0/24"]).ok, false);
+  assert.equal(addrAllowed("192.0.2.7", ["!192.0.2.0/24", "*"]).ok, false);
+});
+
+test("a prefix is a byte comparison, not a string one", () => {
+  assert.equal(inCidr("10.1.2.3", "10.0.0.0/8"), true);
+  assert.equal(inCidr("10.1.2.3", "10.1.0.0/16"), true);
+  assert.equal(inCidr("10.1.2.3", "10.1.2.0/24"), true);
+  assert.equal(inCidr("10.1.2.3", "10.1.3.0/24"), false);
+  // a /23 spans two /24s: 10.1.2.0–10.1.3.255 is in, 10.1.4.0 is out
+  assert.equal(inCidr("10.1.2.3", "10.1.2.0/23"), true);
+  assert.equal(inCidr("10.1.3.255", "10.1.2.0/23"), true);
+  assert.equal(inCidr("10.1.4.0", "10.1.2.0/23"), false);
+  assert.equal(inCidr("10.0.0.0", "10.0.0.0/32"), true);
+  assert.equal(inCidr("10.0.0.1", "10.0.0.0/32"), false);
+  // v6, and the two families never match each other
+  assert.equal(inCidr("2001:db8::5", "2001:db8::/32"), true);
+  assert.equal(inCidr("2001:db9::5", "2001:db8::/32"), false);
+  assert.equal(inCidr("2001:db8::5", "10.0.0.0/8"), false);
 });
 
 test("a target has to be both named and public before it is opened", async () => {
-  const rule = { allow: ["localhost", "example.com"] };
+  // the name is allowed; the address is refused — that is the two-key design
+  const rule = { allow: ["localhost", "example.com"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] };
   const named = await checkTarget("localhost:443", rule);
   assert.equal(named.ok, false, "放行名单里有它，但它解析到 127.0.0.1");
   const unknown = await checkTarget("not-on-the-list.test:443", rule);
@@ -60,6 +90,9 @@ test("the chain is a setting with three meanings, and `off` is one of them", () 
 
 test("`*` is how everything is allowed, and an empty list is how nothing is", () => {
   assert.equal(hostAllowed("anything.example", ["*"]), true);
+  // `!` on the name list, and it wins
+  assert.equal(hostAllowed("evil.example", ["*", "!evil.example"]), false);
+  assert.equal(hostAllowed("sub.evil.example", ["*", "!evil.example"]), false);
   assert.equal(hostAllowed("anything.example", []), false);
 });
 
@@ -85,7 +118,7 @@ test("a CONNECT to a name that resolves inside the host's own network is refused
         on: () => {},
         destroy: () => {},
       };
-      void handleConnect(`localhost:${port}`, socket as never, Buffer.alloc(0), { allow: ["localhost"] }, (l) => {
+      void handleConnect(`localhost:${port}`, socket as never, Buffer.alloc(0), { allow: ["localhost"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] }, (l) => {
         refusals.push(l);
       });
     });
@@ -115,7 +148,7 @@ test("when the host is itself behind a proxy, the tunnel goes through it", async
   process.env.HTTPS_PROXY = `http://127.0.0.1:${(upstream.address() as { port: number }).port}`;
   const chain = chainFrom("auto");
   const clientSide = createTcp((socket) => {
-    void handleConnect("github.com:443", socket, Buffer.alloc(0), { allow: ["github.com"] }, () => {}, chain);
+    void handleConnect("github.com:443", socket, Buffer.alloc(0), { allow: ["github.com"], cidrs: ["0.0.0.0/0"] }, () => {}, chain);
   });
   await new Promise<void>((r) => clientSide.listen(0, "127.0.0.1", () => r()));
   try {
@@ -195,7 +228,7 @@ test("a SOCKS5 chain does the handshake before it pipes anything", async () => {
   await new Promise<void>((r) => socks.listen(0, "127.0.0.1", () => r()));
   const chain = chainFrom(`socks5://me:secret@127.0.0.1:${(socks.address() as { port: number }).port}`);
   const front = createTcp((socket) => {
-    void handleConnect("github.com:443", socket, Buffer.alloc(0), { allow: ["github.com"] }, () => {}, chain);
+    void handleConnect("github.com:443", socket, Buffer.alloc(0), { allow: ["github.com"], cidrs: ["0.0.0.0/0"] }, () => {}, chain);
   });
   await new Promise<void>((r) => front.listen(0, "127.0.0.1", () => r()));
   try {
@@ -219,5 +252,62 @@ test("a SOCKS5 chain does the handshake before it pipes anything", async () => {
   } finally {
     front.close();
     socks.close();
+  }
+});
+
+test("plain http is proxied too, and refused by the same address rules", async () => {
+  const target = createHttp((req, res) => {
+    res.writeHead(200, { "content-type": "text/plain" });
+    res.end(`hello ${req.url ?? ""}`);
+  });
+  await new Promise<void>((r) => target.listen(0, "127.0.0.1", () => r()));
+  const up = makePaths(mkdtempSync(join(tmpdir(), "geng-proxy-")), "alice");
+  const ask = (url: string): Promise<{ status: number; body: string }> =>
+    new Promise((resolve, reject) => {
+      const req = request(
+        {
+          socketPath: socketPath(up),
+          path: url,
+          method: "GET",
+          agent: false,
+          headers: { host: new URL(url).host },
+        },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (c) => (body += c));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+  const port = (target.address() as { port: number }).port;
+  const denyAll = await startBookServer({
+    paths: up,
+    log: () => {},
+    proxy: { allow: ["*"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] },
+  });
+  try {
+    // the rule refuses it before anything is fetched: 127/8 is excluded
+    const denied = await ask(`http://127.0.0.1:${port}/a`);
+    assert.equal(denied.status, 403);
+    assert.match(denied.body, /127\.0\.0\.1/);
+  } finally {
+    denyAll.close();
+  }
+  // and when the operator does open loopback, the same request is actually forwarded
+  const opened = await startBookServer({
+    paths: up,
+    log: () => {},
+    proxy: { allow: ["*"], cidrs: ["0.0.0.0/0"] },
+  });
+  try {
+    const ok = await ask(`http://127.0.0.1:${port}/a`);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body, "hello /a");
+  } finally {
+    opened.close();
+    target.close();
   }
 });
