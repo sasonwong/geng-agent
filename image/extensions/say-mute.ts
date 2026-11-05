@@ -9,6 +9,7 @@
  *
  * None of it talks to Telegram. The container has no bot token, and must not have one.
  */
+import { existsSync } from "node:fs";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tool } from "./lib/tool.ts";
 import { postJson } from "./lib/uds.ts";
@@ -67,6 +68,19 @@ const sayTool = tool({
       return { content: [{ type: "text", text: "没说要说什么。" }], details: undefined };
     }
     const files = (params.files ?? []).map((f) => f.trim()).filter((f) => f !== "");
+    // A `/work` path that is not there is refused by the gateway with a line in `_ops`,
+    // which is the operator's channel: the agent would believe the file had gone out. This
+    // runs in the same container, so it can see the file while copying it is still an
+    // option. A path outside /work is the book's refusal, and that one comes back here.
+    const missing = files.filter((f) => !existsSync(f));
+    if (missing.length > 0) {
+      return {
+        content: [
+          { type: "text", text: `附件要发 /work 里存在的文件：${missing.join("、")} 不在。先 cp 到 /work 再发。` },
+        ],
+        details: undefined,
+      };
+    }
     const { ok, reply } = await send("/say", {
       messages,
       to: params.to,
