@@ -101,7 +101,8 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number): Pru
 
 /**
  * What it asked to forget. Applied here rather than inside the container, because the
- * directory is mounted read-only there and it must not be able to erase what a person sent.
+ * container never has the directory: it holds ids, so erasing what a person sent is a
+ * request the host carries out, on its own clock, in the ledger of the round.
  */
 export function forgetFiles(dir: string, requested: string[]): number {
   let removed = 0;

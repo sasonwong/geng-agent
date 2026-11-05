@@ -223,8 +223,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   ensurePolicyLocation(paths);
   const conflict = schemaConflict(onDiskSchema(paths));
   if (conflict !== null) throw new ExpectedError(conflict);
-  // it is mounted read-only into the container, and docker materialises a missing
-  // host path as a directory — after which appending a line is EISDIR forever
+  // A directory at this path breaks every append with EISDIR, and the symptom is a log
+  // that stops rather than an error. Nothing mounts this file; `init` creates it too, and
+  // this is the daemon's own first line, which has to land somewhere.
   if (!existsSync(paths.daemonLog)) writeText(paths.daemonLog, "");
   // Spent at the top of every cycle, not only at startup: the page promises the agent
   // "before the next waking", and reading it only at startup made that a promise for the

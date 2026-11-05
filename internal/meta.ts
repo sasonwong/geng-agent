@@ -81,9 +81,9 @@ export function readWakes(paths: Paths, nowMs: number): number[] {
 /**
  * Forgiving on purpose: a broken note is worth less than a waking that cannot start.
  *
- * Every field the page reads is checked here, not at the page: `/state` is writable from
- * inside, so a hand-written record is an ordinary input, and `tools: "bash ls"` used to
- * pass this check and then throw on `.join` while a waking was being assembled.
+ * Every field the page reads is checked here, not at the page: a hand-edited file or a
+ * restore that landed wrong is an ordinary input, and `tools: "bash ls"` used to pass this
+ * check and then throw on `.join` while a waking was being assembled.
  */
 export function readCut(paths: Paths): CutRecord | null {
   const rec = readJson<Partial<CutRecord> | null>(join(paths.meta, "cut.json"), null);
