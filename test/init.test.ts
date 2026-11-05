@@ -48,6 +48,31 @@ test("init writes the four values that are about this instance, not the project"
   assert.notEqual(modelKeyFile(p), join(r, "secrets", "model.env"));
 });
 
+test("two instances actually get two different keys and upstreams", () => {
+  // 旧断言只说「路径不是那个共享的 model.env」。它证明不了隔离：文件可能都叫那个
+  // 名字、也可能第二份把第一份覆盖了。真要验的是读回来的是谁的值。
+  const aliceKey = ["key-for-", "alice"].join("");
+  const bobKey = ["key-for-", "bob"].join("");
+  const r = root();
+  initInstance(r, "alice", { modelKey: aliceKey, upstream: "https://alice.invalid/v1" });
+  initInstance(r, "bob", { modelKey: bobKey, upstream: "https://bob.invalid/v1" });
+  const a = makePaths(r, "alice");
+  const b = makePaths(r, "bob");
+
+  assert.notEqual(modelKeyFile(a), modelKeyFile(b));
+  assert.deepEqual(readModelKey(a), { name: "OPENCODE_API_KEY", key: aliceKey });
+  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: bobKey });
+  assert.equal(modelUpstream(a), "https://alice.invalid/v1");
+  assert.equal(modelUpstream(b), "https://bob.invalid/v1");
+
+  // init 是幂等的：再跑一次 bob 不能把 alice 的 key 顺手改掉，也不能覆盖已有值。
+  initInstance(r, "bob", { modelKey: ["ignored", "-key"].join(""), upstream: "https://other.invalid/v1" });
+  assert.deepEqual(readModelKey(a), { name: "OPENCODE_API_KEY", key: aliceKey });
+  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: bobKey });
+  assert.equal(modelUpstream(a), "https://alice.invalid/v1");
+  assert.equal(modelUpstream(b), "https://bob.invalid/v1");
+});
+
 test("without flags the template's values survive, and the key file is still created", () => {
   const r = root();
   initInstance(r, "bob");
