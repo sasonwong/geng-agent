@@ -49,15 +49,8 @@ pi 跑在容器里，每次醒来都是一个全新进程，什么也不记得�
 
 ## 装上它
 
-```bash
-npm ci && deploy/build.sh
-node cmd/geng/index.ts init alice      # 建目录、policy、凭据模板、备份口令
-node cmd/geng/index.ts doctor alice    # 检查不变量
-node cmd/geng/index.ts daemon --instance alice
-```
-
-宿主前置（docker、systemd 单元、可选能力）见
-**[`docs/install.md`](docs/install.md)**——那里每节都以一条验证命令收尾。
+怎么装、怎么配、怎么排错在 **[`docs/install.md`](docs/install.md)**——那里不写"已完成"，
+每节都以一条**能失败的**验证命令收尾。
 
 第一次醒来时 `identity.md` 是空的，书里没有一行。**那个空白就是它的出生。**
 

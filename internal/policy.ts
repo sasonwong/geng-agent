@@ -164,7 +164,9 @@ export function loadPolicy(file: string): Policy {
                   const body = entry.startsWith("!") ? entry.slice(1) : entry;
                   // A name here would never match an address, and the silence would look
                   // like the proxy ignoring the rule.
-                  if (!/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(body) || !body.includes("/") && !body.includes(".") && !body.includes(":")) {
+                  // a bare word (no slash, no dot, no colon) is a host name, not an address
+                  const bare = !body.includes("/") && !body.includes(".") && !body.includes(":");
+                  if (bare || !/^[0-9a-fA-F:.]+(\/\d{1,3})?$/.test(body)) {
                     throw new ExpectedError(`policy: container.proxyAllowCidrs 只收网段或地址，收到 ${entry}`);
                   }
                   return entry;
