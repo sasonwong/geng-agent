@@ -240,23 +240,33 @@ function sessionItems(p: Paths): Item[] {
   } catch {
     return [];
   }
-  return projects.flatMap((project) =>
-    files(join(p.sessionDir, project), ".jsonl").map((f) => {
-      const body = render(read(f).split("\n"));
-      return {
-        id: (() => {
-          const counter = /-(\d+)\.jsonl$/.exec(basename(f));
-          // the daemon numbers its wakings; a session made some other way has no number
-          // to align with, so it keeps its timestamp but stays under the same letter
-          return counter ? `R${Number(counter[1])}` : `R${basename(f, ".jsonl").slice(0, 19)}`;
-        })(),
-        source: "sessions" as const,
-        at: when(f),
-        header: `${body.split("\n").length} 段`,
-        body,
-      };
-    }),
+  const idOf = (file: string): string => {
+    const counter = /-(\d+)\.jsonl$/.exec(basename(file));
+    // the daemon numbers its wakings; a session made some other way has no number
+    // to align with, so it keeps its timestamp but stays under the same letter
+    return counter ? `R${Number(counter[1])}` : `R${basename(file, ".jsonl").slice(0, 19)}`;
+  };
+  const entries = projects.flatMap((project) =>
+    files(join(p.sessionDir, project), ".jsonl").map((file) => ({ project, file })),
   );
+  // Each project numbers its own sessions from one, so two projects can both hold an
+  // -5.jsonl: the listing then shows R5 twice and `open` can only ever reach the first.
+  // Only the ids that actually clash grow a project suffix, so an instance with a single
+  // project keeps exactly the ids it had.
+  const count = new Map<string, number>();
+  for (const e of entries) count.set(idOf(e.file), (count.get(idOf(e.file)) ?? 0) + 1);
+  return entries.map(({ project, file }) => {
+    const body = render(read(file).split("\n"));
+    const base = idOf(file);
+    const tag = project.replace(/^--/, "").replace(/[^\w-]+/g, "-").slice(0, 24) || "project";
+    return {
+      id: (count.get(base) ?? 0) > 1 ? `${base}@${tag}` : base,
+      source: "sessions" as const,
+      at: when(file),
+      header: `${body.split("\n").length} 段`,
+      body,
+    };
+  });
 }
 
 /** The path a listed file actually has: the index sits between the id and the name. */

@@ -169,3 +169,29 @@ test("limit counts the things it shows, not the lines, and never cuts one in hal
   assert.equal(recallText(p, { query: "这个词", limit: 50 }).split("\n").filter((l) => /^J/.test(l)).length, 3);
   assert.equal(recallText(p, { limit: 2 }).split("\n").filter((l) => /^J/.test(l)).length, 2);
 });
+
+test("two projects that both number a session 5 give two ids, and both open", () => {
+  const p = fixture();
+  for (const [project, text] of [["--home-work", "第一棵树说的话"], ["--other", "第二棵树说的话"]] as const) {
+    mkdirSync(join(p.sessionDir, project), { recursive: true });
+    writeFileSync(
+      join(p.sessionDir, project, "2026-03-02T07-00-00-5.jsonl"),
+      JSON.stringify({ message: { role: "user", content: text } }) + "\n",
+    );
+  }
+  const listing = recallText(p, { sources: ["sessions"] });
+  const ids = listing
+    .split("\n")
+    .map((l) => l.split("  ")[0] ?? "")
+    .filter((id) => id.startsWith("R"));
+  assert.equal(ids.length, 2);
+  assert.equal(new Set(ids).size, 2, `两个项目撞号了：${ids.join("、")}`);
+  const texts = ids.map((id) => openText(p, id, 0).text);
+  assert.ok(texts.some((t) => t.includes("第一棵树说的话")), texts.join("\n---\n"));
+  assert.ok(texts.some((t) => t.includes("第二棵树说的话")), texts.join("\n---\n"));
+  // one project keeps plain R5 — the suffix is only for a clash
+  const one = fixture();
+  mkdirSync(join(one.sessionDir, "--solo"), { recursive: true });
+  writeFileSync(join(one.sessionDir, "--solo", "2026-03-02T07-00-00-5.jsonl"), JSON.stringify({ message: { role: "user", content: "只有一棵" } }) + "\n");
+  assert.match(recallText(one, { sources: ["sessions"] }), /^R5  /m);
+});
