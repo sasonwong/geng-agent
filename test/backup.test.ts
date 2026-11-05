@@ -37,6 +37,20 @@ test("restore refuses when there is nothing to restore from", async () => {
   assert.match(result.detail, /rustic\.env|没有仓库/);
 });
 
+test("a repo that cannot be read is not reported as having no snapshots", async () => {
+  // a password and a repo directory, but nothing that can answer: the old answer was
+  // 「没有快照」, which told the operator their backups were gone
+  const paths = fixture();
+  mkdirSync(join(paths.root, "secrets"), { recursive: true });
+  writeFileSync(join(paths.root, "secrets", "rustic.env"), "RUSTIC_PASSWORD=x\n");
+  const repo = backupRepo(paths);
+  mkdirSync(repo, { recursive: true });
+  writeFileSync(join(repo, "config"), "");
+  const result = await restore({ paths, target: join(paths.root, "out") });
+  assert.equal(result.ok, false);
+  assert.match(result.detail, /读不出快照列表/);
+});
+
 test("the repo lives outside the directory being backed up", () => {
   const paths = fixture();
   assert.equal(backupRepo(paths), join(paths.root, "backup", "alice"));
@@ -86,7 +100,9 @@ test("both rustic snapshot JSON shapes parse", () => {
   const old = parseSnapshots(JSON.stringify([[{ hostname: "demo" }, [entry]]]));
   const newer = parseSnapshots(JSON.stringify([{ group_key: { hostname: "demo" }, snapshots: [entry] }]));
   assert.deepEqual(old, newer);
-  assert.equal(old[0]?.id, entry.id);
-  assert.equal(old[0]?.files, 7);
-  assert.deepEqual(parseSnapshots("not json"), []);
+  assert.equal(old?.[0]?.id, entry.id);
+  assert.equal(old?.[0]?.files, 7);
+  // not a list at all is a different fact from an empty one (see SnapshotList.ok)
+  assert.equal(parseSnapshots("not json"), null);
+  assert.equal(parseSnapshots("42"), null);
 });
