@@ -152,7 +152,10 @@ export function fileById(paths: Paths, id: string): { name: string; path: string
   return name === undefined ? null : { name, path: join(paths.filesDir, name) };
 }
 
-/** Every file that has an id, newest first, for `recall`. */
+/**
+ * Every file that has an id, for `recall`. Directory order, not time order: the sorting a
+ * listing needs (newest first) is `collectAll`'s job, over every source at once.
+ */
 export function listFiles(
   paths: Paths,
 ): { id: string; name: string; bytes: number; mtimeMs: number }[] {
