@@ -139,7 +139,12 @@ export function knockable(pending: string[], hold: KnockHold | null, nowMs: numb
 }
 
 export function formatDuration(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
+  // A wake packet is no place for "NaNh": a bad join hands us NaN, and a huge number
+  // hands us Infinity. Both are numbers, so Math.max(0, …) kept them and the hours
+  // branch printed them verbatim. A future/negative duration is not a wait at all.
+  if (!Number.isFinite(ms)) return "未知";
+  if (ms < 0) return "0s";
+  const s = Math.round(ms / 1000);
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.round(s / 60)}m`;
   return `${(s / 3600).toFixed(1)}h`;

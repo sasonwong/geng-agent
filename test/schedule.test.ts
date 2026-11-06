@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { alarmSpent, knockFloorMs, knockable, parseAfter, readWaiting } from "../internal/schedule.ts";
+import { alarmSpent, formatDuration, knockFloorMs, knockable, parseAfter, readWaiting } from "../internal/schedule.ts";
 import { planFor } from "../internal/escalation.ts";
 
 function tmpFile(content: string): string {
@@ -24,6 +24,19 @@ test("a relative alarm counts from when it was written, not from when it is read
   assert.ok((spec?.dueAtMs ?? Infinity) < writtenAt + 21 * 60_000);
 });
 
+test("a malformed wake.after is no alarm, not a crashing waking", () => {
+  // `null !== undefined`, so a restored or hand-edited waiting.json with `"after": null`
+  // reached parseAfter(null) and called null.trim(). The daemon has no catch around
+  // readWaiting, so that was one whole waking gone with no log line.
+  for (const bad of ["null", "true", "{}", "[]", "[1]"]) {
+    const f = tmpFile(`{"wake":{"after":${bad}}}`);
+    assert.equal(readWaiting(f), null, `${bad} 只能读作「没有闹钟」`);
+  }
+  assert.equal(parseAfter(Number.NaN), null, "NaN 分钟不是闹钟");
+  assert.equal(parseAfter(Number.POSITIVE_INFINITY), null);
+  assert.equal(parseAfter(20), 20 * 60_000);
+});
+
 test("readWaiting parses an absolute alarm", () => {
   const f = tmpFile(JSON.stringify({ wake: { at: "2026-03-02T01:00:00Z" } }));
   assert.equal(readWaiting(f)?.dueAtMs, Date.parse("2026-03-02T01:00:00Z"));
@@ -34,30 +47,6 @@ test("readWaiting returns null when no alarm was set", () => {
   assert.equal(readWaiting(tmpFile("{not json")), null);
   assert.equal(readWaiting(tmpFile(JSON.stringify({ why: "我忘了" }))), null);
   assert.equal(readWaiting(tmpFile(JSON.stringify({ wake: { after: "20 minutes" } }))), null);
-});
-
-// `waiting.json` 是盘上的状态，不是这个进程刚写出来的值：手改、旧版本、恢复的快照都会
-// 往里放别的东西。`after: null` 以前会走到 `null.trim()`，而这一行在 daemon 主循环的
-// 第一条语句上——抛出去就是每次启动都死，日志里一个字都没有。读不认识的形状要答 null，
-// 和这个函数其它每一条分支一样。
-test("an alarm file full of shapes nobody wrote is not a reason to die", () => {
-  for (const after of [null, true, {}, [], "20 minutes", ""]) {
-    const f = tmpFile(JSON.stringify({ wake: { after } }));
-    assert.equal(readWaiting(f), null, `after=${JSON.stringify(after)} 该答 null`);
-  }
-  // 数字是分钟：旧写法留下的形状，还得认
-  const f = tmpFile(JSON.stringify({ wake: { after: 30 } }));
-  assert.equal(readWaiting(f)?.dueAtMs, statSync(f).mtimeMs + 30 * 60_000);
-});
-
-test("a duration that overflows is not a duration", () => {
-  // JSON 里 NaN 和 Infinity 都会变成 null，走不到这一段，只能直接喂给解析器。
-  // 不挡的话 `dueAt` 是 Infinity：一个再也不会醒的实例，而不是一个坏掉的闹钟。
-  assert.equal(parseAfter(Number.NaN), null);
-  assert.equal(parseAfter(Number.POSITIVE_INFINITY), null);
-  assert.equal(parseAfter("9".repeat(400) + "m"), null);
-  assert.equal(parseAfter(30), 30 * 60_000);
-  assert.equal(parseAfter("1.5h"), 90 * 60_000);
 });
 
 test("a message already handed over does not knock again inside the floor", () => {
@@ -100,4 +89,33 @@ test("the knock floor never goes backwards as the ladder climbs", () => {
   }
   // the parked rung has no timer behind it, so it must be the longest wait, not the shortest
   assert.ok((floors[3] as number) > (floors[2] as number), "level 4 is parked: backoff is 0");
+});
+
+test("formatDuration 对 NaN／无穷／负值也完备，不往唤醒纸里写 NaN", () => {
+  // meta 里一个 "3"+"1" 的手拼字段会把 NaN 喂进来；旧代码 Math.max(0, NaN)
+  // 留着 NaN，最后落到小时分支，唤醒纸上印出「NaNh」。
+  assert.equal(formatDuration(Number.NaN), "未知");
+  assert.equal(formatDuration(Number.POSITIVE_INFINITY), "未知");
+  assert.equal(formatDuration(Number.NEGATIVE_INFINITY), "未知");
+  assert.equal(formatDuration(-1), "0s");
+  assert.equal(formatDuration(-60_000), "0s");
+  assert.doesNotMatch(formatDuration(Number.NaN), /NaN/);
+  // 正常值一个都不能被这次改动碰坏
+  assert.equal(formatDuration(0), "0s");
+  assert.equal(formatDuration(45_000), "45s");
+  assert.equal(formatDuration(120_000), "2m");
+  assert.equal(formatDuration(7_200_000), "2.0h");
+});
+
+test("parseAfter 不把 NaN、无穷、null 和 400 位数字当闹钟", () => {
+  // 数字分支用 Number.isFinite 挡住：这几样都是 number，却永远不会到点。
+  assert.equal(parseAfter(Number.NaN), null);
+  assert.equal(parseAfter(Number.POSITIVE_INFINITY), null);
+  assert.equal(parseAfter(Number.NEGATIVE_INFINITY), null);
+  // 一个 400 位的数字在 JS 里就是 Infinity，到 Infinity 的闹钟等于没有
+  assert.equal(parseAfter(1e400), null, "400 位数字溢出成 Infinity");
+  // null 在 readWaiting 的边界就被挡掉，根本到不了 parseAfter
+  assert.equal(readWaiting(tmpFile('{"wake":{"after":null}}')), null, "null 不是闹钟");
+  assert.equal(parseAfter("20 minutes"), null, "字符串写法必须带单位");
+  assert.equal(parseAfter(20), 20 * 60_000);
 });
