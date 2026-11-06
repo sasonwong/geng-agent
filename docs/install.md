@@ -409,16 +409,8 @@ ls data/<inst>/inbox/low/     # 空 = 第 2 步还有开关没开（privacy 或 
 
 ### 5.2 搜索
 
-搜索的 key 不在容器里。宿主上跑一个只认搜索的端点：
-
-```bash
-node cmd/geng/index.ts secrets init alice     # 生成 mail token，写进该写的地方
-```
-
-它生成的是 `GENG_MAIL_TOKEN`（搜索那对 token 已经取消了：socket 就是授权）。已经有的不动，
-要换加 `--rotate`。
-
-端点需要的东西它生成不出来，手写：
+搜索的 key 不在容器里。宿主上跑一个只认搜索的端点，**它不需要 token**：socket 就是授权
+（`secrets init` 生成的是邮件那一个，见 §5.4）。端点需要的东西手写：
 
 ```bash
 # secrets/search.env   chmod 600
@@ -490,6 +482,8 @@ git -C /work/geng remote -v                        # 在容器里：git pull 不
 给它一个真地址：Cloudflare Email Routing 收信 → 一个 Email Worker 解 MIME → POST 回宿主。
 
 ```bash
+node cmd/geng/index.ts secrets init alice      # 生成 GENG_MAIL_TOKEN，写进 secrets/mail.env
+                                              # （已有的不动；要换加 --rotate）
 # secrets/mail.json   地址 → 实例；allow 留空 = 谁都进不来（这里默认是关的，
 #                     一个没配好的信箱不该是开放的信箱）
 { "geng-alice-bot@example.com": { "instance": "alice", "allow": ["you@example.org"] } }
