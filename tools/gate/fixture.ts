@@ -64,8 +64,12 @@ export function commit(dir: string, files: Record<string, string>): void {
 
 export const SCAN = fileURLToPath(new URL("scan.mjs", import.meta.url));
 
-/** Run the gate in `dir` the way CI does: same node, same env, no host git config. */
-export function scan(dir: string): { code: number; out: string } {
-  const r = spawnSync(process.execPath, [SCAN], { cwd: dir, encoding: "utf8", env: CLEAN_GIT });
+/**
+ * Run the gate in `dir` the way CI does: same node, same env, no host git config.
+ * `cwd` 单独给是为了能测「从子目录跑」——门读的是哪棵树的索引，不该由谁在哪个
+ * 目录里敲了 `npm run gate` 决定。
+ */
+export function scan(dir: string, cwd = dir): { code: number; out: string } {
+  const r = spawnSync(process.execPath, [SCAN], { cwd, encoding: "utf8", env: CLEAN_GIT });
   return { code: r.status ?? -1, out: `${r.stdout}${r.stderr}` };
 }

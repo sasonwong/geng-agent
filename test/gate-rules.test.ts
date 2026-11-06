@@ -1,5 +1,7 @@
 import { after, test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { cleanupRepos, commit, repo, scan } from "../tools/gate/fixture.ts";
 
 // 规则表（tools/gate/patterns.mjs）的测试。与 gate.test.ts 里那三条结构检查分开：
@@ -126,6 +128,59 @@ test("an unquoted NAME=value is a credential too", () => {
   assert.equal(r.code, 1);
   assert.match(r.out, /口令赋值: secrets\.env:1/);
   assert.equal(r.out.includes(secret), false);
+});
+
+test("a placeholder elsewhere on the line cannot excuse a real token", () => {
+  // 旧写法见到行里出现 `localhost` 就整行 return []。一行注释、一行 JSON、一个
+  // 「本地调这个地址时带上 token」的笔记，都天然是这种形状——等于一条现成的绕过。
+  const dir = repo();
+  commit(dir, { "notes.md": `调用 https://localhost/v1 时带上 ${TOKEN}\n` });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /GitHub 令牌: notes\.md:1/);
+  assert.equal(r.out.includes(TOKEN), false);
+});
+
+test("a placeholder value cannot excuse the real value next to it", () => {
+  // 同时钉住第二处：`exec()` 只看每条规则的第一处命中。第一行是文档示例，紧跟着
+  // 同一行的真值得靠走遍所有命中才看得见。
+  const dir = repo();
+  const secret = ["Zm9vYmFy", "YmF6cXV4MTIzNDU2Nzg5MA"].join("");
+  commit(dir, { "notes.md": `示例 api_key = "your-key-here"；真的 GENG_MAIL_TOKEN=${secret}\n` });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /(?:密钥赋值|口令赋值): notes\.md:1/);
+  assert.equal(r.out.includes(secret), false);
+});
+
+test("a fake id first on the line does not hide the real one after it", () => {
+  // 全同数字的九位数是 `suppressed()` 有意放过的占位 id；它后面那个真的不能一起
+  // 被放过。旧写法 `exec()` 命中第一处就 `continue`，整条规则这一行算干净。
+  const dir = repo();
+  const fake = ["111111", "111"].join("");
+  const real = ["583920", "174"].join("");
+  commit(dir, { "notes.md": `编号 ${fake}，编号 ${real}\n` });
+  const r = scan(dir);
+  assert.equal(r.code, 0);
+  assert.match(r.out, /gate: ok（1 个文件，1 个提交身份，1 条低级别警告）/);
+  assert.match(r.out, /警告 长数字 ID: notes\.md:1/);
+});
+
+test("a published checksum manifest is not a machine fingerprint", () => {
+  // deploy/checksums.txt 里全是上游发布包的校验和。豁免的是这一份清单，不是
+  // 「64 位 hex」这个形状——同一串写到笔记里仍要被拦。
+  const hash = ["a1", "b2"].join("").repeat(16);
+  const manifest = repo();
+  mkdirSync(join(manifest, "deploy"), { recursive: true });
+  commit(manifest, { "deploy/checksums.txt": `${hash}  pi-linux-x64.tar.gz\n` });
+  assert.equal(scan(manifest).code, 0);
+
+  const note = repo();
+  commit(note, { "notes.md": `快照 ${hash}\n` });
+  const r = scan(note);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /快照 ID: notes\.md:1/);
+  assert.equal(r.out.includes(hash), false);
 });
 
 test("a value that is an expression is not an unquoted credential", () => {
