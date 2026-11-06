@@ -1,5 +1,5 @@
-import { realpathSync, statSync } from "node:fs";
-import { join, sep } from "node:path";
+import { lstatSync, realpathSync } from "node:fs";
+import { resolve, sep } from "node:path";
 import type { TgMessage } from "./telegram.ts";
 
 /**
@@ -79,18 +79,24 @@ export function placeholderFor(atts: { kind: string; note?: string }[]): string 
 export function hostPathForWorkPath(workRoot: string, given: string): string | null {
   if (!given.startsWith("/work/")) return null;
   const rel = given.slice("/work/".length);
-  if (rel === "" || rel.includes("..")) return null;
-  // `join`, not `${workRoot}/${rel}`: the answer is a host path, and a host path assembled
-  // with a slash is wrong on a host that does not use them.
-  const abs = join(workRoot, rel);
+  if (rel === "" || rel.startsWith("/") || rel.includes("\0")) return null;
+  // Resolve against the host's own root, with the host's own separator: `${workRoot}/${rel}`
+  // produced a mixed path on Windows, and `rel.includes("..")` refused an ordinary name like
+  // `report..v2.pdf` while a raw `/work/a/../b` still resolved. Comparing the *resolved*
+  // path is what makes both cases right.
+  const base = resolve(workRoot);
+  const abs = resolve(base, rel);
+  if (abs !== base && !abs.startsWith(base + sep)) return null;
   try {
-    if (!statSync(abs).isFile()) return null;
     // A symlink in /work is one the container wrote, and the container's `/` is not the
     // host's: `ln -s /etc/passwd /work/x` plus `say(files: ["/work/x"])` sent the host's
-    // file, because `stat` follows the link. Only a real path that stays inside the
-    // workspace is a file this container actually produced.
+    // file, because `stat` follows the link. Only a real file whose real path stays inside
+    // the workspace is something this container produced.
+    const st = lstatSync(abs);
+    if (st.isSymbolicLink() || !st.isFile()) return null;
     const real = realpathSync(abs);
-    if (!real.startsWith(realpathSync(workRoot) + sep)) return null;
+    const realBase = realpathSync(base);
+    if (real !== realBase && !real.startsWith(realBase + sep)) return null;
     return abs;
   } catch {
     return null; // missing, unreadable, or a link that goes nowhere

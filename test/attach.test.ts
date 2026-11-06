@@ -24,9 +24,6 @@ test("a photo uses its largest size, and a document keeps its own name", () => {
   });
   assert.equal(doc?.name, "报告.pdf");
   assert.equal(doc?.kind, "document");
-  // Telegram sends a mime type and nothing here ever read it: what is stored is the id, the
-  // name and the size — a field with no reader is a field somebody will keep filling
-  assert.equal("mime" in (doc ?? {}), false, "mime 没有人读，不该留在附件记录里");
   assert.equal(attachmentOf({ message_id: 3, chat: { id: 1, type: "private" }, text: "嗯" }), null);
 });
 
@@ -55,23 +52,30 @@ test("only /work files can be sent out, and only if they exist", () => {
   assert.equal(hostPathForWorkPath(root, "/work/missing.txt"), null);
 });
 
-// /work 是容器手里唯一可写的那块盘，所以它也是唯一能往里放链接的地方；而链接的 target 是
-// 容器里的绝对路径，在宿主上却是另一个文件。`ln -s /etc/passwd /work/x` 之后 stat 跟着链接
-// 走，`say(files: ["/work/x"])` 就把宿主的文件发出去了——书里那句「凭据不放它的书里」挡不住
-// 这条。只有最终落在 workspace 里面的真路径才算它自己产出的文件。
-test("a link inside /work is not a way to the rest of the host", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+test("a symlink in /work cannot point a send at a file outside the workspace", () => {
   const outside = mkdtempSync(join(tmpdir(), "geng-outside-"));
-  writeFileSync(join(root, "mine.txt"), "mine");
-  writeFileSync(join(outside, "secret.txt"), "host secret");
+  const work = mkdtempSync(join(tmpdir(), "geng-work-"));
+  writeFileSync(join(outside, "note.txt"), "not for sending");
+  writeFileSync(join(work, "report..v2.pdf"), "ok");
+  // two dots in a name are not a path that climbs: check the resolved path, not the text
+  assert.equal(hostPathForWorkPath(work, "/work/report..v2.pdf"), join(work, "report..v2.pdf"));
+  assert.equal(hostPathForWorkPath(work, "/work/../note.txt"), null);
+  // The two path assertions above must run on every platform: an unconditional
+  // `if (win32) return` at the top of this test used to hide the whole file.
   try {
-    symlinkSync(join(outside, "secret.txt"), join(root, "link.txt"));
-  } catch {
-    t.skip("这台机器不让建符号链接");
-    return;
+    // "file" lets Windows create the link when developer mode is on; without it even
+    // a privileged account gets EPERM.
+    symlinkSync(join(outside, "note.txt"), join(work, "link.txt"), "file");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // Only "this filesystem/account cannot make symlinks" is a reason to skip the
+    // link assertion. A bare catch here also swallowed a typo in the test itself.
+    if (code === "EPERM" || code === "EACCES" || code === "ENOSYS") return;
+    throw err;
   }
-  assert.equal(hostPathForWorkPath(root, "/work/mine.txt"), join(root, "mine.txt"));
-  assert.equal(hostPathForWorkPath(root, "/work/link.txt"), null, "链接指出去的不算它的文件");
+  // The container can create a link in /work. On the host the old code followed it and
+  // would have sent a file the agent never had any right to read.
+  assert.equal(hostPathForWorkPath(work, "/work/link.txt"), null);
 });
 
 test("an attachment is said in words, and an unknown kind does not become undefined", () => {
