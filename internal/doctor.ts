@@ -666,6 +666,38 @@ export function toolsDigest(dir: string): string {
   }
 }
 
+/** The tool-mount verdict, as a pure function of the four numbers the probe brings back.
+ *  It lives out here because `probe()` needs docker: the decision table used to be inlined,
+ *  which is why a branch that shipped wrong (two empty digests read as "the same") had no
+ *  test to catch it. Every branch below names what was measured, not what was assumed. */
+export function toolMountVerdict(
+  onHost: number,
+  inContainer: number,
+  digestOnHost: string,
+  digestInContainer: string,
+): { mounted: boolean; detail: string } {
+  // Two empty strings are equal, and "both sides returned nothing" is not evidence that the
+  // two sides agree: `toolsDigest` gives "" when its own shell cannot run (a minimal PATH is
+  // enough for that), and the probe gives "" when the container never printed its line. Both
+  // empty has to read as "compared nothing", never as "the same".
+  const comparable = digestOnHost !== "" && digestInContainer !== "";
+  const mounted = onHost > 0 && comparable && digestInContainer === digestOnHost;
+  const detail = mounted
+    ? `${onHost} 个，内容与宿主一致（${digestOnHost.slice(0, 8)}）`
+    : inContainer < 0
+      ? "探针没数出来 —— 容器里读不到 /opt/geng/extensions"
+      : onHost === 0
+        ? `宿主 image/extensions 里没有 .ts，容器里 ${inContainer} 个 —— 检查无从比起`
+        : !comparable
+          ? `宿主 ${onHost} 个，容器里 ${inContainer} 个，但摘要没算出来（${digestOnHost === "" ? "宿主" : "容器"}那一侧是空的）—— 内容比不了`
+          : inContainer === 0
+            ? `容器里 /opt/geng/extensions 是空的，宿主 ${onHost} 个 —— 挂载缺了；pi 收到不存在的 -e 会 exit(1)，agent 起不来`
+            : inContainer === onHost
+              ? `${onHost} 个，个数相同但内容不同（${digestOnHost.slice(0, 8)} → ${digestInContainer.slice(0, 8)}）—— 旧挂载或半同步的 checkout`
+              : `宿主 image/extensions 里 ${onHost} 个（${digestOnHost.slice(0, 8)}），容器里 ${inContainer} 个（${digestInContainer.slice(0, 8)}）`;
+  return { mounted, detail };
+}
+
 export const PROBE = [
   "sh",
   "-c",
@@ -803,25 +835,7 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     ok: out.includes("POLICY_HIDDEN"),
     detail: out.includes("POLICY_VISIBLE") ? "容器里能看到 policy.json —— 它不该在自己的书里读规则" : "看不见",
   });
-  // Two empty strings are equal, and "both sides returned nothing" is not evidence that the
-  // two sides agree: `toolsDigest` gives "" when its own shell cannot run (a minimal PATH is
-  // enough for that), and the probe gives "" when the container never printed its line. Both
-  // empty has to read as "compared nothing", never as "the same".
-  const comparable = digestOnHost !== "" && digestInContainer !== "";
-  const mounted = onHost > 0 && comparable && digestInContainer === digestOnHost;
-  const detail = mounted
-    ? `${onHost} 个，内容与宿主一致（${digestOnHost.slice(0, 8)}）`
-    : inContainer < 0
-      ? "探针没数出来 —— 容器里读不到 /opt/geng/extensions"
-      : onHost === 0
-        ? `宿主 image/extensions 里没有 .ts，容器里 ${inContainer} 个 —— 检查无从比起`
-        : !comparable
-          ? `宿主 ${onHost} 个，容器里 ${inContainer} 个，但摘要没算出来（${digestOnHost === "" ? "宿主" : "容器"}那一侧是空的）—— 内容比不了`
-          : inContainer === 0
-            ? `容器里 /opt/geng/extensions 是空的，宿主 ${onHost} 个 —— 挂载缺了；pi 收到不存在的 -e 会 exit(1)，agent 起不来`
-            : inContainer === onHost
-              ? `${onHost} 个，个数相同但内容不同（${digestOnHost.slice(0, 8)} → ${digestInContainer.slice(0, 8)}）—— 旧挂载或半同步的 checkout`
-              : `宿主 image/extensions 里 ${onHost} 个（${digestOnHost.slice(0, 8)}），容器里 ${inContainer} 个（${digestInContainer.slice(0, 8)}）`;
+  const { mounted, detail } = toolMountVerdict(onHost, inContainer, digestOnHost, digestInContainer);
   checks.push({ name: "工具挂载", ok: mounted, detail });
   const meta = metaCode(out);
   checks.push({
