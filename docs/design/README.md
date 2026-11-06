@@ -418,7 +418,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
 | `inbox/*.json` | gateway | `{id, text, from, at, chat, attachments?[{kind,id?,name?,note?,bytes?}]}`（为什么投递只在 `daemon.log` 那一行；被引用的原文在 transcript 里） |
-| `outbox/*.json` | daemon（`say` 走 socket） | `{messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}}`；id 是文件名 |
+| `outbox/*.json` | daemon（`say` 走 socket） | `{messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}, file}`；`file` 就是文件名，发送端按它认这一条 |
 | `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
 | `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{wake,talkedTo[],touched}, knockHold?}` |
 | `meta/escalation.json` | daemon | `{level, streak, symptom, detail}` |
@@ -594,11 +594,12 @@ Telegram 给的消息号记成 `<chat>-<message_id>`，所以它想引用自己�
 
 ### 挂载表
 
-七条挂载，逐条理由在 `docs/install.md` §10；这里只记形状：`identity.md` 一个文件、
-`/work` 一个目录、`settings.json` 与 `models.json` 两个只读文件、`session/` 一个目录、
-扩展目录和 socket 目录各一个只读目录。配了搜索还有第八条：那个 socket 文件按它宿主的绝对
-路径只读挂进来（不存在就不挂——docker 会把缺失的路径建成目录）。书本身不挂：`/state`、`/inbox`、
-`/people`、`/mail`、`/outbox`、`/files` 都不在容器里，读写全是 id 加 socket。
+六条挂载无条件，另外两条看 socket 在不在（逐条理由在 `docs/install.md` §10）：`identity.md`
+一个文件、`/work` 一个目录、`settings.json` 与 `models.json` 两个只读文件、`session/` 一个目录、
+扩展目录一个只读目录；book socket 的 `run/` 目录和搜索 socket 文件各一条，都按它们在宿主上的
+绝对路径只读挂进来（不在就不挂——docker 会把缺失的路径建成目录）。正常一轮两个 socket 都在，
+所以纸面上通常是八条。书本身不挂：`/state`、`/inbox`、`/people`、`/mail`、`/outbox`、`/files`
+都不在容器里，读写全是 id 加 socket。
 
 **根文件系统是只读的**，容器能写的是四处：`identity.md`、`/work`、`~/.pi/agent` 和 `/tmp`。
 前两个是它的，后两个是 tmpfs——`~/.pi/agent` 每次醒来由镜像里的 `/opt/pi-npm` 重新填满（那是它
