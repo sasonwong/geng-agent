@@ -48,6 +48,38 @@ test("init writes the four values that are about this instance, not the project"
   assert.notEqual(modelKeyFile(p), join(r, "secrets", "model.env"));
 });
 
+test("two instances actually get two different keys and upstreams", () => {
+  // 旧断言只说「路径不是那个共享的 model.env」。它证明不了隔离：文件可能都叫那个
+  // 名字、也可能第二份把第一份覆盖了。真要验的是读回来的是谁的值。
+  const aliceKey = ["key-for-", "alice"].join("");
+  const bobKey = ["key-for-", "bob"].join("");
+  const r = root();
+  initInstance(r, "alice", { modelKey: aliceKey, upstream: "https://alice.invalid/v1" });
+  initInstance(r, "bob", { modelKey: bobKey, upstream: "https://bob.invalid/v1" });
+  const a = makePaths(r, "alice");
+  const b = makePaths(r, "bob");
+
+  assert.notEqual(modelKeyFile(a), modelKeyFile(b));
+  assert.deepEqual(readModelKey(a), { name: "OPENCODE_API_KEY", key: aliceKey });
+  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: bobKey });
+  assert.equal(modelUpstream(a), "https://alice.invalid/v1");
+  assert.equal(modelUpstream(b), "https://bob.invalid/v1");
+
+  // CLI 让操作者「export 后重跑 init」来改一个填错的 key / upstream。旧实现只在
+  // model.env 不存在时写，重跑会报成功却什么都没改——reader 永远读着那把旧 key。
+  const freshKey = ["fresh-key-for-", "bob"].join("");
+  initInstance(r, "bob", { modelKey: freshKey, upstream: "https://other.invalid/v1" });
+  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: freshKey }, "重跑要真的换上新 key");
+  assert.equal(modelUpstream(b), "https://other.invalid/v1", "重跑要真的换上新 upstream");
+  // 但 bob 的重跑不能顺手改掉 alice
+  assert.deepEqual(readModelKey(a), { name: "OPENCODE_API_KEY", key: aliceKey });
+  assert.equal(modelUpstream(a), "https://alice.invalid/v1");
+  // 不带新值重跑则保持不动（CLI 没 export key 时就是这条路径）
+  initInstance(r, "bob");
+  assert.deepEqual(readModelKey(b), { name: "OPENCODE_API_KEY", key: freshKey });
+  assert.equal(modelUpstream(b), "https://other.invalid/v1");
+});
+
 test("without flags the template's values survive, and the key file is still created", () => {
   const r = root();
   initInstance(r, "bob");
@@ -57,23 +89,4 @@ test("without flags the template's values survive, and the key file is still cre
   assert.equal(policy.cycle.timeoutSec, 1800);
   assert.equal(readModelKey(p), null, "空模板不该算配好了");
   assert.equal(modelUpstream(p), "https://opencode.ai/inference/go/v1");
-});
-
-test("a rerun with a key or an upstream reaches the file that already exists", () => {
-  // the CLI prints "把 key 写进这里，或 export 后重跑 init"; the rerun used to be a no-op
-  // over an existing file, reporting success while the wrong key stayed in place
-  const r = root();
-  initInstance(r, "carol", { modelKey: "first" });
-  const p = makePaths(r, "carol");
-  assert.equal(readModelKey(p)?.key, "first");
-
-  initInstance(r, "carol", { modelKey: "second", upstream: "https://other.invalid/v1" });
-  assert.equal(readModelKey(p)?.key, "second", "重跑要换掉旧 key");
-  assert.equal(readModelKey(p)?.name, "OPENCODE_API_KEY", "沿用文件里已有的名字，不再长出第二个");
-  assert.equal(modelUpstream(p), "https://other.invalid/v1", "重跑要换掉旧地址");
-
-  // a rerun without a key does not blank what is there
-  initInstance(r, "carol", {});
-  assert.equal(readModelKey(p)?.key, "second");
-  assert.equal(modelUpstream(p), "https://other.invalid/v1");
 });

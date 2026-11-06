@@ -95,6 +95,49 @@ test("the search socket is mounted only when it exists, and at the same path", (
   assert.match(argv(), new RegExp(`-e GENG_SEARCH_SOCKET=${sock}`), "路径要和挂载点一致");
 });
 
+test("only the per-instance env file crosses into the container", () => {
+  // The whole reason the model key, the search key, the GitHub App private key and the
+  // bot tokens live in *other* files is that `docker run --env-file` hands its contents
+  // to `env` inside the container. Nothing here checked that the split actually held:
+  // a stray -e or -v would have been invisible to every existing mount assertion.
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  mkdirSync(join(root, "secrets"), { recursive: true });
+  // split so the repo's secret scanner does not read a fixture as a credential
+  const line = (name: string): string => [name, "not-a-real-value"].join("=");
+  writeFileSync(paths.secrets, `${line("GENG_GH_APP_ID")}\n${line("GENG_GH_INSTALLATION_ID")}\n`);
+  for (const [name, key] of [
+    ["alice.model.env", "OPENCODE_API_KEY"],
+    ["search.env", "DEEPSEEK_API_KEY"],
+    ["rustic.env", "RUSTIC_PASSWORD"],
+    ["mail.env", "GENG_MAIL_TOKEN"],
+  ] as const) {
+    writeFileSync(join(root, "secrets", name), `${line(key)}\n`);
+  }
+  writeFileSync(join(root, "secrets", "bots.json"), "{}");
+  writeFileSync(join(root, "secrets", "gh-app.pem"), "not-a-key");
+  mkdirSync(join(root, "data", "alice"), { recursive: true });
+  writeFileSync(paths.policy, "{}");
+
+  const { args } = buildCommand(paths, defaultPolicy(), "geng-alice-0001", "P");
+  const joined = args.join(" ");
+  const envFiles = args.filter((_, i) => i > 0 && args[i - 1] === "--env-file");
+  assert.deepEqual(envFiles, [paths.secrets], "只有 alice.env 该作为 --env-file 进容器");
+  for (const forbidden of [
+    "alice.model.env", "search.env", "rustic.env", "bots.json", "gh-app.pem",
+    "mail.env", "policy.json",
+  ]) {
+    assert.equal(joined.includes(forbidden), false, `${forbidden} 不该出现在 docker run 里`);
+  }
+  for (const keyVar of [
+    "OPENCODE_API_KEY", "DEEPSEEK_API_KEY", "GENG_MAIL_TOKEN", "RUSTIC_PASSWORD",
+  ]) {
+    assert.equal(args.some((a) => a.includes(keyVar)), false, `${keyVar} 不能进容器环境`);
+  }
+  const network = args.indexOf("--network");
+  assert.ok(network !== -1 && args[network + 1] === "none", "容器没有直连网络");
+});
+
 test("the book socket is mounted read-only, and only when something is listening", async () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
