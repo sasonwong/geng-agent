@@ -88,6 +88,11 @@ export function buildCommand(
     "--read-only",
     "--tmpfs",
     "/tmp:rw,nosuid,size=64m",
+    // The home itself, not only the pi dir inside it: `HOME` is where tools drop their
+    // caches, and on the read-only rootfs `mkdir ~/.cache` fails. That surfaced as
+    // `gh run view --log` dying with EROFS, which reads like a network error.
+    "--tmpfs",
+    "/home/agent:rw,nosuid,size=32m",
     "--tmpfs",
     "/home/agent/.pi/agent:rw,size=32m",
     // the proxy lives on loopback, bridged to the book socket by `geng-pi`
