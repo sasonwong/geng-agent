@@ -676,7 +676,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt  bu
 | `session/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
 | `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 |
 | `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |
-| `secrets/search.env` 里的 socket | 同一个绝对路径 | 只读：搜索端点。文件不在就不挂——docker 会把缺失的宿主路径建成目录 |
+| `secrets/search.env` 里的 socket | `/run/search.sock` | 只读：搜索端点。文件不在就不挂——docker 会把缺失的宿主路径建成目录 |
 
 书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`discard`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`/`say`，

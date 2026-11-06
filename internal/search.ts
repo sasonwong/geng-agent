@@ -29,6 +29,16 @@ export interface SearchEnv {
  * `systemctl --user`, so a hard-coded `/run/geng` named a directory that did not exist and
  * that a non-root process could not create.
  */
+/**
+ * Where the container sees this socket.
+ *
+ * Not `/run/geng/search.sock`, which is where it belongs by name: docker cannot create a
+ * mountpoint inside a read-only bind, and `/run/geng` is one (`paths.run`, mounted `:ro` so
+ * the agent cannot unlink the book socket). Mounting the file first does not work either —
+ * the directory mount that comes after it shadows the socket. So it sits one level up.
+ */
+export const SEARCH_SOCKET_IN_CONTAINER = "/run/search.sock";
+
 export function defaultSearchSocket(): string {
   const runtime = process.env.XDG_RUNTIME_DIR ?? "";
   return join(runtime === "" ? "/run" : runtime, "geng", "search.sock");

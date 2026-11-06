@@ -3,7 +3,7 @@ import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import type { Policy } from "./policy.ts";
-import { readSearchEnv } from "./search.ts";
+import { readSearchEnv, SEARCH_SOCKET_IN_CONTAINER } from "./search.ts";
 import { bookSocketExists, BOOK_SOCKET_IN_CONTAINER } from "./book.ts";
 
 export interface Command {
@@ -130,28 +130,32 @@ export function buildCommand(
     "-w",
     "/work",
   ];
-  // The search endpoint is a unix socket, not a port on the bridge: nothing on the
-  // network can reach it, which is why nothing else has to be opened for it.
-  // Mounted only when the file is there — docker materialises a missing host path as a
-  // directory, and a directory at that path fails at connect time with a shape nobody
-  // recognises.
-  const search = readSearchEnv(paths.root);
-  if (search !== null && existsSync(search.socket)) {
-    args.push(
-      "-v",
-      `${search.socket}:${search.socket}:ro`,
-      "-e",
-      `GENG_SEARCH_SOCKET=${search.socket}`,
-    );
-  }
-  // The book endpoint, same shape as search: a unix socket, no port. Read-only on the
-  // mount so the agent cannot unlink the name and cut itself off mid-round.
+  // The book endpoint: a unix socket, no port. Read-only on the mount so the agent
+  // cannot unlink the name and cut itself off mid-round.
   if (bookSocketExists(paths)) {
     args.push(
       "-v",
       `${paths.run}:/run/geng:ro`,
       "-e",
       `GENG_BOOK_SOCK=${BOOK_SOCKET_IN_CONTAINER}`,
+    );
+  }
+  // The search endpoint is a socket too: nothing on the network can reach it, which is
+  // why nothing else has to be opened for it. Mounted only when the file is there —
+  // docker materialises a missing host path as a directory, and a directory at that path
+  // fails at connect time with a shape nobody recognises.
+  //
+  // The host path is a runtime path with a uid in it (`/run/user/1002/geng/search.sock`);
+  // handing the container that path is a naming leak even though the inode is the same.
+  // The destination is `/run/search.sock` and not `/run/geng/search.sock` because docker
+  // cannot make a mountpoint inside a read-only bind — see SEARCH_SOCKET_IN_CONTAINER.
+  const search = readSearchEnv(paths.root);
+  if (search !== null && existsSync(search.socket)) {
+    args.push(
+      "-v",
+      `${search.socket}:${SEARCH_SOCKET_IN_CONTAINER}:ro`,
+      "-e",
+      `GENG_SEARCH_SOCKET=${SEARCH_SOCKET_IN_CONTAINER}`,
     );
   }
   // There is no direct network at all. Everything leaves through the proxy on the book

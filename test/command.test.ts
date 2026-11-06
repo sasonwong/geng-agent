@@ -91,8 +91,35 @@ test("the search socket is mounted only when it exists, and at the same path", (
 
   mkdirSync(join(root, "run"), { recursive: true });
   writeFileSync(sock, "");
-  assert.match(argv(), new RegExp(`-v ${sock}:${sock}:ro`), "socket 在的时候要挂进来");
-  assert.match(argv(), new RegExp(`-e GENG_SEARCH_SOCKET=${sock}`), "路径要和挂载点一致");
+  // The host path carries a uid (`/run/user/1002/…`); a container that names it is a
+  // naming leak even though the inode is the same. Asserting "mount point == env" let
+  // both sides be wrong together, which is exactly what it was doing.
+  assert.match(argv(), /-v \S+:\/run\/search\.sock:ro/, "socket 在的时候要挂进来");
+  assert.match(argv(), /-e GENG_SEARCH_SOCKET=\/run\/search\.sock/, "容器里只认这个名字");
+  // the bind source is the host path — that is how a mount works. What must not appear is
+  // a *container* path equal to it: the mount destination, or an -e value.
+  const args = buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…").args;
+  assert.equal(args.some((a) => a === `GENG_SEARCH_SOCKET=${sock}`), false, "env 给的是容器路径");
+  assert.equal(args.some((a) => a.endsWith(`:${sock}`)), false, "挂载点是容器路径，不是宿主路径");
+});
+
+test("the search socket is not mounted inside the read-only directory mount", () => {
+  // Docker cannot create a mountpoint inside a read-only bind, and `/run/geng` is one
+  // (mounted `:ro` so the agent cannot unlink the book socket). Mounting the file before
+  // the directory is not a way out either: the later directory mount shadows it. Both
+  // failures are at container start, where the daemon only sees "docker run exited 125".
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  mkdirSync(join(root, "secrets"), { recursive: true });
+  mkdirSync(paths.run, { recursive: true });
+  const sock = join(paths.run, "search.sock");
+  writeFileSync(sock, "");
+  writeFileSync(join(root, "secrets", "search.env"), `DEEPSEEK_API_KEY=sk-x\nGENG_SEARCH_SOCKET=${sock}\n`);
+  const args = buildCommand(paths, { ...defaultPolicy() }, "geng-alice", "你是…").args;
+  const dest = args.find((a) => a.includes(":") && a.startsWith(sock + ":"));
+  assert.ok(dest !== undefined, "socket 没挂进来");
+  const from = dest.slice(sock.length + 1).replace(/:ro$/, "");
+  assert.equal(from.startsWith("/run/geng/"), false, "挂在只读目录里，容器起不来");
 });
 
 test("only the per-instance env file crosses into the container", () => {
