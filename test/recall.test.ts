@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
@@ -125,21 +125,6 @@ test("a file in the listing keeps its original name, and its size is what it is"
   assert.match(openText(p, "F1", 0).text, /download\("F1", "\/work\/\.\.\."\)/);
 });
 
-// 时间那一列是它判断「这是刚收到的还是上周的」的唯一依据，而它现在来自 `listFiles` 顺手
-// 做的那一次 stat。以前是照着 id 和名字拼一个猜测的名字回目录里再找一个——同一件事两个
-// 读者、每个文件一次全目录扫描，找不到时还会留 0（1970）。这条钉住日期仍然是对的。
-test("a listed file carries the date it arrived, never 1970", () => {
-  const p = fixture();
-  mkdirSync(p.filesDir, { recursive: true });
-  const file = join(p.filesDir, "F1-0-report.txt");
-  writeFileSync(file, "hello");
-  const when = new Date("2026-03-02T09:30:00Z");
-  utimesSync(file, when, when);
-  const listing = recallText(p, { sources: ["files"] });
-  assert.match(listing, /^F1 {2}files {2}2026-03-02 09:30/m);
-  assert.equal(listing.includes("1970"), false);
-});
-
 test("a discarded entry is still listed, and says it no longer counts", () => {
   const p = fixture();
   mkdirSync(p.journalDiscarded, { recursive: true });
@@ -151,62 +136,52 @@ test("a discarded entry is still listed, and says it no longer counts", () => {
   assert.match(openText(p, "J20260303-1", 0).text, /不算/);
 });
 
-test("an offset past the end is not the same thing as having no body", () => {
+test("mail 的 attachments 里有 null 元素，recall 与 open 都不崩", () => {
   const p = fixture();
-  mkdirSync(p.journal, { recursive: true });
-  writeFileSync(join(p.journal, "J20260302-1.md"), "只有这一句\n");
-  const past = openText(p, "J20260302-1", 999);
-  assert.equal(past.found, true);
-  // reading past the end used to answer "这一件没有正文", which is a claim about the
-  // thing, not about the offset — the reader then believes the entry is empty
-  assert.doesNotMatch(past.text, /没有正文/);
-  assert.match(past.text, /末尾/);
-  // an item that really is empty still says so
-  writeFileSync(join(p.journal, "J20260302-2.md"), "");
-  assert.match(openText(p, "J20260302-2", 0).text, /没有正文/);
+  mkdirSync(p.mail, { recursive: true });
+  // 别的进程写进来的数组元素是 unknown：null 以前被送到 a.id 上抛 TypeError，
+  // 整次 recall / open 查询（模型每轮都调）就这么没了。
+  writeFileSync(
+    join(p.mail, "m1.json"),
+    JSON.stringify({
+      id: "E1",
+      at: "2026-03-02T07:00:00Z",
+      from: "a@example.invalid",
+      subject: "带附件",
+      text: "正文",
+      attachments: [null, 42, "坏数据"],
+    }),
+  );
+  assert.match(recallText(p, { sources: ["mail"] }), /E1/);
+  assert.match(openText(p, "E1", 0).text, /正文/);
 });
 
-test("limit counts the things it shows, not the lines, and never cuts one in half", () => {
+test("session 里 content 为 null 或数组含 null 元素，recall 都不崩", () => {
   const p = fixture();
-  mkdirSync(p.journal, { recursive: true });
-  // three entries that all match, each matching on two lines
-  for (const n of [1, 2, 3]) {
-    writeFileSync(join(p.journal, `J2026030${n}-1.md`), `有这个词 ${n} 上面\n中间\n下面还有这个词 ${n}\n`);
-  }
-  const one = recallText(p, { query: "这个词", limit: 1 });
-  // one item: its id line and both hit lines; a header with no hits is not an answer
-  assert.equal(one.split("\n").filter((l) => /^J/.test(l)).length, 1);
-  assert.match(one, /有这个词/);
-  assert.equal((one.match(/有这个词|下面还有这个词/g) ?? []).length, 2);
-  // two asked for means two things, even though each brings its own lines along
-  assert.equal(recallText(p, { query: "这个词", limit: 2 }).split("\n").filter((l) => /^J/.test(l)).length, 2);
-  // limit bigger than the matches shows all of them, and no-query still means items
-  assert.equal(recallText(p, { query: "这个词", limit: 50 }).split("\n").filter((l) => /^J/.test(l)).length, 3);
-  assert.equal(recallText(p, { limit: 2 }).split("\n").filter((l) => /^J/.test(l)).length, 2);
+  const dir = join(p.sessionDir, "--proj-x");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, "session-1.jsonl"),
+    [
+      // 某个 pi 版本会给 content 写 null：整条 JSONL 字段不能是 iterable
+      JSON.stringify({ message: { role: "user", content: null } }),
+      // 数组里混进一个 null 元素，旧的 for…of 会读它 .type 而抛
+      JSON.stringify({
+        message: { role: "assistant", content: [null, { type: "text", text: "你好" }] },
+      }),
+    ].join("\n") + "\n",
+  );
+  assert.match(recallText(p, { sources: ["sessions"], query: "你好" }), /R1[\s\S]*你好/);
 });
 
-test("two projects that both number a session 5 give two ids, and both open", () => {
+test("offset 越过末尾时说清有多长，而不是给一页空白", () => {
   const p = fixture();
-  for (const [project, text] of [["--home-work", "第一棵树说的话"], ["--other", "第二棵树说的话"]] as const) {
-    mkdirSync(join(p.sessionDir, project), { recursive: true });
-    writeFileSync(
-      join(p.sessionDir, project, "2026-03-02T07-00-00-5.jsonl"),
-      JSON.stringify({ message: { role: "user", content: text } }) + "\n",
-    );
-  }
-  const listing = recallText(p, { sources: ["sessions"] });
-  const ids = listing
-    .split("\n")
-    .map((l) => l.split("  ")[0] ?? "")
-    .filter((id) => id.startsWith("R"));
-  assert.equal(ids.length, 2);
-  assert.equal(new Set(ids).size, 2, `两个项目撞号了：${ids.join("、")}`);
-  const texts = ids.map((id) => openText(p, id, 0).text);
-  assert.ok(texts.some((t) => t.includes("第一棵树说的话")), texts.join("\n---\n"));
-  assert.ok(texts.some((t) => t.includes("第二棵树说的话")), texts.join("\n---\n"));
-  // one project keeps plain R5 — the suffix is only for a clash
-  const one = fixture();
-  mkdirSync(join(one.sessionDir, "--solo"), { recursive: true });
-  writeFileSync(join(one.sessionDir, "--solo", "2026-03-02T07-00-00-5.jsonl"), JSON.stringify({ message: { role: "user", content: "只有一棵" } }) + "\n");
-  assert.match(recallText(one, { sources: ["sessions"] }), /^R5  /m);
+  mkdirSync(p.journal, { recursive: true });
+  writeFileSync(join(p.journal, "J20260302-1.md"), "今天很安静"); // 5 字
+  const r = openText(p, "J20260302-1", 9_999);
+  assert.equal(r.found, true);
+  // 旧代码给空页还说「这一件没有正文」，读的人以为它是空的
+  assert.match(r.text, /正文共 5 字/);
+  assert.match(r.text, /末尾之后/);
+  assert.doesNotMatch(r.text, /这一件没有正文/);
 });

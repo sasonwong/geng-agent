@@ -116,17 +116,28 @@ function mailItems(p: Paths): Item[] {
         header: `${from} · ${subject}`,
         body: [
           typeof raw.text === "string" ? raw.text : "",
-          ...(Array.isArray(raw.attachments)
-            ? (raw.attachments as { id?: unknown; name?: unknown; note?: unknown }[]).map((a) =>
-                typeof a.id === "string" ? `附件 ${a.id}：${typeof a.name === "string" ? a.name : "文件"}` : `附件：${String(a.note ?? "没取")}`,
-              )
-            : []),
+          ...objectEntries(raw.attachments).map((a) =>
+            typeof a.id === "string" ? `附件 ${a.id}：${typeof a.name === "string" ? a.name : "文件"}` : `附件：${typeof a.note === "string" ? a.note : "没取"}`,
+          ),
         ]
           .filter((l) => l !== "")
           .join("\n"),
       },
     ];
   });
+}
+
+/**
+ * Arrays in the book are JSON written by other processes (mail ingest, the gateway, pi
+ * itself), so their elements are `unknown`. A null element used to reach `a.id` / `b.type`
+ * and throw, taking the whole recall or open query down — and those are tool calls the
+ * model makes every round.
+ */
+function objectEntries(raw: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (x): x is Record<string, unknown> => x !== null && typeof x === "object" && !Array.isArray(x),
+  );
 }
 
 interface SaidLine {
@@ -221,7 +232,7 @@ function render(lines: string[]): string {
     const content = rec.message?.content;
     if (typeof content === "string") parts.push(content);
     else if (Array.isArray(content)) {
-      for (const b of content as Record<string, unknown>[]) {
+      for (const b of objectEntries(content)) {
         if (b.type === "text" && typeof b.text === "string") parts.push(b.text);
         else if (b.type === "toolCall" && typeof b.name === "string") parts.push(`[${b.name}]`);
       }
