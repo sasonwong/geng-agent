@@ -217,14 +217,21 @@ function logLine(
 export async function runDaemon(o: DaemonOptions): Promise<void> {
   const paths = makePaths(o.root, o.instance);
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
-  ensureDirs(requiredDirs(paths));
-  ensurePolicyLocation(paths);
-  const conflict = schemaConflict(onDiskSchema(paths));
-  if (conflict !== null) throw new ExpectedError(conflict);
-  // A directory at this path breaks every append with EISDIR, and the symptom is a log
-  // that stops rather than an error. Nothing mounts this file; `init` creates it too, and
-  // this is the daemon's own first line, which has to land somewhere.
-  if (!existsSync(paths.daemonLog)) writeText(paths.daemonLog, "");
+  const dry = o.dry === true;
+  // A preview is a read. `geng-dev packet` builds the same page a waking would see, and a
+  // page that creates, moves or deletes the things it describes is not a preview. Every
+  // mutation below is gated on !dry — including the ones that only prepare a directory,
+  // and the orphan sweep, which kills containers.
+  if (!dry) {
+    ensureDirs(requiredDirs(paths));
+    ensurePolicyLocation(paths);
+    const conflict = schemaConflict(onDiskSchema(paths));
+    if (conflict !== null) throw new ExpectedError(conflict);
+    // A directory at this path breaks every append with EISDIR, and the symptom is a log
+    // that stops rather than an error. Nothing mounts this file; `init` creates it too,
+    // and this is the daemon's own first line, which has to land somewhere.
+    if (!existsSync(paths.daemonLog)) writeText(paths.daemonLog, "");
+  }
   // Spent at the top of every cycle, not only at startup: the page promises the agent
   // "before the next waking", and reading it only at startup made that a promise for the
   // next restart.
@@ -318,7 +325,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
   }
 
-  const { ops } = ensureGatewayDirs(paths.root);
+  // writeOps creates its own outbox when it needs one; a preview must not create it.
+  const ops = dry ? join(paths.root, "data", "_ops") : ensureGatewayDirs(paths.root).ops;
   // A preview computes the same note without touching the disk: `dry` must not eat what
   // it is showing, but it must still say what a real start would say.
   const leftover = leftoverCut(paths, !o.dry);
@@ -355,13 +363,14 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // must not have. Its own requests go first, then the cap. `dry` counts what a start
     // would take without taking it — the packet says the same thing either way.
     const forgetList = parseForget(readJson<unknown>(paths.filesForget, null));
-    const forgot = forgetFiles(paths.filesDir, forgetList, o.dry === true);
+    const gone = forgetNames(paths.filesDir, forgetList);
+    const forgot = forgetFiles(paths.filesDir, forgetList, dry);
     if (!o.dry) rmSync(paths.filesForget, { force: true });
     // A message nothing can read is moved aside instead of being skipped forever. Before
     // this, one caption-less document knocked 58 times in an hour and handed over nothing.
     const junk = [
-      ...quarantine(paths.inbox, paths.inboxSeen, o.dry === true),
-      ...quarantine(paths.inboxLow, paths.inboxSeen, o.dry === true),
+      ...quarantine(paths.inbox, paths.inboxSeen, dry),
+      ...quarantine(paths.inboxLow, paths.inboxSeen, dry),
     ];
     if (junk.length > 0) {
       log(
@@ -376,8 +385,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       paths.filesDir,
       policy.files,
       Date.now(),
-      o.dry !== true,
-      new Set(forgetNames(paths.filesDir, forgetList)),
+      !dry,
+      dry ? new Set(gone) : new Set<string>(),
     );
     const filesUsed = filesUsage(paths.filesDir);
 
@@ -465,7 +474,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       filesForgotten: forgot,
       filesPruned: pruned.removed,
       filesOldestPrunedMs: pruned.oldestRemovedMs,
-      filesUsedBytes: o.dry ? pruned.bytesLeft : filesUsed.bytes,
+      filesUsedBytes: dry ? pruned.bytesLeft : filesUsed.bytes,
       filesCapMb: policy.files.maxMb,
       inbox,
       lowInbox,
@@ -504,9 +513,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       identity: readText(paths.identity),
     });
 
-    if (o.dry) {
-      process.stdout.write(`--- 系统提示词（常量 + identity）---\n${systemPrompt}\n`);
-      process.stdout.write(`--- 唤醒纸（只有变量）---\n${packet}\n`);
+    if (dry) {
+      // Through `log`, not a direct stdout write: a caller that passes its own logger (a
+      // test, or a command that formats the preview) still sees the whole page.
+      log(`--- 系统提示词（常量 + identity）---\n${systemPrompt}`);
+      log(`--- 唤醒纸（只有变量）---\n${packet}`);
       return;
     }
 
