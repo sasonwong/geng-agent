@@ -126,13 +126,11 @@ SHA-256。`packages` 那一层装扩展包用的 npm 包钉在同一个 `PI_VERS
 扩展在 `image/extensions/`，构建时**不进镜像**：`book.ts`（`journal`/`discard`/`loop_open`/`loop_close`/`wait`）、
 `recall.ts`（`recall`/`open`）、`files.ts`（`download`）、`say-mute.ts`（`say`/`listen`/`forget`/`mute`/`propose`）、
 `websearch.ts`（`web_search`/`web_fetch`）。运行时只读挂载到 `/opt/geng/extensions`，容器里加载的是
-这个目录**顶层**的每一个 `.ts`（`lib/` 里的共用代码不是扩展，也不会被加载）。所以改一个工具、或者新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，既不用重建镜像，纸上的
-「环境变了」也不会响（那一行只在镜像换了、或搜索从有到无/从无到有的时候才响）。
+这个目录**顶层**的每一个 `.ts`（`lib/` 里的共用代码不是扩展，也不会被加载）。所以改一个工具、或者
+新加一个工具，都只要存盘：下一轮醒来读到的就是新文件，不用重建镜像。
 
-容器里改不了、删不了这些文件——工具必须不可变，否则它就能改自己和人对谈的方式。
-**实例也不能写自己的扩展**：扩展跑在 pi 进程里，而任何一个扩展加载失败都会让 pi 直接退出——
-它写错一个文件，下一轮还没醒就死，死前说不出话。它要新工具就写在唤醒纸上，由操作者写进
-`image/extensions/`。
+容器里改不了、删不了这些文件。为什么必须只读、以及实例想加工具时该走哪条路，见 `AGENTS.md`
+的「容器里的扩展」。
 
 ---
 
@@ -167,12 +165,8 @@ OPENCODE_API_KEY=sk-... node cmd/geng/index.ts init alice --model …
 
 ### 3.1 policy 里剩下的东西
 
-**没有 `runner` 这个字段了。** 每一轮醒来都是一个容器——只有这一条路。以前那个 `local`
-模式跑的是宿主上的 pi：没有只读根、没有出口代理、书就在盘上能直接 `cat`、你的密钥就在
-`~/.pi/agent` 里，而且它连扩展都不加载（唤醒纸让它调用的工具根本不存在），日志里照样是 `sym=ok`。
-一个坏掉却不说的模式，不如没有。
-
-第一次跑之前建镜像就行（见第 2 节）。网络不用配：容器没有网络，出口只有 book socket 上的代理。
+**只有容器这一条路。** 每一轮醒来都是一个容器：policy 里没有 `runner` 字段，也没有本机直跑的
+分支。第一次跑之前建镜像就行（见第 2 节）。网络不用配：容器没有网络，出口只有 book socket 上的代理。
 看得见的地方没有"忘了配"这一档——镜像不在就是每轮 `start-failed`，`daemon.log` 当场说话。
 
 同一个文件里值得先看一眼的还有 `cycle.timeoutSec`（默认 1800 = 30 分钟）、`timezone`、
@@ -235,9 +229,7 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 1. **同一个值要在两个地方逐字相同**：`mail.env` 里的 `GENG_MAIL_TOKEN` = Cloudflare Worker 里的同名 secret
 2. **只在 `bots.json` 里出现一次、但错一个字符就是 401**：每个 bot 的 token
 
-抄错的后果都是**同一种**：那边看起来正常，这边安静地什么都不发生。所以拿不到可靠信号时，
-判据永远是**拿它去打一次真端点看状态码**（401 = 能连上但没认出来，200 = 对了），
-而不是打印它、数长度、看前缀。
+抄错的后果都是**同一种**：那边看起来正常，这边安静地什么都不发生。
 
 ### 3.3 pi 的配置（模型、思考档）
 
@@ -247,7 +239,7 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 {
   "defaultProvider": "opencode-go",
   "defaultModel": "deepseek-v4.1-flash",
-  "defaultThinkingLevel": "high",
+  "defaultThinkingLevel": "low",
   "packages": ["npm:@dietrichgebert/ponytail", "npm:@ff-labs/pi-fff"]
 }
 ```
@@ -600,9 +592,9 @@ deploy/update.sh      # git pull --ff-only + 重装 unit + 重建镜像 + 重启
 | 改了什么 | 要做什么 | 它会知道吗 |
 |---|---|---|
 | `internal/`、`cmd/` | `git pull` + 重启 unit | 直接经历到（不同的纸、不同的行为） |
-| `image/extensions/` | 存盘（`build.sh` 对它没有作用） | 下一轮醒来工具就是新的 |
+| `image/extensions/` | 存盘（`build.sh` 对它没有作用） | 下一轮醒来工具就是新的；「环境变了」不会响 |
 | `Dockerfile` | 重建镜像 | 下一张纸开头多一行 `环境变了。` |
-| `<inst>.env` 的 `GENG_SEARCH_URL`（从有到无，或反过来） | 改完重启 unit | 下一张纸开头多一行 `环境变了。` |
+| 搜索端点从有到无（或反过来）：`secrets/search.env` 没了，或那个 socket 不在 | 存盘 / 起服务 | 下一张纸开头多一行 `环境变了。` |
 | `deploy/policy.json`（模板） | **没有用**，老实例的 policy 是生成时的副本；要手改 `data/<inst>/policy.json` | — |
 
 最后一行是最容易漏的：模板只是 `init` 的输入。所以升级之后值得跑一次
@@ -628,7 +620,7 @@ git fetch origin && git reset --hard origin/main
 | 没有 `daemon.log` 这一行，但状态里有一轮 | `ls -l data/<inst>/daemon.log` | 它是**目录**：每次 append 都 EISDIR，所以症状是"日志不涨"而不是报错。删掉再跑一次 `init` |
 | unit 127，每十秒一次 | unit 里的 `@NODE@` | node 绝对路径错（nvm 不在 systemd 的 PATH 里） |
 | 容器压根没起来，日志里也没有一轮 | 手工跑一遍完整的 `docker run` | argv 里少了一个 `-e`（比如 `TZ=…` 没带 `-e`，docker 会把它当镜像名） |
-| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者扩展需要的环境变量没注入（`GENG_BOOK_SOCK` 缺了：`web_search` 干脆不注册自己，`journal`/`say` 这类在调用时回一句话） |
+| 工具不见了 | `geng doctor <inst> --probe` 的「工具挂载」 | 挂载源不在（checkout 不完整、`image/extensions/` 被删）；或者 socket 没挂进来：`GENG_SEARCH_SOCKET` 缺了，`web_search`/`web_fetch` 干脆不注册自己；`GENG_BOOK_SOCK` 缺了，`journal`/`say` 这类在调用时回一句话 |
 | 它不回复，但进程正常 | `docker ps`、`daemon.log` 最后一行的用时 | 一轮还在跑（一轮可以跑 30 分钟）；或者它**选择了不说**——只有 `say` 会送出去，正文不会 |
 | 它不知道收到过邮件 | `ls data/<inst>/mail/`、纸上的邮件行 | mail 是 pull，纸上只报数；读靠 `recall`/`open` |
 | 搜不到东西 | `doctor` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |
@@ -669,13 +661,15 @@ secrets/bots.json        每个实例一个 bot（token 就是路由键）
 secrets/search.env       搜索的上游 key、绑定地址、每日限额（socket 就是授权，没有第二个 token）
 secrets/mail.json/.env   信箱的地址映射和收信 token
 secrets/rustic.env       备份口令——丢了快照就没了
-deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  geng-gateway.service  geng-search.service  mail-worker/
+deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt  build.sh  update.sh
+           geng@.service  geng-gateway.service  geng-search.service  mail-worker/
 ```
 
 `data/`、`backup/`、`secrets/` 全部 gitignore，且**永不进 git**。
 
-挂载是逐条论证过的，不是攒出来的：**七条是底线，配上搜索时是八条**——搜索的 socket 只在它
-真的存在时才挂，所以那一条可能不在。少挂它，容器里就没有 `web_search`（见 §5.2）。
+挂载是逐条论证过的，不是攒出来的：**六条无条件，两条看 socket 在不在**。正常一轮两个 socket
+都由宿主端先起好，所以纸面上是八条；搜索的 socket 不在就不挂，容器里也就没有 `web_search`
+（见 §5.2）。
 
 | 宿主 | 容器 | 为什么 |
 |---|---|---|
@@ -703,7 +697,7 @@ docker ps                                  # 不需要 sudo
 node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
 # 其中五条是"漏配"的唯一出口：搜索接线 / 邮件接线 / bot 接线 / GitHub App / 备份
 #   配好且对 = ok，配了但不对 = FAIL，没配 = warn（模型密钥是 FAIL：没有它没有模型可用）
-# 「policy 跟模板」报的是模板有、这份副本没有的键——它在用没人选过的默认值
+# 「policy 跟模板」两个方向都报：模板有而副本没有（正在用没人选过的默认值）、副本有而模板没有（没人再读）
 node cmd/geng/index.ts doctor alice --probe   # 直连必须断开、代理必须通、容器里看不见 policy.json
 #   （--probe 要有 daemon 在跑：代理是它答的，没有它只能测到"直连断了"）
 node cmd/geng/index.ts status --all        # 上次=… 下次=…
