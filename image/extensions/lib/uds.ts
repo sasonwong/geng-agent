@@ -16,6 +16,28 @@ export interface UdsReply {
   body: string;
 }
 
+/**
+ * The same request, except a dead socket comes back as a reply the model can read.
+ *
+ * `postJson` rejects on ENOENT / ECONNREFUSED / a timeout on purpose — the caller decides
+ * what that means. Every tool caller means the same thing, though: a host that is briefly
+ * down is a sentence, not an exception that ends the waking through a tool result nobody
+ * can act on. One place for that decision keeps the tools from drifting apart again.
+ */
+export async function postJsonOrError(
+  socketPath: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+  timeoutMs = 70_000,
+): Promise<UdsReply> {
+  try {
+    return await postJson(socketPath, path, body, headers, timeoutMs);
+  } catch (err) {
+    return { status: 0, body: JSON.stringify({ error: (err as Error).message }) };
+  }
+}
+
 export function postJson(
   socketPath: string,
   path: string,

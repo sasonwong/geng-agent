@@ -11,7 +11,7 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tool } from "./lib/tool.ts";
-import { postJson } from "./lib/uds.ts";
+import { postJsonOrError } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
 
@@ -19,9 +19,11 @@ type Reply = Record<string, unknown>;
 
 async function call(path: string, body: Record<string, unknown>): Promise<Reply> {
   if (SOCKET === "") {
-    throw new Error("没有配置记忆端点：GENG_BOOK_SOCK 是空的。");
+    return { error: "没有配置记忆端点：GENG_BOOK_SOCK 是空的。" };
   }
-  const reply = await postJson(SOCKET, path, body);
+  // A host that is not listening is a sentence, not an exception: the answer goes to the
+  // model either way, and one line is something it can act on.
+  const reply = await postJsonOrError(SOCKET, path, body);
   try {
     return JSON.parse(reply.body) as Reply;
   } catch {

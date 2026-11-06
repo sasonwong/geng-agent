@@ -4,15 +4,15 @@
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { tool } from "./lib/tool.ts";
-import { postJson } from "./lib/uds.ts";
+import { postJsonOrError } from "./lib/uds.ts";
 
 const SOCKET = process.env.GENG_SEARCH_SOCKET ?? "";
 
 async function call(path: string, body: Record<string, unknown>): Promise<string> {
   if (SOCKET === "") {
-    throw new Error("没有配置搜索端点：GENG_SEARCH_SOCKET 是空的。");
+    return "没有配置搜索端点：GENG_SEARCH_SOCKET 是空的。";
   }
-  const reply = await postJson(SOCKET, path, body);
+  const reply = await postJsonOrError(SOCKET, path, body);
   let payload: { data?: unknown; error?: string; remaining?: number };
   try {
     payload = JSON.parse(reply.body) as typeof payload;
@@ -21,7 +21,9 @@ async function call(path: string, body: Record<string, unknown>): Promise<string
   }
   const left = typeof payload.remaining === "number" ? `（今天还剩 ${payload.remaining} 次）` : "";
   if (payload.error) return `${payload.error}${left}`;
-  return JSON.stringify(payload.data) + left;
+  // JSON.stringify(undefined) is undefined, not a string: a reply with no `data` used to
+  // hand pi a tool result whose text was not a string at all.
+  return `${payload.data === undefined ? "搜索端点没有回内容" : JSON.stringify(payload.data)}${left}`;
 }
 
 const searchTool = tool({
