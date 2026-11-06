@@ -335,7 +335,7 @@ export function restoredLooksWhole(dir: string): { ok: boolean; missing: string[
   const instanceDir = findInstanceRoot(dir);
   if (!instanceDir) return { ok: false, missing: ["book/"] };
   const missing: string[] = [];
-  for (const rel of ["meta/deploy.json", "session"]) {
+  for (const rel of ["meta/deploy.json", "sessions"]) {
     if (!existsSync(join(instanceDir, rel))) missing.push(rel);
   }
   try {

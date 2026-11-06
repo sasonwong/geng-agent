@@ -644,7 +644,7 @@ data/<instance>/
   mail/         收到的邮件，一封一个文件（不进容器，靠 recall 读）
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
-  session/      pi 的会话文件，一轮一个（可写，但纸上不提它）
+  sessions/     pi 的会话文件，一轮一个（可写，但纸上不提它）
   pi/           这个实例的 pi 配置（settings.json），只读挂进容器
   usage/        症状日志 symptoms.log
   meta/         计数、stateSchema、快照版本，以及一两份跨轮的注记（cut / escalation）
@@ -673,7 +673,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt  bu
 | `workspace/` | `/work` | 干活的地方，可写 |
 | `pi/settings.json` | `~/.pi/agent/settings.json` | 只读：它不能换模型 |
 | `deploy/models.json` | `~/.pi/agent/models.json` | 只读：provider 指向容器里的 socat |
-| `session/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
+| `sessions/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
 | `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 |
 | `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |
 | `secrets/search.env` 里的 socket | `/run/search.sock` | 只读：搜索端点。文件不在就不挂——docker 会把缺失的宿主路径建成目录 |

@@ -61,7 +61,7 @@ test("a restored tree is found even when rustic nests the absolute paths", () =>
   const nested = join(target, "tmp", "geng", "data", "alice");
   mkdirSync(join(nested, "book"), { recursive: true });
   mkdirSync(join(nested, "meta"), { recursive: true });
-  mkdirSync(join(nested, "session"), { recursive: true });
+  mkdirSync(join(nested, "sessions"), { recursive: true });
   writeFileSync(join(nested, "book", "identity.md"), "我是 alice\n");
   writeFileSync(join(nested, "meta", "deploy.json"), "{}\n");
 

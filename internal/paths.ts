@@ -79,7 +79,7 @@ export function makePaths(root: string, instance: string): Paths {
     root: r,
     instance,
     data,
-    sessionDir: join(data, "session"),
+    sessionDir: join(data, "sessions"),
     book,
     workspace: join(data, "workspace"),
     usage: join(data, "usage"),

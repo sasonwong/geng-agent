@@ -408,6 +408,19 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     detail: bad.length === 0 ? `${sessions.length} 个文件完好` : bad.map((b) => `${b.file}: ${b.note}`).join("; "),
   });
 
+  // A directory that was renamed once is a directory that will be missed silently: the
+  // daemon simply starts writing into the new name, and the old sessions look like they
+  // were never there. Only printed while the old one exists, so a migrated instance sees
+  // nothing.
+  const oldSessions = join(p.data, "session");
+  if (existsSync(oldSessions)) {
+    checks.push({
+      name: "session 目录改名",
+      ok: false,
+      detail: `${oldSessions} 还在：v0.0.1 起叫 sessions/，停掉 daemon 后 mv 过去（跑着 mv 会让它建一个空目录）`,
+    });
+  }
+
   const waitingFresh = existsSync(p.waiting);
   checks.push({
     name: "waiting.json",

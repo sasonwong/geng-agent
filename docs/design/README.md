@@ -600,7 +600,7 @@ Telegram 给的消息号记成 `<chat>-<message_id>`，所以它想引用自己�
 ### 挂载表
 
 六条挂载无条件，另外两条看 socket 在不在（逐条理由在 `docs/install.md` §10）：`identity.md`
-一个文件、`/work` 一个目录、`settings.json` 与 `models.json` 两个只读文件、`session/` 一个目录、
+一个文件、`/work` 一个目录、`settings.json` 与 `models.json` 两个只读文件、`sessions/` 一个目录、
 扩展目录一个只读目录；book socket 的 `run/` 目录和搜索 socket 文件各一条，都按它们在宿主上的
 绝对路径只读挂进来（不在就不挂——docker 会把缺失的路径建成目录）。正常一轮两个 socket 都在，
 所以纸面上通常是八条。书本身不挂：`/state`、`/inbox`、`/people`、`/mail`、`/outbox`、`/files`
