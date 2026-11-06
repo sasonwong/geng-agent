@@ -412,7 +412,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 两边都读的东西。读的一侧只用认识的字段，所以**加字段永远安全**。
 
 字段不在这里抄一遍——抄一遍就会有一份必然过期的副本。形状的权威是代码里那个
-`interface`/`Policy`，这里只记**谁写**，以及读的一侧不会从代码里看出来的一条约束。
+`interface`/`Policy`；这里只记**谁写**，以及读的一侧必须知道的那条约束。
 
 | 文件 | 写者 | 约束 |
 |---|---|---|
@@ -420,7 +420,7 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 | `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同 `policy.json` 的形状，只认白名单里的键，越界即拒绝 |
 | `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻；手写的老写法 `after` 仍读（按 mtime 折算） |
 | `book/mute.json` | 它发起（`mute`），宿主落盘 | 只有 `"*"` 和 `"chat:<id>"`：`route()` 先判私聊，`dm` 写进去也不会生效 |
-| `book/attention.json` | 它发起（`listen`），宿主落盘 | `until` 必填，最长四小时 |
+| `book/attention.json` | 它发起（`listen`），宿主落盘 | `until` 缺了就是没有窗口；最长四小时 |
 | `book/files.forget.json` | 它发起（`forget`），宿主落盘 | id 或 `/files/<name>` 都认；下一轮之前执行 |
 | `book/mail.read.json` | `open`，和读正文同一次调用 | 已读是名单，不是文件的位置 |
 | `inbox/*.json` | gateway | 被引用的原文不抄进来（在 transcript 里）；为什么投递只在 `daemon.log` |
