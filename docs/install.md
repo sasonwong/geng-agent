@@ -114,8 +114,14 @@ npx tsc --noEmit && npm test             # 十秒内应该全绿
 deploy/build.sh                          # 镜像：pi 的独立二进制 + gh + git（不含 node，也不含扩展）
 ```
 
-**什么时候需要重建镜像**：只有 `Dockerfile` 变了。只改 `internal/`、`cmd/` 不用重建——
-daemon 在宿主上跑，容器只装 pi 和它的工具链。
+**什么时候需要重建镜像**：`Dockerfile` 或 `deploy/checksums.txt` 变了。只改 `internal/`、
+`cmd/` 不用重建——daemon 在宿主上跑，容器只装 pi 和它的工具链。
+
+镜像里 pi 的独立二进制和 gh 都按版本钉死，下载后还要过 `deploy/checksums.txt` 里的
+SHA-256。`packages` 那一层装扩展包用的 npm 包钉在同一个 `PI_VERSION` 上——两边版本漂了，
+装出来的包目录要让第一次醒来才报错。所以**升版本必须同时改三处**：`GH_VERSION` /
+`PI_VERSION` 两处 ARG，以及校验和清单里对应的行；少改一处，构建会直接失败，这比悄悄
+换掉一个二进制要好。
 
 扩展在 `image/extensions/`，构建时**不进镜像**：`book.ts`（`journal`/`discard`/`loop_open`/`loop_close`/`wait`）、
 `recall.ts`（`recall`/`open`）、`files.ts`（`download`）、`say-mute.ts`（`say`/`listen`/`forget`/`mute`/`propose`）、
@@ -424,12 +430,22 @@ node cmd/geng/index.ts secrets init alice     # 生成 mail token，写进该写
 
 ```bash
 # secrets/search.env   chmod 600
-DEEPSEEK_API_KEY=sk-...                      # 搜索是单独计费的端点，chat 的 key 不一定能用
-GENG_SEARCH_SOCKET=/run/geng/search.sock     # 默认值就是这个，不写也行
-GENG_SEARCH_DAILY=200                        # 改了不用重启，下一次请求就是新额度
+# 搜索是单独计费的端点，chat 的 key 不一定能用
+DEEPSEEK_API_KEY=sk-...
+# 改了不用重启，下一次请求就是新额度
+GENG_SEARCH_DAILY=200
 
-node cmd/geng/index.ts search                # 前台；常驻用 deploy/geng-search.service
+node cmd/geng/index.ts search                # 前台；它会自己建 socket 的父目录
 ```
+
+**别忘了 `.env` 的注释要独占一行。** `readEnvFile()`、systemd 的 `EnvironmentFile=` 和
+docker 的 `--env-file` 都把 `=` 后面直到行尾整段当成值：`DEEPSEEK_API_KEY=xx  # 说明`
+里的说明会跟着进 `Authorization` 头。
+
+**socket 路径别手写。** 不写 `GENG_SEARCH_SOCKET` 时，宿主端点和 daemon 都取
+`$XDG_RUNTIME_DIR/geng/search.sock`（通常是 `/run/user/<uid>/geng/search.sock`）——正是 user
+unit 的 `RuntimeDirectory=geng` 建出来的目录。写死 `/run/geng/search.sock` 是 system unit
+的形状：普通用户的 user unit 既没权限在那儿建目录，daemon 找的也还是另一个路径。
 
 **端点是 unix socket，不是端口。** 容器能连它是因为 daemon 把 socket 文件按同一个路径挂进去，
 不是因为网络上有一个地址能打——所以出口规则里不再有私网例外，`ss -ltnp` 上也看不到任何东西。
@@ -566,8 +582,20 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 ## 8. 升级
 
 ```bash
-deploy/update.sh      # git pull --ff-only + 重建镜像 + 重启已装的 unit
+deploy/update.sh      # git pull --ff-only + 重装 unit + 重建镜像 + 重启已启用的 unit
 ```
+
+脚本按顺序走，任何一步失败就停，不会打印「更新完成」：
+
+1. 工作区必须干净、HEAD 必须在分支上，否则 `git pull --ff-only` 可能留下一个既不是新提交
+   也不是旧提交的在跑版本。
+2. `git pull --ff-only`。
+3. 用 `deploy/` 里最新的模板**重装** `~/.config/systemd/user/` 下的 unit，再
+   `daemon-reload`。只重启不重装的话，`KillMode`、`RuntimeDirectory`、`ExecStart` 的改动
+   永远到不了 systemd。
+4. 读 `data/*/policy.json` 里的 `container.image`，为每一个在用的 tag 重建镜像。用 `--image`
+   建的实例不该因为只重建了 `geng-agent:latest` 就一直留在旧镜像上。
+5. 只重启已启用的 unit。重启失败就是升级失败。
 
 | 改了什么 | 要做什么 | 它会知道吗 |
 |---|---|---|
