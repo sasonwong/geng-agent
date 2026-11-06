@@ -151,7 +151,9 @@ test("截断的 body 不会变成一份看着完整的 dest", async () => {
   try {
     await assert.rejects(() => getToFile(s.sock, "/files/F1", dest, 5000));
     assert.equal(existsSync(dest), false, "半截 body 不能被当成整份文件落到 dest");
-    await waitFor(() => !existsSync(part));
+    // the same async-open race the other tests here use waitForGone for: under a loaded
+    // suite, one snapshot "not there yet" is not the same as "cleaned up"
+    await waitForGone(part);
     assert.equal(existsSync(part), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
