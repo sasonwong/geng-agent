@@ -101,8 +101,8 @@ npm run check     # tsc --noEmit
 npm test          # node --test
 ```
 
-本地绿、CI 红 = 少跑了一条，不是命令不一样。需要 docker 或 rustic 的测试会自己跳过，所以 CI
-不需要它们。
+本地绿、CI 红 = 少跑了一条，不是命令不一样。测试不碰真的 docker、rustic 或网络：它们验的是
+argv、解析和落盘的状态，所以 CI 上不需要这些东西。
 
 测试只覆盖不可逆或难观察的少数部件（见 `AGENTS.md` 的「测试」）。不追求覆盖率：一个只为凑数的
 测试比没有测试更贵。
