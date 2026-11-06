@@ -45,6 +45,20 @@ const sleep = (ms: number): void => {
  * A holder that died without removing it is reclaimed by age, so a crash cannot wedge
  * every id forever; the wait is bounded, so a wedged lock is an error and not a hang.
  */
+
+/**
+ * Is this lock a corpse, or just absent?
+ *
+ * Absent is not old. `mtimeMs` gives null for a lock that is not there — the ordinary
+ * shape of "someone just finished" — and reading that as age 0 said "over ten seconds
+ * old, take it over". The takeover then deletes whatever `wx` created in between: the
+ * lock of a process that had just acquired it. Both sides run, both read the same
+ * counter, and one number goes out twice (that is the "两个进程发到了同一个号" red).
+ */
+export function lockIsStale(ageMs: number | null, nowMs: number): boolean {
+  return ageMs !== null && nowMs - ageMs > 10_000;
+}
+
 function withIdsLock<T>(paths: Paths, run: () => T): T {
   const lock = `${paths.ids}.lock`;
   mkdirSync(dirname(lock), { recursive: true });
@@ -54,7 +68,7 @@ function withIdsLock<T>(paths: Paths, run: () => T): T {
       closeSync(openSync(lock, "wx"));
       break;
     } catch {
-      if (Date.now() - (mtimeMs(lock) ?? 0) > 10_000) {
+      if (lockIsStale(mtimeMs(lock), Date.now())) {
         rmSync(lock, { force: true }); // its holder is gone: take it over
         continue;
       }
