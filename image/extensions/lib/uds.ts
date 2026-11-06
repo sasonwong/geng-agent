@@ -91,6 +91,7 @@ export function getToFile(
   socketPath: string,
   path: string,
   dest: string,
+  timeoutMs = 120_000,
 ): Promise<{ status: number; bytes: number }> {
   return new Promise((resolve, reject) => {
     // A partial download must never sit at the destination looking like the whole file,
@@ -108,7 +109,7 @@ export function getToFile(
       reject(err);
     };
     const req = request(
-      { socketPath, path, method: "GET", signal: AbortSignal.timeout(120_000) },
+      { socketPath, path, method: "GET", signal: AbortSignal.timeout(timeoutMs) },
       (res) => {
         if (res.statusCode !== 200) {
           let body = "";
