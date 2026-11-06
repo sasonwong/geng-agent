@@ -59,6 +59,8 @@ export function makeJwt(app: { appId: string; keyPem: string }, nowMs: number): 
 }
 
 const SECURITY = 300_000;
+/** GitHub is normally instant; a black-holed connection must not leave `git` waiting. */
+export const TOKEN_TIMEOUT_MS = 15_000;
 
 interface Cached {
   token: string;
@@ -76,6 +78,7 @@ export async function installationToken(
   app: GhApp,
   nowMs: number,
   fetchImpl: typeof fetch = fetch,
+  timeoutMs: number = TOKEN_TIMEOUT_MS,
 ): Promise<Cached> {
   const key = `${app.appId}/${app.installationId}`;
   const hit = cache.get(key);
@@ -89,15 +92,23 @@ export async function installationToken(
         accept: "application/vnd.github+json",
         "user-agent": "geng-agent",
       },
+      // The signal covers the whole exchange, body included: without it a connected but
+      // silent endpoint holds `/gh/token` open, and every `git` command in the round
+      // hangs on a credential helper that never prints a line.
+      signal: AbortSignal.timeout(timeoutMs),
     },
   );
   const body = (await response.json().catch(() => ({}))) as { token?: string; expires_at?: string; message?: string };
-  if (!response.ok || typeof body.token !== "string") {
+  if (!response.ok || typeof body.token !== "string" || body.token === "") {
     throw new Error(`换 installation token 失败：${response.status} ${body.message ?? "没有说明"}`);
   }
+  // An unparseable expires_at used to become NaN. `NaN - SECURITY > now` is false on
+  // every check, so a token was minted again for every single git command instead of
+  // being reused for the hour GitHub gave it.
+  const parsed = typeof body.expires_at === "string" ? Date.parse(body.expires_at) : Number.NaN;
   const fresh = {
     token: body.token,
-    expiresAt: typeof body.expires_at === "string" ? Date.parse(body.expires_at) : nowMs + 3_600_000,
+    expiresAt: Number.isFinite(parsed) ? parsed : nowMs + 3_600_000,
   };
   cache.set(key, fresh);
   return fresh;

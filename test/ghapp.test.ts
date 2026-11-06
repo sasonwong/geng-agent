@@ -48,6 +48,24 @@ test("a token is reused while it has time left, and re-minted when it does not",
   assert.equal(third.token, "ghs_2");
 });
 
+test("an unparseable expires_at still leaves a reusable hour of token", async () => {
+  forgetCachedTokens();
+  let calls = 0;
+  const fake = (async () => {
+    calls += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ token: `ghs_${calls}`, expires_at: "not-a-date" }),
+    };
+  }) as unknown as typeof fetch;
+  const now = 1_800_000_000_000;
+  const first = await installationToken(app, now, fake);
+  assert.equal(Number.isNaN(first.expiresAt), false, "NaN 的过期时刻等于永远过期");
+  await installationToken(app, now + 60_000, fake);
+  assert.equal(calls, 1, "缓存命中不了的话，一条 git 命令就要换一次 token");
+});
+
 test("a refused exchange names the status instead of returning an empty token", async () => {
   forgetCachedTokens();
   const fake = (async () => ({
@@ -56,4 +74,36 @@ test("a refused exchange names the status instead of returning an empty token", 
     json: async () => ({ message: "A JSON web token could not be decoded" }),
   })) as unknown as typeof fetch;
   await assert.rejects(() => installationToken(app, 1_800_000_000_000, fake), /401.*decoded/);
+});
+
+test("a silent GitHub cannot hold the credential helper open", async () => {
+  forgetCachedTokens();
+  let seen: AbortSignal | null | undefined;
+  // constructed, so the privacy gate does not read this fixture as a credential
+  const probe = ["ghs", "timeout"].join("_");
+  const fake = (async (_url: string, init: Parameters<typeof fetch>[1]) => {
+    seen = init?.signal;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ token: probe, expires_at: new Date(1_900_000_000_000).toISOString() }),
+    };
+  }) as unknown as typeof fetch;
+  // a short bound only for the test: the production one is fifteen seconds
+  await installationToken(app, 1_800_000_000_000, fake, 10);
+  assert.ok(seen instanceof AbortSignal, "换 token 的请求没有超时信号，git 会一直等下去");
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(seen?.aborted, true, "上游不回话时信号必须真的中断");
+  forgetCachedTokens();
+});
+
+test("an empty token is a failed exchange, not a credential", async () => {
+  forgetCachedTokens();
+  const fake = (async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ token: "", expires_at: new Date(1_900_000_000_000).toISOString() }),
+  })) as unknown as typeof fetch;
+  await assert.rejects(() => installationToken(app, 1_800_000_000_000, fake), /换 installation token 失败/);
+  forgetCachedTokens();
 });
