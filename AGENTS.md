@@ -156,10 +156,15 @@ id 分配、刹车窗口、盘的形状。
   没配 App 时这条链路安静地拿不到凭据，git 会说"要密码"——`doctor` 的「GitHub App」先说话。
 - **没有 token 也能贡献**：`git format-patch` 出补丁，用 `say` 的 `files` 发给主人，宿主机上
   `git am` 落地。这条路随时可用，不依赖任何凭据。
-- 提交身份用 `git -c user.name=… -c user.email=<id>+<login>@users.noreply.github.com` 传：
-  `HOME` 每轮都会被丢掉，写进 `~/.gitconfig` 的东西活不过这一次醒来。**邮箱只能是 noreply 或
-  `*.invalid`**——真实域名会进历史、进 squash 提交、进每一份 clone，而提交元数据不在任何 diff
-  里，逐行扫描器永远看不见它。
+- **提交身份在 clone 里配好了，不要用 `-c` 覆盖它**：`data/<inst>/workspace/geng-agent/.git/config`
+  里是 `user.name=<Alice|Bob|Carol>` 和
+  `user.email=5640022+geng-agent-bots[bot]@users.noreply.github.com`。`HOME` 每轮都会被丢掉，
+  所以写进 `~/.gitconfig` 的东西活不过这一次醒来——这条配置只活在 clone 里。
+- **邮箱只能是 noreply 或 `*.invalid`**——真实域名会进历史、进 squash 提交、进每一份 clone，
+  而提交元数据不在任何 diff 里，逐行扫描器永远看不见它。
+- **noreply 必须带 `+数字`**：`<数字>+<login>@users.noreply.github.com`。不带的那一种
+  （`login@users.noreply.github.com`）是 2017 年前的旧格式，GitHub 会把它对到同名账号上——
+  提交不是"未归属"，而是记在了别人名下。改已有的提交要 force-push，所以第一次就写对。
 
 ## 文档
 

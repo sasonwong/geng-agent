@@ -102,8 +102,10 @@ merge 或 squash**：那两种都会在 `main` 上造出一个"发布提交"，`
 - 引用 issue / 审计编号（如 `L1`），不要把值本身抄进来。
 - 合并前必须同时满足：CI 绿 + 至少一个 approval。**没有人能批准自己的 PR**，所以机器人和人都
   需要另一个人点。
-- 提交邮箱要能归属到账号（`<id>+<login>@users.noreply.github.com`）。GitHub 对未归属的提交
-  要求**额外一个** approval，所以这不只是好看。
+- 提交邮箱要能归属到账号（`<数字>+<login>@users.noreply.github.com`）。GitHub 对未归属的提交
+  要求**额外一个** approval，所以这不只是好看。不带 `+数字` 的
+  `login@users.noreply.github.com` 是旧格式：GitHub 会把它对到同名账号，提交记在**别人**名下，
+  比未归属更糟。
 
 ## 提交信息
 
