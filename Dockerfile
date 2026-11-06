@@ -73,6 +73,23 @@ RUN chmod 0755 /usr/local/bin/geng-gh-credential \
   # `--noproxy` habit and a wrapper script that clears the environment
   && printf '[http]\n\tproxy = http://127.0.0.1:3128\n' >> /etc/gitconfig
 
+# CNB has no App and nothing to mint, so its token is one long-lived string on the host
+# (`secrets/cnb.env`). The same socket answers for it: the container asks, the daemon
+# reads the file. A host that was never configured simply has no credential — git then
+# fails as an auth error, which is the truth.
+RUN cat > /usr/local/bin/geng-cnb-credential <<'SH'
+#!/bin/sh
+# git calls this with `get`/`store`/`erase`; only `get` has an answer.
+[ "$1" = "get" ] || exit 0
+token=$(curl -fsS --connect-timeout 2 --max-time 5 \
+  --unix-socket "${GENG_BOOK_SOCK:-/run/geng/book.sock}" \
+  http://localhost/cnb/token 2>/dev/null) || exit 0
+[ -n "$token" ] || exit 0
+printf 'username=cnb\npassword=%s\n' "$token"
+SH
+RUN chmod 0755 /usr/local/bin/geng-cnb-credential \
+  && printf '[credential "https://cnb.cool"]\n\thelper = !/usr/local/bin/geng-cnb-credential\n' >> /etc/gitconfig
+
 # pi itself: a Bun-compiled release binary, pinned like gh. No node in the image, so
 # there is no npm, no package manager and no second copy of a JS runtime to keep patched.
 # 和上面 packages 那一层的 ARG 必须一致。旧写法把 PI_SHA256 默认成空字符串再

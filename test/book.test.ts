@@ -435,6 +435,38 @@ test("git's credential question is answered by the host, or not at all", async (
   }
 });
 
+test("a host with no App answers with its one token, and refuses when there is none", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const server = await startBookServer({ paths, log: () => {} });
+  const ask = () =>
+    new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = request({ socketPath: socketPath(paths), path: "/cnb/token", method: "GET" }, (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      });
+      req.on("error", reject);
+      req.end();
+    });
+  try {
+    // no file: a refusal that names the file, not an empty credential that reads as "ok"
+    const none = await ask();
+    assert.equal(none.status, 503);
+    assert.match(none.body, /secrets\/cnb\.env/);
+    mkdirSync(join(root, "secrets"), { recursive: true });
+    writeFileSync(join(root, "secrets", "cnb.env"), "CNB_TOKEN=abc123\n");
+    const ok = await ask();
+    assert.equal(ok.status, 200);
+    // plain text on purpose: the reader is `git`'s credential helper, not an agent
+    assert.equal(ok.body, "abc123");
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("model traffic is proxied: the key goes upstream, never to the container", async () => {
   const root = mkdtempSync(join(tmpdir(), "geng-book-"));
   const paths = makePaths(root, "alice");

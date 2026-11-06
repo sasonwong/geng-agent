@@ -13,6 +13,7 @@ import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
 import { parseAfter } from "./schedule.ts";
 import { readJson, readText, writeJson, writeText } from "./fs.ts";
+import { readCnbToken } from "./secret.ts";
 
 /**
  * The book endpoint: the only way into the book, because the book is not mounted.
@@ -573,6 +574,18 @@ export function startBookServer(o: BookOptions): Promise<Server> {
           res.end(t.token);
         })
         .catch(guard);
+      return;
+    }
+    // The same question for a host that cannot mint anything. One string, one reader: the
+    // daemon, which keeps it in a file no container mounts.
+    if (req.method === "GET" && url === "/cnb/token") {
+      const token = readCnbToken(o.paths.root);
+      if (token === null) {
+        reply(503, { error: "没有配置 CNB：secrets/cnb.env 里没有 CNB_TOKEN" });
+        return;
+      }
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end(token);
       return;
     }
     if (req.method !== "POST") {

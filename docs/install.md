@@ -223,6 +223,7 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
 | `secrets/gh-app.pem` + `<inst>.env` 里的两个 id | 你 | daemon 换 installation token | `git push` 要求密码；**别的都不受影响**（见 5.3） |
+| `secrets/cnb.env` | 你 | daemon，`/cnb/token` 与 `git` 的 helper 都从这儿取 | 那台机器上的 cnb 读写 401；别的都不受影响（它没有 App，只有一个长期 token，所以比 GitHub 那条更容易被抄错） |
 
 抄错率最高的是这两类：
 
