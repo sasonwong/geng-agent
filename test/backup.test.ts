@@ -82,6 +82,21 @@ test("a snapshot from before the rename has session/, and it is still whole", ()
   assert.deepEqual(restoredLooksWhole(target), { ok: true, missing: [] });
 });
 
+test("the oldest snapshot names the book palimpsest, and it is still whole", () => {
+  // The rename to `book/` happened after the first four days of snapshots. A restore drill
+  // that only looks for today's directory name finds nothing in them and reports the last
+  // good backup as broken.
+  const paths = fixture();
+  const target = join(paths.root, "ancient");
+  const nested = join(target, "data", "alice");
+  mkdirSync(join(nested, "palimpsest"), { recursive: true });
+  mkdirSync(join(nested, "meta"), { recursive: true });
+  mkdirSync(join(nested, "session"), { recursive: true });
+  writeFileSync(join(nested, "palimpsest", "identity.md"), "我是 alice\n");
+  writeFileSync(join(nested, "meta", "deploy.json"), "{}\n");
+  assert.deepEqual(restoredLooksWhole(target), { ok: true, missing: [] });
+});
+
 test("an empty or partial restore is reported, not passed", () => {
   const paths = fixture();
   const target = join(paths.root, "empty");

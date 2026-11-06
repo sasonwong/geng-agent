@@ -311,9 +311,14 @@ export async function restore(o: RestoreOptions): Promise<{ ok: boolean; detail:
   };
 }
 
-/** rustic restores absolute paths under the target, so look for the instance root. */
+/**
+ * rustic restores absolute paths under the target, so look for the instance root.
+ *
+ * `palimpsest/` is the book's old name: a snapshot taken before the rename contains that
+ * directory instead, and it is still a whole snapshot.
+ */
 function findInstanceRoot(dir: string, depth = 0): string | null {
-  if (existsSync(join(dir, "book"))) return dir;
+  if (existsSync(join(dir, "book")) || existsSync(join(dir, "palimpsest"))) return dir;
   if (depth >= 8) return null;
   let entries: string[];
   try {
@@ -342,8 +347,9 @@ export function restoredLooksWhole(dir: string): { ok: boolean; missing: string[
   if (!existsSync(join(instanceDir, "sessions")) && !existsSync(join(instanceDir, "session"))) {
     missing.push("sessions");
   }
+  const book = existsSync(join(instanceDir, "book")) ? join(instanceDir, "book") : join(instanceDir, "palimpsest");
   try {
-    if (readdirSync(join(instanceDir, "book")).length === 0) missing.push("book/ 是空的");
+    if (readdirSync(book).length === 0) missing.push("book/ 是空的");
   } catch {
     missing.push("book/");
   }
