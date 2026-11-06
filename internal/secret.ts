@@ -26,6 +26,18 @@ function parseEnvLine(raw: string): { key: string; value: string } | null {
   return { key: line.slice(0, at).trim(), value: line.slice(at + 1).trim() };
 }
 
+/**
+ * A host with no App concept has nothing to mint a credential from: CNB issues one
+ * long-lived token, and the agent needs it for both `git` and its own API calls. It lives
+ * in `secrets/cnb.env`, never in `secrets/<instance>.env` — that one is `--env-file` into
+ * the container — and the book socket hands it out, so the container can ask but nothing
+ * inside it holds a copy between calls.
+ */
+export function readCnbToken(root: string): string | null {
+  const token = (readEnvFile(join(root, "secrets", "cnb.env")).CNB_TOKEN ?? "").trim();
+  return token === "" ? null : token;
+}
+
 export function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
   const out: Record<string, string> = {};

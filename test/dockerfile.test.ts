@@ -47,7 +47,7 @@ test("both release tarballs are verified unconditionally, for both architectures
 
 test("the scripts baked into the image are valid sh", () => {
   const scripts = heredocs(docker);
-  assert.equal(scripts.length, 2, "credential helper 和 geng-pi 两份");
+  assert.equal(scripts.length, 3, "两个 credential helper 和 geng-pi");
   const dir = mkdtempSync(join(tmpdir(), "geng-dockerfile-"));
   try {
     for (const [i, body] of scripts.entries()) {
@@ -69,4 +69,9 @@ test("the entrypoint refuses to start when its way out is missing", () => {
   assert.match(entry, /GENG_BOOK_SOCK/, "和 credential helper 用同一个路径");
   const helper = heredocs(docker).find((s) => s.includes("gh/token")) ?? "";
   assert.match(helper, /--max-time/, "socket 接了不答会一直挂住 git");
+  // 静态 token 走同一个 socket：容器里没有副本，问一次用一次
+  const cnb = heredocs(docker).find((s) => s.includes("/cnb/token")) ?? "";
+  assert.match(cnb, /--max-time/, "socket 接了不答会一直挂住 git");
+  assert.match(cnb, /username=cnb/, "cnb 的用户名是固定的，不是提示出来的");
+  assert.match(docker, /credential "https:\/\/cnb\.cool"/, "git 要按 host 找得到它");
 });
