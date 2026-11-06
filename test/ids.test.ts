@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { ensureDirs } from "../internal/fs.ts";
-import { allocate, lockIsStale } from "../internal/ids.ts";
+import { allocate, lockIsStale, releaseLock } from "../internal/ids.ts";
 
 const REPO = fileURLToPath(new URL("..", import.meta.url));
 
@@ -66,4 +66,22 @@ test("a lock that is merely absent is not a corpse", () => {
   assert.equal(lockIsStale(null, 1_000_000), false, "不在的锁不是陈锁");
   assert.equal(lockIsStale(Date.now() - 9_000, Date.now()), false);
   assert.equal(lockIsStale(Date.now() - 60_000, Date.now()), true);
+});
+
+test("a holder does not delete a lock that is no longer the one it took", () => {
+  // A stall longer than ten seconds gets its lock taken over; when it wakes up, its
+  // release must not remove the new holder's lock — that is a third process walking in.
+  const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+  const p = makePaths(root, "carol");
+  ensureDirs(requiredDirs(p));
+  const lock = `${p.ids}.lock`;
+  writeFileSync(lock, "mine");
+  const other = `${lock}.other`;
+  writeFileSync(other, "the one that took over");
+
+  releaseLock(lock, statSync(other));
+  assert.equal(existsSync(lock), true, "删了接手者的锁");
+
+  releaseLock(lock, statSync(lock));
+  assert.equal(existsSync(lock), false, "自己的锁要能删掉");
 });
