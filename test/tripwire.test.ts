@@ -32,6 +32,16 @@ test("retrying while paused never inflates the window — that was the lockup", 
   assert.equal(t.check(["hi"], start + 700_000), null);
 });
 
+test("a repeat threshold above the old fixed buffer cap is still reachable", () => {
+  // The buffer was truncated at 40 entries, so `repeat: 45` could never be counted:
+  // that wire was dead for any threshold above 40, with no line saying why.
+  const t = new Tripwire({ ...opts, rate: 999, repeat: 45 });
+  const now = 1_000_000;
+  const verdicts = Array.from({ length: 45 }, (_, i) => t.check(["同一句"], now + i * 10));
+  assert.equal(verdicts[43], null);
+  assert.equal(verdicts[44], "repeat");
+});
+
 test("the same sentence too many times trips the wire", () => {
   const t = new Tripwire({ ...opts, rate: 999 });
   const now = 1_000_000;
