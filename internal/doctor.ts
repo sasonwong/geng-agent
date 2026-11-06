@@ -641,7 +641,7 @@ export function toolsDigest(dir: string): string {
   }
 }
 
-const PROBE = [
+export const PROBE = [
   "sh",
   "-c",
   [
@@ -664,7 +664,9 @@ const PROBE = [
     'if curl -s -m 20 -o /dev/null https://github.com/ 2>/dev/null; then echo PROXY_OK; else echo PROXY_DEAD; fi',
     'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
     // the real attack path is the host on our own gateway, not a fixed docker0 address
-    'GW=$(ip route 2>/dev/null | awk "/^default/{print \$3; exit}"); if [ -n "$GW" ] && curl -s -m 3 -o /dev/null "http://$GW:2375/version" 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
+    // `\\$3`, not `\\$3` once: the JS string has to hand the shell a literal `\$3`, or the
+    // shell expands `$3` (empty) inside the double quotes and awk prints the whole line.
+    'GW=$(ip route 2>/dev/null | awk "/^default/{print \\$3; exit}"); if [ -n "$GW" ] && curl -s -m 3 -o /dev/null "http://$GW:2375/version" 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
     "true",
   ].join("; "),
 ];
@@ -702,6 +704,11 @@ async function probe(root: string, instance: string): Promise<Check[]> {
   const out = await new Promise<string>((resolve) => {
     const p = spawn(command.cmd, command.args, { stdio: ["ignore", "pipe", "pipe"] });
     let text = "";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finish = (t: string): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      resolve(t);
+    };
     p.stdout?.setEncoding("utf8");
     p.stdout?.on("data", (c: string) => {
       text += c;
@@ -710,8 +717,14 @@ async function probe(root: string, instance: string): Promise<Check[]> {
     p.stderr?.on("data", (c: string) => {
       text += c;
     });
-    p.on("error", () => resolve(`PROBE_FAILED ${String(p.spawnfile)}`));
-    p.on("close", () => resolve(text));
+    p.on("error", () => finish(`PROBE_FAILED ${String(p.spawnfile)}`));
+    p.on("close", () => finish(text));
+    // A wedged `docker run` must read as "the probe did not finish", never as silence that
+    // the checks below then treat as a passed proxy test.
+    timer = setTimeout(() => {
+      p.kill();
+      finish(`${text}\nPROBE_FAILED docker run 超时（90s），探针没有跑完`);
+    }, 90_000);
   });
   const inContainer = Number(/EXT_COUNT=(\d+)/.exec(out)?.[1] ?? -1);
   const digestInContainer = /EXT_DIGEST=([0-9a-f]{40})/.exec(out)?.[1] ?? "";
