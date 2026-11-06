@@ -411,22 +411,27 @@ pi 自己的自动压缩还在，阈值很大，只在那种情况下才会碰�
 
 两边都读的东西。读的一侧只用认识的字段，所以**加字段永远安全**。
 
-| 文件 | 写者 | 形状 |
-|---|---|---|
-| `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | `{schema, cycle{timeoutSec,defaultWakeMinutes,minWakeMinutes,repeatThreshold}, backup{enabled}, container{image,memory,cpus,pidsLimit,proxyChain,proxyAllow,proxyAllowCidrs}, files, timezone}` |
-| `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同一形状，只允许白名单里的键，越界即拒绝 |
-| `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻：`{wake:{at:"ISO"}, why}`；手写的老格式仍读 |
-| `book/mute.json` | 它发起（`mute`），宿主落盘 | `{"*"\|"chat:<id>": {until:"ISO", why}}`（`dm` 不被接受：`route()` 先判私聊） |
-| `inbox/*.json` | gateway | `{id, text, from, at, chat, attachments?[{kind,id?,name?,note?,bytes?}]}`（为什么投递只在 `daemon.log` 那一行；被引用的原文在 transcript 里） |
-| `outbox/*.json` | daemon（`say` 走 socket） | `{messages[], chat?, files?(/work 路径), attachments?[{path,name}], replyTo?{chat,messageId}, file}`；`file` 就是文件名，发送端按它认这一条 |
-| `people/<chat>.jsonl` | gateway | 每行 `{at, dir:"in"\|"out", text, from?, id?, quote?}` |
-| `meta/state.json` | daemon | `{stateSchema, lastWakeMs, wakings, env{}, lastSaid, lastCycle{wake,talkedTo[],touched}, knockHold?}` |
-| `meta/escalation.json` | daemon | `{level, streak, symptom, detail}` |
-| `meta/wakes.json` | daemon | 24 小时内的唤醒时间戳数组 |
-| `meta/cut.json` | daemon | `{kind:"timeout"\|"crashed"\|"interrupted", waking, reason, tools[]?, openMs?, capMinutes?}`，只活一张纸 |
+字段不在这里抄一遍——抄一遍就会有一份必然过期的副本。形状的权威是代码里那个
+`interface`/`Policy`，这里只记**谁写**，以及读的一侧不会从代码里看出来的一条约束。
 
-`stateSchema` 是 `meta/state.json` 的版本号，由 `writeMeta` 统一盖戳——一份形状只有一个版本号，别的文件没有它的副本。**磁盘上的版本比代码新就拒绝启动**——
-被旧代码按自己的形状覆盖一次，比重启一百次都糟。
+| 文件 | 写者 | 约束 |
+|---|---|---|
+| `policy.json`（在 `data/<inst>/`，**不在书里**） | 操作者 | 形状见 `deploy/policy.json`；改名或删字段要升 `schema` |
+| `book/policy.proposal.json` | 它发起（`propose`），宿主落盘 | 同 `policy.json` 的形状，只认白名单里的键，越界即拒绝 |
+| `book/waiting.json` | 它发起（`wait`），宿主落盘 | 只写绝对时刻；手写的老写法 `after` 仍读（按 mtime 折算） |
+| `book/mute.json` | 它发起（`mute`），宿主落盘 | 只有 `"*"` 和 `"chat:<id>"`：`route()` 先判私聊，`dm` 写进去也不会生效 |
+| `book/attention.json` | 它发起（`listen`），宿主落盘 | `until` 必填，最长四小时 |
+| `book/files.forget.json` | 它发起（`forget`），宿主落盘 | id 或 `/files/<name>` 都认；下一轮之前执行 |
+| `book/mail.read.json` | `open`，和读正文同一次调用 | 已读是名单，不是文件的位置 |
+| `inbox/*.json` | gateway | 被引用的原文不抄进来（在 transcript 里）；为什么投递只在 `daemon.log` |
+| `outbox/*.json` | daemon（`say` 走 socket） | 文件名就是这条的 id，发送端按它认 |
+| `people/<chat>.jsonl` | gateway | 只追加，两个方向都在一个文件里 |
+| `meta/state.json` | daemon | `stateSchema` 由 `writeMeta` 统一盖戳，别的文件没有它的副本 |
+| `meta/escalation.json`、`meta/wakes.json` | daemon | 计数与 24 小时窗口；纸上的数从它们来 |
+| `meta/cut.json` | daemon | 只活一张纸：下一轮读到就清掉 |
+
+`stateSchema` 的规矩是**磁盘上的版本比代码新就拒绝启动**——被旧代码按自己的形状覆盖一次，
+比重启一百次都糟。
 
 `policy.json` 的 `schema` 是同一条规矩用在操作者的文件上：改名或删字段时升它，旧代码看到更高的
 版本就明确拒绝，而不是把那些键当成"没写"、然后回一串「must be a number」。加字段不升——读的一侧
