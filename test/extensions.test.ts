@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -91,4 +92,20 @@ test("a download lands where the model said, or nowhere", async () => {
   assert.equal(resolveUnder("/work", "/etc/passwd"), null);
   // the directory itself is inside itself; a file cannot be written *as* the directory
   assert.equal(resolveUnder("/work", "/work"), "/work");
+});
+
+test("a link left behind in the writable directory cannot point a download out of it", async () => {
+  const { resolveUnder } = await import("../image/extensions/lib/under.ts");
+  // posix.resolve 只认以 `/` 开头的绝对路径；把 Windows 的盘符去掉后，Node 在
+  // Windows 上仍会把这个 `/...` 解到同一个目录（当前盘的根）。
+  const real = mkdtempSync(join(tmpdir(), "geng-under-"));
+  const root = real.replace(/\\/g, "/").replace(/^[A-Za-z]:/, "");
+  try {
+    // Windows 上目录符号链接要提权，junction 不用；两边都只要 lstat 能看出它是链接。
+    symlinkSync(real, join(root, "link"), process.platform === "win32" ? "junction" : "dir");
+    assert.equal(resolveUnder(root, `${root}/plain/x.txt`), `${root}/plain/x.txt`);
+    assert.equal(resolveUnder(root, `${root}/link/x.txt`), null, "顺着上一轮留下的链接写出去了");
+  } finally {
+    rmSync(real, { recursive: true, force: true });
+  }
 });
