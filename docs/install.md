@@ -489,7 +489,7 @@ node cmd/geng/index.ts secrets init alice      # 生成 GENG_MAIL_TOKEN，写进
 { "geng-alice-bot@example.com": { "instance": "alice", "allow": ["you@example.org"] } }
 
 # secrets/mail.env
-GENG_MAIL_TOKEN=...                          # geng secrets init 生成的；Worker 和宿主共用
+GENG_MAIL_TOKEN=...                          # 上面生成的；Worker 和宿主共用
 GENG_MAIL_BIND=127.0.0.1:8788                # 只听 loopback，前面是 tunnel
 ```
 
@@ -638,7 +638,8 @@ data/<instance>/
   policy.json   它活在什么规矩下——在书外面，容器里看不见也写不着
   workspace/    挂成 /work（可写，永远不清理）——容器里除了它和 identity.md 只有 tmpfs
   files/        别人发来的图片和文件，每个附件一个 F<n>（不进容器，靠 id）
-  inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次
+  inbox/        别人说的话：直接对它说的叫醒它，群里的闲话进 low/ 等下次；
+                这一轮真正交给它的移进 seen/（跑完才算读过）
   mail/         收到的邮件，一封一个文件（不进容器，靠 recall 读）
   people/       一个地址一份对话记录，只追加，不总结
   outbox/       它要说的话，gateway 取走
