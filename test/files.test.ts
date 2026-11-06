@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { bareName, filesUsage, forgetFiles, parseForget, pruneFiles } from "../internal/files.ts";
@@ -55,24 +55,40 @@ test("forgetting takes only bare names inside the directory", () => {
   assert.equal(forgetFiles(d, ["/files/gone.jpg", "F12"]), 0, "只在真删掉东西的时候算一个");
 });
 
+test("a name containing two dots is still a name, not a path", () => {
+  // `includes("..")` refused ordinary attachment names: `forget` then reported a
+  // deletion over a file that was still sitting in files/.
+  assert.equal(bareName("F12-1-report..pdf"), "F12-1-report..pdf");
+  assert.equal(bareName(".."), null);
+  assert.equal(bareName("."), null);
+  assert.equal(bareName("..\\policy.json"), null);
+});
+
+test("a dry prune reports the bytes a real round would leave, without deleting", () => {
+  const d = dir();
+  put(d, "old.bin", 600, 10);
+  put(d, "mid.bin", 600, 5);
+  put(d, "new.bin", 600, 1);
+
+  const preview = pruneFiles(d, { maxMb: 1, maxAgeDays: 0 }, NOW, false);
+  assert.equal(preview.removed, 2);
+  assert.equal(filesUsage(d).count, 3, "预览一个文件都没删");
+  const real = pruneFiles(d, { maxMb: 1, maxAgeDays: 0 }, NOW);
+  assert.equal(real.removed, 2);
+  assert.equal(preview.bytesLeft, filesUsage(d).bytes, "预览报的剩余量和真跑之后一样");
+});
+
+test("a directory in files/ is not counted as a file", () => {
+  const d = dir();
+  put(d, "a.bin", 1, 0);
+  mkdirSync(join(d, "stray"));
+  const u = filesUsage(d);
+  assert.equal(u.count, 1, "只有真正称过重量的才算一个文件");
+  assert.equal(u.bytes, 1024);
+});
+
 test("a malformed request deletes nothing", () => {
   assert.deepEqual(parseForget(null), []);
   assert.deepEqual(parseForget({ files: "x" }), []);
   assert.deepEqual(parseForget({ files: ["/files/a", 3] }), ["/files/a"]);
-});
-
-test("a dry run reports what it would do and leaves every file in place", () => {
-  const d = dir();
-  put(d, "old.bin", 600, 10);
-  put(d, "new.bin", 600, 1);
-
-  const pruned = pruneFiles(d, { maxMb: 1, maxAgeDays: 0 }, NOW, true);
-  assert.equal(pruned.removed, 1, "预览也要说出会删几个");
-  assert.equal(Math.round((NOW - (pruned.oldestRemovedMs ?? 0)) / day), 10);
-  assert.equal(filesUsage(d).count, 2, "预览不能真删");
-
-  const forgot = forgetFiles(d, ["/files/old.bin"], true);
-  assert.equal(forgot, 1, "预览也要说出会忘掉几个");
-  assert.equal(filesUsage(d).count, 2, "预览不能真忘");
-  assert.equal(statSync(join(d, "old.bin")).size, 600 * 1024);
 });

@@ -10,7 +10,7 @@ import { loadPolicy, type Policy } from "./policy.ts";
 import { chainFrom } from "./proxy.ts";
 import { ExpectedError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict } from "./schema.ts";
-import { filesUsage, forgetFiles, parseForget, pruneFiles } from "./files.ts";
+import { filesUsage, forgetFiles, forgetNames, parseForget, pruneFiles } from "./files.ts";
 import {
   alarmSpent,
   formatDuration,
@@ -354,11 +354,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // Only while it is not running: a file vanishing under a read is the failure this
     // must not have. Its own requests go first, then the cap. `dry` counts what a start
     // would take without taking it — the packet says the same thing either way.
-    const forgot = forgetFiles(
-      paths.filesDir,
-      parseForget(readJson<unknown>(paths.filesForget, null)),
-      o.dry === true,
-    );
+    const forgetList = parseForget(readJson<unknown>(paths.filesForget, null));
+    const forgot = forgetFiles(paths.filesDir, forgetList, o.dry === true);
     if (!o.dry) rmSync(paths.filesForget, { force: true });
     // A message nothing can read is moved aside instead of being skipped forever. Before
     // this, one caption-less document knocked 58 times in an hour and handed over nothing.
@@ -373,7 +370,15 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
           : `丢弃了 ${junk.length} 条读不出来的消息：${junk.join("、")}`,
       );
     }
-    const pruned = pruneFiles(paths.filesDir, policy.files, Date.now(), o.dry === true);
+    // A preview cannot see the files it only pretended to remove, so the prune pass is told
+    // which names are already gone, and its leftover byte count is what the page reports.
+    const pruned = pruneFiles(
+      paths.filesDir,
+      policy.files,
+      Date.now(),
+      o.dry !== true,
+      new Set(forgetNames(paths.filesDir, forgetList)),
+    );
     const filesUsed = filesUsage(paths.filesDir);
 
     let meta = readMeta(paths);
@@ -460,7 +465,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       filesForgotten: forgot,
       filesPruned: pruned.removed,
       filesOldestPrunedMs: pruned.oldestRemovedMs,
-      filesUsedBytes: filesUsed.bytes,
+      filesUsedBytes: o.dry ? pruned.bytesLeft : filesUsed.bytes,
       filesCapMb: policy.files.maxMb,
       inbox,
       lowInbox,

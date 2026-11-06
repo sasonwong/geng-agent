@@ -27,28 +27,39 @@ export function filesUsage(dir: string): Usage {
   }
   let bytes = 0;
   let oldestMs: number | null = null;
+  let count = 0;
   for (const name of names) {
     try {
       const s = statSync(join(dir, name));
       if (!s.isFile()) continue;
+      // Count what was actually weighed: a stray directory used to appear in `count` but
+      // not in `bytes`, so the page said "N 个文件" over N-1 of them.
+      count += 1;
       bytes += s.size;
       if (oldestMs === null || s.mtimeMs < oldestMs) oldestMs = s.mtimeMs;
     } catch {
       // a file that vanished is not an error
     }
   }
-  return { count: names.length, bytes, oldestMs };
+  return { count, bytes, oldestMs };
 }
 
 /** A path it named: only ever a bare name inside the directory, never a way out. */
 export function bareName(given: string): string | null {
   const trimmed = given.trim().replace(/^\/files\//, "");
-  if (trimmed === "" || trimmed.includes("/") || trimmed.includes("..")) return null;
+  // Only a separator (or the two dot names themselves) can walk out of this directory.
+  // Rejecting every name that merely CONTAINS ".." refused ordinary attachments like
+  // `report..pdf`, and forget then left them on disk while the page said it removed them.
+  if (trimmed === "" || trimmed === "." || trimmed === "..") return null;
+  if (trimmed.includes("/") || trimmed.includes("\\")) return null;
   return trimmed;
 }
 
 export interface PruneResult {
   removed: number;
+  /** Bytes the directory holds once the rule has run. A preview cannot weigh a directory
+   *  it did not empty, so it uses this instead of re-reading the disk. */
+  bytesLeft: number;
   /** Age of the oldest thing removed, so the page can say how old it was. */
   oldestRemovedMs: number | null;
 }
@@ -58,12 +69,20 @@ export interface PruneResult {
  * waking might want to look at. `dry` counts what a real call would take without taking
  * it: a preview must say the same thing a start would say, over the same directory.
  */
-export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number, dry = false): PruneResult {
+export function pruneFiles(
+  dir: string,
+  policy: FilesPolicy,
+  nowMs: number,
+  apply = true,
+  /** Names an earlier forget pass already removed: only the dry preview needs this, since
+   *  it cannot see them disappear from the directory. */
+  exclude: ReadonlySet<string> = new Set<string>(),
+): PruneResult {
   let names: string[];
   try {
-    names = readdirSync(dir).filter((f) => !f.startsWith("."));
+    names = readdirSync(dir).filter((f) => !f.startsWith(".") && !exclude.has(f));
   } catch {
-    return { removed: 0, oldestRemovedMs: null };
+    return { removed: 0, oldestRemovedMs: null, bytesLeft: 0 };
   }
   const entries = names
     .map((name) => {
@@ -88,7 +107,7 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number, dry 
   for (const e of entries.slice(0, -1)) {
     const tooOld = ageMs !== null && nowMs - e.mtimeMs > ageMs;
     if (!tooOld && total <= capBytes) break;
-    if (!dry) {
+    if (apply) {
       try {
         rmSync(join(dir, e.name), { force: true });
       } catch {
@@ -100,7 +119,7 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number, dry 
     removed += 1;
     oldestRemovedMs ??= e.mtimeMs;
   }
-  return { removed, oldestRemovedMs };
+  return { removed, oldestRemovedMs, bytesLeft: total };
 }
 
 /**
@@ -108,6 +127,18 @@ export function pruneFiles(dir: string, policy: FilesPolicy, nowMs: number, dry 
  * container never has the directory: it holds ids, so erasing what a person sent is a
  * request the host carries out, on its own clock, in the ledger of the round.
  */
+/** The names this pass accounts for, whether or not it actually deletes them — the dry
+ *  preview needs them so its prune does not count files it just pretended to remove. */
+export function forgetNames(dir: string, requested: string[]): string[] {
+  const out: string[] = [];
+  for (const given of requested) {
+    const name = bareName(given);
+    if (name === null || out.includes(name)) continue;
+    if (existsSync(join(dir, name))) out.push(name);
+  }
+  return out;
+}
+
 export function forgetFiles(dir: string, requested: string[], dry = false): number {
   let removed = 0;
   for (const given of requested) {
