@@ -153,19 +153,19 @@ test("the previous waking is stated as counts, never as a story", () => {
   const { input } = fixture();
   const knocked = buildPacket(
     input({
-      lastCycle: { wake: "knock", talkedTo: ["telegram:@you"], touched: 0 },
+      lastCycle: { at: "2026-03-02T08:59:00Z", wake: "knock", tools: 9, inbox: 1, talkedTo: ["telegram:@you"], touched: 0 },
     }),
   );
   assert.match(knocked, /上一轮：有人敲门，和 telegram:@you 说了话，写了 0 个文件。/);
 
   const worked = buildPacket(
-    input({ lastCycle: { wake: "timer", talkedTo: [], touched: 3 } }),
+    input({ lastCycle: { at: "2026-03-02T08:30:00Z", wake: "timer", tools: 9, inbox: 0, talkedTo: [], touched: 3 } }),
   );
   assert.match(worked, /上一轮：你自己的闹钟，写了 3 个文件。/);
 
   const many = buildPacket(
     input({
-      lastCycle: { wake: "timer", talkedTo: ["telegram:@a", "telegram:@b"], touched: 1 },
+      lastCycle: { at: "2026-03-02T08:30:00Z", wake: "timer", tools: 6, inbox: 0, talkedTo: ["telegram:@a", "telegram:@b"], touched: 1 },
     }),
   );
   assert.match(many, /上一轮：你自己的闹钟，和 2 个人说了话，写了 1 个文件。/);
@@ -187,6 +187,39 @@ test("a subdirectory of open-loops is not itself an unfinished thing", () => {
   writeText(join(paths.openLoops, "一件.md"), "x");
   writeText(join(paths.openLoops, "closed", "已闭.md"), "x");
   assert.match(buildPacket(input({})), /未闭合的事：1 件/);
+});
+
+test("a low peek longer than the inbox peek does not invent knocks", () => {
+  const { input } = fixture();
+  const msg = (id: string) => ({ id, file: `${id}.json`, text: `第 ${id} 句`, chat: 7 });
+  const text = buildPacket(
+    input({
+      inbox: [msg("a"), msg("b"), msg("c")],
+      // 两次 peek 之间可能又有消息进来；lowInbox 比 inbox 长时，
+      // `slice(0, inbox.length - lowInbox.length)` 的负数终点会让 slice 从末尾往回数，
+      // 把不相干的前两条当成叫醒它的 knock 报出来。
+      lowInbox: [msg("x"), msg("y"), msg("z"), msg("w")],
+    }),
+  );
+  assert.doesNotMatch(text, /有人在跟你说话：2 条/);
+  assert.doesNotMatch(text, /有人在跟你说话：[1-9]\d* 条/);
+});
+
+test("the thread's age uses the page's clock, not the wall clock", () => {
+  const { input } = fixture();
+  const text = buildPacket(
+    input({
+      thread: {
+        who: "telegram:@you",
+        chat: 1,
+        total: 1,
+        bytes: 100,
+        // 固定时钟 2026-03-02T09:00:00Z 往前整整五天 = 120 小时
+        lines: [{ dir: "in", text: "在吗", at: "2026-02-25T09:00:00Z" }],
+      },
+    }),
+  );
+  assert.match(text, /最早的一句在 120\.0h前/);
 });
 
 test("a conversation carries how much was said and when it started", () => {

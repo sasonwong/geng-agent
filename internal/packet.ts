@@ -144,9 +144,11 @@ export interface ThreadInput {
   }[];
 }
 
-function renderThread(t: ThreadInput): string[] {
+function renderThread(t: ThreadInput, nowMs: number): string[] {
   const oldest = t.lines[0]?.at ? Date.parse(t.lines[0].at) : NaN;
-  const age = Number.isNaN(oldest) ? "" : `，最早的一句在 ${formatDuration(Date.now() - oldest)}前`;
+  // The whole page is built from one clock reading, so a preview taken at a fixed time
+  // cannot have this one line drift onto the real wall clock.
+  const age = Number.isNaN(oldest) ? "" : `，最早的一句在 ${formatDuration(nowMs - oldest)}前`;
   const out = [`你和 ${t.who} 说过 ${t.total} 句，下面是最新的 ${t.lines.length} 句${age}：`];
   for (const line of t.lines) {
     const back = line.quote?.text ? `（回：${excerpt(line.quote.text, 60)}）` : "";
@@ -337,7 +339,7 @@ export function buildPacket(input: PacketInput): string {
     const more = waiting.length > 3 ? `，还有 ${waiting.length - 3} 个` : "";
     out.push("", `还没回的：${shown.join("、")}${more}。`);
   }
-  if (thread) out.push("", ...renderThread(thread));
+  if (thread) out.push("", ...renderThread(thread, nowMs));
   // Only the knock lives in inbox/; the ambient chatter is in inbox/low/. Reporting the
   // whole of `inbox` under the root path is what let a page say
   // "有人在跟你说话：28 条，在 /inbox/" over a directory holding one file, and then count
@@ -346,7 +348,10 @@ export function buildPacket(input: PacketInput): string {
   // that belongs to inbox/ is what the low peek did not supply. Slicing rather than
   // filtering by file name keeps a message that is on disk in both places — a crash
   // between the write and the offset, then a routing change — counted as the knock it was.
-  const loud = inbox.slice(0, inbox.length - lowInbox.length);
+  // The low inbox is normally a suffix of `inbox`, but the two peeks are taken at
+  // different moments: a message can arrive between them, and a negative end would make
+  // `slice` count from the END and silently drop the wrong half of the page.
+  const loud = inbox.slice(0, Math.max(0, inbox.length - lowInbox.length));
   if (loud.length > 0) {
     // the thread block above shows one conversation; say how many people are actually
     // waiting, or the page quietly privileges whoever spoke last
