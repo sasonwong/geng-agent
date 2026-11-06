@@ -8,7 +8,7 @@
  * The socket is mounted read-only into the container, so a tool cannot replace it, and
  * a host-side process is the only thing on the other end.
  */
-import { createWriteStream, renameSync, rmSync } from "node:fs";
+import { createWriteStream, renameSync, rmSync, type WriteStream } from "node:fs";
 import { request } from "node:http";
 
 export interface UdsReply {
@@ -98,14 +98,26 @@ export function getToFile(
     // and a file that was already there must not be deleted by a failed replacement.
     const part = `${dest}.geng-part-${process.pid}`;
     let settled = false;
-    const fail = (err: Error): void => {
-      if (settled) return;
-      settled = true;
+    let out: WriteStream | null = null;
+    const removePart = (): void => {
       try {
         rmSync(part, { force: true });
       } catch {
         // the cleanup is best effort; the name says what it is
       }
+    };
+    const fail = (err: Error): void => {
+      if (settled) return;
+      settled = true;
+      // `createWriteStream` opens asynchronously. Removing the name before that open lands
+      // removes nothing, and the open then creates the file — a truncated download left a
+      // `.geng-part-<pid>` behind, one per failure, and only the name said what it was. So:
+      // destroy the stream, and remove again once it has closed.
+      if (out !== null && !out.closed) {
+        out.once("close", removePart);
+        out.destroy();
+      }
+      removePart();
       reject(err);
     };
     const req = request(
@@ -121,15 +133,16 @@ export function getToFile(
           return;
         }
         rmSync(part, { force: true });
-        const out = createWriteStream(part);
+        const stream = createWriteStream(part);
+        out = stream;
         let bytes = 0;
         res.on("data", (c: Buffer) => {
           bytes += c.length;
         });
-        res.pipe(out);
+        res.pipe(stream);
         res.on("error", fail);
-        out.on("error", fail);
-        out.on("finish", () => {
+        stream.on("error", fail);
+        stream.on("finish", () => {
           if (settled) return;
           settled = true;
           try {

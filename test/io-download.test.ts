@@ -179,3 +179,23 @@ test("非 200 只报错，不碰 dest", async () => {
 });
 
 
+
+test("an error before the part file is even open leaves nothing behind", async () => {
+  // `createWriteStream` opens asynchronously, so removing the name in the error handler can
+  // land first — and then the open creates the file. A response that dies in the same tick
+  // as its headers makes that ordering the usual one instead of a scheduling accident.
+  const s = await serve((_req, res) => {
+    res.writeHead(200, { "content-length": "100", "content-type": "application/octet-stream" });
+    res.socket?.destroy();
+  });
+  const { dir, dest, part } = destPaths("openrace");
+  try {
+    await assert.rejects(() => getToFile(s.sock, "/files/F1", dest, 5000));
+    await waitForGone(part);
+    assert.equal(existsSync(part), false, "半截下载留下了 part 文件");
+    assert.equal(existsSync(dest), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await s.close();
+  }
+});
