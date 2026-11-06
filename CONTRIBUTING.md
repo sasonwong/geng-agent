@@ -100,12 +100,8 @@ merge 或 squash**：那两种都会在 `main` 上造出一个"发布提交"，`
 - 描述写**为什么**：原来的行为、为什么不对、改成了什么。不要复述 diff。
 - 写清验证方式。测试没覆盖的部分，明说怎么手工验证的，或者明说没验证。
 - 引用 issue / 审计编号（如 `L1`），不要把值本身抄进来。
-- 合并前必须同时满足：CI 绿 + 至少一个 approval。**没有人能批准自己的 PR**，所以机器人和人都
-  需要另一个人点。
-- 提交邮箱要能归属到账号（`<数字>+<login>@users.noreply.github.com`）。GitHub 对未归属的提交
-  要求**额外一个** approval，所以这不只是好看。不带 `+数字` 的
-  `login@users.noreply.github.com` 是旧格式：GitHub 会把它对到同名账号，提交记在**别人**名下，
-  比未归属更糟。
+- 提交邮箱要能归属到账号（`<数字>+<login>@users.noreply.github.com`）。不带 `+数字` 的
+  `login@users.noreply.github.com` 是旧格式：GitHub 会把它对到同名账号，提交记在**别人**名下。
 
 ## 提交信息
 
@@ -133,7 +129,11 @@ argv、解析和落盘的状态，所以 CI 上不需要这些东西。
 
 ## 谁合并、谁部署
 
-- **合并**：仓库主人点 approval 并合并。分支保护要求至少一个 approval，且 `main` 拒绝直接推送。
+- **合并**：`dev` 的 PR 不需要 approval。仓库主人是 `always` bypass——直接推、force-push 都行，
+  `check` 对他是软的；有写权限的协作者是 `pull_request` bypass——走 PR 合，`check` 必须绿。
+  机器人不在 bypass 里，而且 GitHub 拒绝它批准自己的 PR，所以它的合并请求会被
+  `405 At least 1 approving review is required` 挡掉：机器人开 PR、人合，这是规则，不是流程疏忽。
+  `main` 不接受直接推送。
 - **部署**：仓库主人在宿主机上执行（`deploy/update.sh`，或重启 unit）。容器里的实例能改代码，
   但改不动正在跑它的那台机器——否则它就等于能改监管自己的程序。
 - **规则挡的是分支，不是权限**：推 `main` 会以 `repository rule violations` 被拒，那不是 token
