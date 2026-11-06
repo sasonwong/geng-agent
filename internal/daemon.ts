@@ -606,7 +606,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       markSeen(
         [paths.inbox, paths.inboxLow],
         paths.inboxSeen,
-        [...inbox.map((m) => m.file), ...read],
+        // Carry the directory: both halves may hold the same `<chat>-<id>.json`, and a bare
+        // name alone moved whichever it found first (or overwrote the first seen/ record).
+        [...inbox.map((m) => ({ dir: m.dir, file: m.file })), ...read],
       );
     }
     const before = escalation;
