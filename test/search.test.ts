@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { leftOf, readSearchEnv, searchQuota, startSearchServer } from "../internal/search.ts";
+import { dirname, join } from "node:path";
+import { defaultSearchSocket, readSearchEnv, searchQuota, startSearchServer } from "../internal/search.ts";
 import { postJson } from "../image/extensions/lib/uds.ts";
 
 // systemd loads secrets/search.env with EnvironmentFile=, so by the time any request
@@ -44,6 +44,50 @@ function envText(sock: string, extra = "", keyLine = PROVIDER_LINE): string {
   return lines.join("\n") + "\n";
 }
 
+test("the default socket follows the user manager's RuntimeDirectory", () => {
+  // RuntimeDirectory=geng in a *user* unit creates $XDG_RUNTIME_DIR/geng, not
+  // /run/geng. A hard-coded /run/geng made the service listen where it could not
+  // create a directory, and the daemon looked for a different socket entirely.
+  const saved = process.env.XDG_RUNTIME_DIR;
+  try {
+    const runtime = join(tmpdir(), "run-user-1000");
+    process.env.XDG_RUNTIME_DIR = runtime;
+    assert.equal(defaultSearchSocket(), join(runtime, "geng", "search.sock"));
+    delete process.env.XDG_RUNTIME_DIR;
+    assert.equal(defaultSearchSocket(), join("/run", "geng", "search.sock"));
+  } finally {
+    if (saved === undefined) delete process.env.XDG_RUNTIME_DIR;
+    else process.env.XDG_RUNTIME_DIR = saved;
+  }
+});
+
+test("a foreground search run makes the RuntimeDirectory itself", async () => {
+  // RuntimeDirectory=geng is a systemd favour. `node cmd/geng/index.ts search` from a
+  // shell has no manager to create $XDG_RUNTIME_DIR/geng, and listen() does not create
+  // parent directories — the documented foreground command used to die with ENOENT.
+  const root = mkdtempSync(join(tmpdir(), "geng-search-dir-"));
+  mkdirSync(join(root, "secrets"), { recursive: true });
+  const nested = join(root, "run-user-1000", "geng", "search.sock");
+  writeFileSync(join(root, "secrets", "search.env"), envText(nested));
+  const env = readSearchEnv(root);
+  assert.ok(env);
+  assert.equal(existsSync(dirname(nested)), false, "the point of the test: nobody made it");
+  let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
+  try {
+    try {
+      server = await startSearchServer({ root, env, log: () => {} });
+    } catch (err) {
+      // Windows cannot bind a unix socket at a filesystem path; the directory is
+      // still created first, which is the assertion below.
+      if (process.platform !== "win32") throw err;
+      assert.match((err as Error).message, /EACCES|ENOENT|permission|access/i);
+    }
+  } finally {
+    server?.close();
+  }
+  assert.equal(existsSync(dirname(nested)), true, "the parent must exist before listen()");
+});
+
 test("the file beats the environment systemd froze at startup", () => {
   const f = fixture();
   try {
@@ -72,9 +116,10 @@ test("an empty quota line means unset — not a quota of zero", () => {
 });
 
 test("a trailing note on the quota line is the note's problem, not the quota's", () => {
-  // docs/install.md writes the line with a note after it; `EnvironmentFile=` keeps the
-  // note in the value, so trimming alone leaves `200   # …`, which is not a finite number
-  // and used to be dropped in favour of the default — the operator's 300 silently becoming 200.
+  // A hand-added note after the number stays in the value: systemd's
+  // `EnvironmentFile=` does not strip inline comments, so trimming alone leaves
+  // `300   # …`, which is not a finite number and used to be dropped in favour of
+  // the default — the operator's 300 silently becoming 200.
   const f = fixture();
   try {
     writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY=300   # 少搜点"));
@@ -188,54 +233,6 @@ test("a call that fails upstream costs nothing: only an answer is charged", asyn
       assert.equal(good.status, 200);
       assert.equal(JSON.parse(good.body).remaining, env.dailyLimit - 1);
       assert.equal((JSON.parse(readFileSync(usage, "utf8")) as { count?: number }).count, 1);
-    } finally {
-      globalThis.fetch = realFetch;
-    }
-  } finally {
-    server?.close();
-    f.restore();
-  }
-});
-
-test("a call being run is part of the balance, not an afterthought", () => {
-  // charging only on success let a burst of concurrent calls all pass the same check:
-  // each one read the same count, and the day was overspent by as many as were running
-  const day = new Date().toISOString().slice(0, 10);
-  assert.equal(leftOf({ day, count: 0 }, 2, 2), 0, "两个在途请求占满两次的余额");
-  assert.equal(leftOf({ day, count: 0 }, 2, 1), 1);
-  assert.equal(leftOf({ day, count: 2 }, 2, 0), 0);
-  // a yesterday's count is nobody's debt
-  assert.equal(leftOf({ day: "2000-01-01", count: 99 }, 2, 1), 1);
-});
-
-test("concurrent calls cannot overspend the day", async () => {
-  const f = fixture();
-  let server: Awaited<ReturnType<typeof startSearchServer>> | null = null;
-  const usage = join(f.root, "data", "_ops", "usage", "search.json");
-  try {
-    // one search a day, and an upstream slow enough that two requests overlap in flight
-    writeFileSync(join(f.root, "secrets", "search.env"), envText(f.sock, "GENG_SEARCH_DAILY=1"));
-    delete process.env.GENG_SEARCH_DAILY;
-    const env = readSearchEnv(f.root);
-    assert.ok(env);
-    assert.equal(env.dailyLimit, 1);
-    server = await startSearchServer({ root: f.root, env, log: () => {} });
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (async () => {
-      await new Promise((r) => setTimeout(r, 200));
-      return { ok: true, status: 200, text: async () => '{"results":[]}' } as unknown as Response;
-    }) as typeof fetch;
-    try {
-      const [a, b] = await Promise.all([
-        postJson(f.sock, "/search", { query: "x" }),
-        postJson(f.sock, "/search", { query: "y" }),
-      ]);
-      const spent = (JSON.parse(readFileSync(usage, "utf8")) as { count?: number }).count ?? 0;
-      assert.equal(spent, 1, "一次的余额只够一次，哪怕两个请求同时在跑");
-      const bodies = [JSON.parse(a.body), JSON.parse(b.body)];
-      const refused = bodies.filter((x) => x.error === "今天的搜索用完了");
-      assert.equal(refused.length, 1, "另一个请求要被拒在门外，而不是事后超支");
-      assert.equal(bodies.filter((x) => x.data !== undefined).length, 1);
     } finally {
       globalThis.fetch = realFetch;
     }

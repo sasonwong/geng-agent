@@ -1,6 +1,6 @@
 import { createServer, type Server } from "node:http";
-import { chmodSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { readEnvFile } from "./secret.ts";
 import { ensureGatewayDirs } from "./mute.ts";
 import { readJson, writeJson } from "./fs.ts";
@@ -20,8 +20,19 @@ export interface SearchEnv {
   dailyLimit: number;
 }
 
-/** Where the socket lives when nobody says otherwise: `RuntimeDirectory=geng` owns it. */
-export const DEFAULT_SEARCH_SOCKET = "/run/geng/search.sock";
+/**
+ * Where the socket lives when nobody says otherwise.
+ *
+ * `RuntimeDirectory=geng` is created by the **user** manager under `$XDG_RUNTIME_DIR`
+ * (normally `/run/user/<uid>/geng`), not at `/run/geng` — that is where a *system* unit
+ * would put it. Every unit in deploy/ is a user unit and update.sh restarts them with
+ * `systemctl --user`, so a hard-coded `/run/geng` named a directory that did not exist and
+ * that a non-root process could not create.
+ */
+export function defaultSearchSocket(): string {
+  const runtime = process.env.XDG_RUNTIME_DIR ?? "";
+  return join(runtime === "" ? "/run" : runtime, "geng", "search.sock");
+}
 
 /**
  * A line like `GENG_SEARCH_DAILY=` carries no number, and `Number("")` is 0 — which the
@@ -60,7 +71,7 @@ export function readSearchEnv(root: string): SearchEnv | null {
   const file = readEnvFile(join(root, "secrets", "search.env"));
   const apiKey = file.DEEPSEEK_API_KEY ?? process.env.DEEPSEEK_API_KEY ?? "";
   if (apiKey === "") return null;
-  const bind = file.GENG_SEARCH_SOCKET ?? process.env.GENG_SEARCH_SOCKET ?? DEFAULT_SEARCH_SOCKET;
+  const bind = file.GENG_SEARCH_SOCKET ?? process.env.GENG_SEARCH_SOCKET ?? defaultSearchSocket();
   return {
     apiKey,
     socket: bind,
@@ -215,6 +226,9 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
     // connection, and the error arrives on the request. Unhandled, it is an uncaught
     // exception — the search endpoint dies and the tool the page promised is gone.
     req.on("error", (err) => log(`请求断了：${err.message}`));
+    // A client that hangs up mid-reply raises "error" on the response too; with no
+    // listener that is an uncaught exception in a long-lived endpoint.
+    res.on("error", () => {});
     req.on("end", () => {
       let params: Record<string, unknown>;
       try {
@@ -252,8 +266,12 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
             log(`${operation} 上游 ${response.status}: ${text.slice(0, 200)}`);
             return send(502, { error: `上游 ${response.status}`, remaining: remaining() });
           }
+          // Parse first: an upstream that answers 200 with an HTML error page used to
+          // throw after the 200 header was on the wire, and the catch then tried to write
+          // a 502 into a finished response.
+          const data: unknown = JSON.parse(text);
           res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ data: JSON.parse(text), remaining: charge() }));
+          res.end(JSON.stringify({ data, remaining: charge() }));
         } catch (err) {
           log(`${operation} 出错：${(err as Error).message}`);
           send(502, { error: (err as Error).message, remaining: remaining() });
@@ -267,6 +285,10 @@ export function startSearchServer(o: SearchServerOptions): Promise<Server> {
 
   return new Promise((resolve, reject) => {
     server.on("error", reject);
+    // A user unit gets its RuntimeDirectory from systemd, but `node cmd/geng/index.ts
+    // search` (documented in docs/install.md) has no manager to make it: listen() does not
+    // create parent directories, so a foreground run died with ENOENT.
+    mkdirSync(dirname(env.socket), { recursive: true, mode: 0o700 });
     // A socket left by an earlier run is a corpse that refuses connections, and the
     // error looks exactly like "the service is down" — remove it before binding.
     rmSync(env.socket, { force: true });
