@@ -15,7 +15,10 @@ export function onDiskSchema(paths: Paths): number | null {
   const raw = readJson<{ stateSchema?: unknown } | null>(file, null);
   if (raw === null) return null; // no life yet
   // a file without the stamp was written before versioning: older, not unknown
-  return typeof raw.stateSchema === "number" ? raw.stateSchema : 0;
+  const v: unknown = raw.stateSchema;
+  // 1.5、-1、以及被写坏的大数都不是版本号；它们会让 schemaConflict 误判成
+  // 「更新版本写的」而拒绝启动。只认非负安全整数。
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0;
 }
 
 /**
