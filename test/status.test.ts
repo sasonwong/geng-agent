@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { printStatus, spendSince, statusLine } from "../internal/status.ts";
+import { printStatus, spendSince } from "../internal/status.ts";
 import { makePaths } from "../internal/paths.ts";
 import { writeText } from "../internal/fs.ts";
 
@@ -44,17 +44,39 @@ test("status counts open loops the way the page does: files, not the old JSON sh
   assert.match(lines.join("\n"), /未闭合\s+1 件/);
 });
 
-test("status counts a message the way the daemon does: it has to parse", () => {
-  // A file nothing can read is quarantined at the start of the next round, and until then
-  // it is not a message: the knock count has been the parser's since the sixty-cycle loop
-  // (see inbox.ts). status counted file names, so the two numbers disagreed exactly when
-  // something was broken — and status is the line a person reads first.
+test("快照列表读不出时 status 说「读不出」，不是笼统的「没有」", async () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const p = makePaths(root, "alice");
-  mkdirSync(p.inbox, { recursive: true });
-  writeText(join(p.inbox, "1-1.json"), JSON.stringify({ id: "1-1", text: "在吗" }));
-  writeText(join(p.inbox, "1-2.json"), "{not json");
-  writeText(join(p.inbox, "1-3.json"), JSON.stringify({ id: "1-3", text: "   " }));
-  assert.match(statusLine(root, "alice"), /收件=1\b/);
-  rmSync(root, { recursive: true, force: true });
+  mkdirSync(p.openLoops, { recursive: true });
+  // 没有 secrets/rustic.env，也没有 RUSTIC_PASSWORD：listSnapshots 返回 ok:false。
+  // 旧实现把读不出和空列表都吞成 []，status 只说「没有（或 rustic 不可用）」。
+  const lines: string[] = [];
+  const old = console.log;
+  console.log = (s: string) => lines.push(s);
+  try {
+    await printStatus(root, "alice");
+  } finally {
+    console.log = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.match(lines.join("\n"), /快照\s+读不出（/);
+});
+
+test("session 文件在列出来之后消失，status 不崩", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = makePaths(root, "alice");
+  mkdirSync(p.sessionDir, { recursive: true });
+  // dangling symlink：readdirSync 会把它当 .jsonl 列出来，statSync 却抛 ENOENT，
+  // 正是「列出来之后被轮转/清理删掉」的形状。旧实现里整个 printStatus 会抛出去。
+  symlinkSync(join(p.sessionDir, "gone.jsonl"), join(p.sessionDir, "dangling.jsonl"), "file");
+  const lines: string[] = [];
+  const old = console.log;
+  console.log = (s: string) => lines.push(s);
+  try {
+    await printStatus(root, "alice");
+  } finally {
+    console.log = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.match(lines.join("\n"), /session\s+1 文件/, "列的那一件还在，只是按 0 字节算");
 });

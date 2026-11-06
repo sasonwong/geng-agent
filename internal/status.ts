@@ -69,7 +69,15 @@ export async function printStatus(root: string, instance: string): Promise<void>
   const identity = readText(p.identity);
   const loops = countLoops(p);
   const sessions = listSessionFiles(p.sessionDir);
-  const sessionBytes = sessions.reduce((n, f) => n + (statSync(f).size || 0), 0);
+  // A session rotated or cleaned up between the listing and the stat counts as 0: one
+  // vanished file must not take the whole status down.
+  const sessionBytes = sessions.reduce((n, f) => {
+    try {
+      return n + (statSync(f).size || 0);
+    } catch {
+      return n;
+    }
+  }, 0);
   const logTail = (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] ?? "（无）";
   const spend = spendSince(p, now);
   const snapshots = await listSnapshots(p);
@@ -98,9 +106,12 @@ export async function printStatus(root: string, instance: string): Promise<void>
     `  快照        ${
       !snapshots.ok
         ? `读不出（${snapshots.detail ?? "?"}）`
-        : latest
-          ? `${snapshots.snapshots.length} 张，最近 ${formatDuration(now - Date.parse(latest.time))} 前`
-          : "没有"
+        : latest === undefined
+          ? "没有"
+          : Number.isFinite(now - Date.parse(latest.time))
+            ? `${snapshots.snapshots.length} 张，最近 ${formatDuration(now - Date.parse(latest.time))} 前`
+            : // some rustic builds leave the time out, and Date.parse("") is NaN
+              `快照时间读不出来（${snapshots.snapshots.length} 张）`
     }`,
     `  上次一轮    ${logTail}`,
   ];
