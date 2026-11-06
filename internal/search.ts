@@ -39,10 +39,11 @@ export function defaultSearchSocket(): string {
  * quota then reads as "no searches today", silently, forever. An empty value means the
  * file does not carry that key: fall through to the environment, then to the default.
  *
- * A trailing note goes too: `docs/install.md` itself writes `GENG_SEARCH_DAILY=200   # 改
- * 了不用重启`, and `EnvironmentFile=` hands that whole line over as the value. A number
- * that stops being a number falls back *silently*, so this is the one reading worth being
- * tolerant about; a mangled GENG_SEARCH_SOCKET fails loudly at listen time instead.
+ * A trailing note goes too: `EnvironmentFile=` hands the line over verbatim, and an
+ * operator who writes `GENG_SEARCH_DAILY=200   # 少搜点` did not mean to change the
+ * quota. A number that stops being a number falls back *silently*, so this is the one
+ * reading worth being tolerant about; a mangled GENG_SEARCH_SOCKET fails loudly at
+ * listen time instead.
  */
 function limitOf(file: Record<string, string>, key: string, fallback: number): number {
   for (const raw of [file[key], process.env[key]]) {
