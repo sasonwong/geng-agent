@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
@@ -61,8 +61,12 @@ export function applyProposal(paths: Paths): ProposalResult | null {
   const applied: ProposalResult["applied"] = [];
   const rejected: ProposalResult["rejected"] = [];
 
-  if (!proposal) {
-    rejected.push({ key: "*", reason: "不是合法的 JSON" });
+  // `readJson` returns parsed JSON, not "an object or null": `42`, `"x"`, `false` and `[]`
+  // are all legal JSON. `getPath`/`flatten` quietly yield nothing for them, so the file
+  // was archived as applied with an empty applied *and* an empty rejected list — a
+  // proposal that changed nothing answered nothing.
+  if (proposal === null || typeof proposal !== "object" || Array.isArray(proposal)) {
+    rejected.push({ key: "*", reason: "提案必须是一个 JSON 对象" });
   } else {
     for (const [key, rule] of Object.entries(NEGOTIABLE)) {
       const proposed = getPath(proposal, key);
@@ -91,13 +95,24 @@ export function applyProposal(paths: Paths): ProposalResult | null {
   const historyDir = join(paths.meta, "policy.history");
   mkdirSync(historyDir, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  copyFileSync(paths.policy, join(historyDir, `${stamp}.json`));
+  const historyFile = join(historyDir, `${stamp}.json`);
+  // loadPolicy() happily uses the defaults when policy.json is absent, so applying a
+  // proposal in that state used to throw ENOENT here and leave the proposal on disk,
+  // retried on every waking. Record what was in force: the file, or those defaults.
+  if (existsSync(paths.policy)) copyFileSync(paths.policy, historyFile);
+  else writeFileSync(historyFile, JSON.stringify(current, null, 2) + "\n");
 
   if (applied.length > 0) {
     // validate before writing: a malformed result must never replace a working policy
-    writeFileSync(`${paths.policy}.tmp-${process.pid}`, JSON.stringify(draft, null, 2) + "\n");
-    loadPolicy(`${paths.policy}.tmp-${process.pid}`);
-    renameSync(`${paths.policy}.tmp-${process.pid}`, paths.policy);
+    const tmp = `${paths.policy}.tmp-${process.pid}`;
+    try {
+      writeFileSync(tmp, JSON.stringify(draft, null, 2) + "\n");
+      loadPolicy(tmp);
+      renameSync(tmp, paths.policy);
+    } finally {
+      // a draft that fails validation must not leave a stray file in data/<inst>/ forever
+      rmSync(tmp, { force: true });
+    }
   }
 
   renameSync(file, join(paths.meta, `proposal.applied.${stamp}.json`));

@@ -105,6 +105,30 @@ function int(v: unknown, path: string, min: number): number {
   return n;
 }
 
+/** A wrong type in an allow list used to become `[]` — a silent "refuse everything". */
+function stringList(v: unknown, path: string): string[] {
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) {
+    throw new ExpectedError(`policy: ${path} 要是字符串数组`);
+  }
+  return (v as string[]).map((x) => x.trim()).filter((x) => x !== "");
+}
+
+/**
+ * `Intl.DateTimeFormat` throws RangeError on a misspelled IANA name, and `localClock` is
+ * called by buildPacket with no catch: one typo made every waking die at the same line
+ * while doctor still said the policy parsed fine. A name that cannot format a date is a
+ * bad value, not a runtime surprise.
+ */
+function timezoneOf(v: unknown, path: string): string {
+  const name = str(v, path);
+  try {
+    new Intl.DateTimeFormat("en-GB", { timeZone: name });
+  } catch {
+    throw new ExpectedError(`policy: ${path} 不是合法的时区名（收到 ${name}）`);
+  }
+  return name;
+}
+
 function str(v: unknown, path: string): string {
   if (typeof v !== "string" || v.length === 0) {
     throw new ExpectedError(`policy: ${path} must be a non-empty string`);
@@ -145,7 +169,7 @@ export function loadPolicy(file: string): Policy {
       repeatThreshold: int(cycle.repeatThreshold ?? d.cycle.repeatThreshold, "cycle.repeatThreshold", 2),
     },
     backup: { enabled: p.backup?.enabled !== false },
-    timezone: str(p.timezone ?? d.timezone, "timezone"),
+    timezone: timezoneOf(p.timezone ?? d.timezone, "timezone"),
     files: {
       maxAgeDays: num(p.files?.maxAgeDays ?? d.files.maxAgeDays, "files.maxAgeDays", 0),
       maxMb: num(p.files?.maxMb ?? d.files.maxMb, "files.maxMb", 1),
@@ -173,21 +197,17 @@ export function loadPolicy(file: string): Policy {
               // A wildcard here would be an open proxy on the host; direct network is what
               // "let it go anywhere" already means, and it is a different field with a
               // different consequence.
-              const list = Array.isArray(container.proxyAllow) ? container.proxyAllow : [];
-              if (list.some((x) => String(x).replace(/^!/, "").includes("/") || String(x).replace(/^!/, "").includes(":"))) {
+              const list = stringList(container.proxyAllow, "container.proxyAllow");
+              if (list.some((x) => x.replace(/^!/, "").includes("/") || x.replace(/^!/, "").includes(":"))) {
                 throw new ExpectedError("policy: container.proxyAllow 只收主机名（\"*\" 表示全部，\"!name\" 排除），不收网段、URL 或端口");
               }
-              return list.filter((x): x is string => typeof x === "string" && x.trim() !== "").map((x) => x.trim());
+              return list;
             })(),
       proxyAllowCidrs:
         container.proxyAllowCidrs === undefined
           ? d.container.proxyAllowCidrs
           : (() => {
-              const list = Array.isArray(container.proxyAllowCidrs) ? container.proxyAllowCidrs : [];
-              return list
-                .filter((x): x is string => typeof x === "string" && x.trim() !== "")
-                .map((x) => x.trim())
-                .map((entry) => {
+              return stringList(container.proxyAllowCidrs, "container.proxyAllowCidrs").map((entry) => {
                   const body = entry.startsWith("!") ? entry.slice(1) : entry;
                   // A name here would never match an address, and the silence would look
                   // like the proxy ignoring the rule.

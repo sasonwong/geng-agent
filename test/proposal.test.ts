@@ -58,6 +58,25 @@ test("the frame is not negotiable", () => {
   assert.equal(loadPolicy(paths.policy).cycle.timeoutSec, 1800);
 });
 
+test("a proposal works on an instance whose policy.json was never written", () => {
+  // loadPolicy() uses the defaults when the file is missing, so applyProposal() has to
+  // as well: copyFileSync used to throw ENOENT and leave the proposal to be retried
+  // on every waking forever.
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const paths = makePaths(root, "alice");
+  for (const d of [paths.book, paths.meta]) mkdirSync(d, { recursive: true });
+  writeJson(join(paths.book, "policy.proposal.json"), { cycle: { defaultWakeMinutes: 45 } });
+
+  const result = applyProposal(paths);
+  assert.deepEqual(result?.applied, [
+    { key: "cycle.defaultWakeMinutes", from: 30, to: 45 },
+  ]);
+  assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 45);
+  const history = readdirSync(join(paths.meta, "policy.history"));
+  assert.equal(history.length, 1, "改之前的样子也要留一份");
+  assert.match(readFileSync(join(paths.meta, "policy.history", history[0] as string), "utf8"), /"defaultWakeMinutes": 30/);
+});
+
 test("no proposal means no work", () => {
   const paths = fixture();
   assert.equal(applyProposal(paths), null);
@@ -72,18 +91,16 @@ test("a malformed proposal is set aside, not obeyed", () => {
   assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 30);
 });
 
-test("applying a proposal keeps the keys this build does not know", () => {
-  // Adding a field to the policy is the one change the interface promises is safe, which
-  // only holds if the writer does not rebuild the file from what it understands. It did:
-  // the draft started from `loadPolicy()`'s output, so one proposal on an older build
-  // dropped every field a newer build had added.
-  const paths = fixture();
-  const base = defaultPolicy();
-  writeJson(paths.policy, { ...base, cycle: { ...base.cycle, aNewerKey: true } });
-  writeJson(join(paths.book, "policy.proposal.json"), { cycle: { defaultWakeMinutes: 45 } });
-
-  assert.equal(applyProposal(paths)?.applied.length, 1);
-  const written = JSON.parse(readFileSync(paths.policy, "utf8")) as { cycle: Record<string, unknown> };
-  assert.equal(written.cycle.aNewerKey, true, "采用一个提议不该删掉它不认识的字段");
-  assert.equal(written.cycle.defaultWakeMinutes, 45);
+test("legal JSON that is not an object is answered, not silently applied", () => {
+  // `readJson` parses, so `42`, `"x"` and `[]` are not "invalid JSON". `getPath` and
+  // `flatten` both yield nothing for them: the file used to be archived as an applied
+  // proposal with an empty applied list and an empty rejected list — no answer at all.
+  for (const value of [42, "x", false, [], null]) {
+    const paths = fixture();
+    writeFileSync(join(paths.book, "policy.proposal.json"), JSON.stringify(value));
+    const result = applyProposal(paths);
+    assert.equal(result?.applied.length, 0);
+    assert.equal(result?.rejected[0]?.key, "*", `${JSON.stringify(value)} 被无声归档了`);
+    assert.equal(loadPolicy(paths.policy).cycle.defaultWakeMinutes, 30);
+  }
 });
