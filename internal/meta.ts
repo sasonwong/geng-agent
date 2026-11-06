@@ -58,8 +58,43 @@ export interface CutRecord {
   capMinutes?: number;
 }
 
+function finite(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * The state file on disk is input, not a promise: the daemon does `wakings + 1`, subtracts
+ * `lastWakeMs`, and pastes `lastSaid` into the wake packet. A hand edit or an older writer
+ * left `"wakings": "3"`, and `3 + 1` became `"31"`; a string timestamp reached
+ * formatDuration as NaN. Fields that feed arithmetic are narrowed to finite numbers (and
+ * dropped otherwise), `lastSaid` to a string or null; nested shapes are passed through.
+ */
 export function readMeta(paths: Paths): Meta {
-  return readJson<Meta>(join(paths.meta, "state.json"), {});
+  const raw = readJson<unknown>(join(paths.meta, "state.json"), {});
+  // A file that literally holds `null`, an array or a scalar comes back as-is (the
+  // fallback only covers missing or unparseable), and reading `.env`/`.wakings` throws.
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const obj = raw as Record<string, unknown>;
+  const out: Record<string, unknown> = { ...obj };
+  for (const key of ["stateSchema", "lastWakeMs", "wakings"] as const) {
+    const v = finite(obj[key]);
+    if (v === undefined) delete out[key];
+    else out[key] = v;
+  }
+  if (typeof obj.lastSaid !== "string" && obj.lastSaid !== null) delete out.lastSaid;
+  const cycle = obj.lastCycle;
+  if (cycle !== null && typeof cycle === "object" && !Array.isArray(cycle)) {
+    const c = { ...(cycle as Record<string, unknown>) };
+    for (const key of ["tools", "inbox", "touched"] as const) {
+      const v = finite(c[key]);
+      if (v === undefined) delete c[key];
+      else c[key] = v;
+    }
+    out.lastCycle = c;
+  } else {
+    delete out.lastCycle;
+  }
+  return out as unknown as Meta;
 }
 
 export function writeMeta(paths: Paths, meta: Meta): void {
@@ -68,10 +103,17 @@ export function writeMeta(paths: Paths, meta: Meta): void {
 }
 
 export function readWakes(paths: Paths, nowMs: number): number[] {
-  return readJson<number[]>(
-    join(paths.meta, "wakes.json"),
-    [],
-  ).filter((t) => nowMs - t < DAY_MS);
+  // readJson's fallback only applies to a missing or unparseable file; a file whose
+  // content is legal JSON of the wrong shape (`null`, `{}`, `"oops"`, `42`) comes back
+  // as-is, and `.filter` is not a function — that is a crash on every waking.
+  const arr = readJson<unknown>(join(paths.meta, "wakes.json"), []);
+  if (!Array.isArray(arr)) return [];
+  // A timestamp in the future (a restored snapshot, a clock that jumped back) is not a
+  // waking inside the window, and NaN never compares true.
+  return arr.filter(
+    (t): t is number =>
+      typeof t === "number" && Number.isFinite(t) && nowMs - t >= 0 && nowMs - t < DAY_MS,
+  );
 }
 
 /**

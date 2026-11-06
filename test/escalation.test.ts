@@ -1,10 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { advance, parkNotice, planFor, slowDownNotice, timeoutNotice, type Escalation } from "../internal/escalation.ts";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { advance, loadEscalation, parkNotice, planFor, slowDownNotice, timeoutNotice, type Escalation } from "../internal/escalation.ts";
 import { classify } from "../internal/symptoms.ts";
+import { makePaths } from "../internal/paths.ts";
 import type { RpcResult } from "../internal/rpc.ts";
 
 const FRESH: Escalation = { level: 0, streak: 0, symptom: null, detail: "" };
+
+function escalationPaths(): ReturnType<typeof makePaths> {
+  const root = mkdtempSync(join(tmpdir(), "geng-esc-"));
+  const paths = makePaths(root, "alice");
+  mkdirSync(paths.meta, { recursive: true });
+  return paths;
+}
 
 function rpc(over: Partial<RpcResult>): RpcResult {
   return {
@@ -183,4 +194,54 @@ test("a round whose last request errored is not reported as an empty one", () =>
   );
   // an error it recovered from is not a failed round: the last thing it said was words
   assert.equal(classify(rpc({ endedOnModelError: false })), "ok");
+});
+
+test("loadEscalation 把越界或非法的计数夹回安全范围", () => {
+  const paths = escalationPaths();
+  const cases: Array<[Record<string, unknown>, number, number]> = [
+    [{ level: 1.5, streak: -3 }, 0, 0],
+    [{ level: -2, streak: 2.5 }, 0, 0],
+    [{ level: 99, streak: 7 }, 4, 7],
+    [{ level: "3", streak: "4" }, 0, 0],
+    [{ level: 3, streak: 1e20 }, 3, 0],
+    [{ level: 2, streak: 2 }, 2, 2],
+  ];
+  for (const [stored, level, streak] of cases) {
+    writeFileSync(join(paths.meta, "escalation.json"), JSON.stringify(stored));
+    const e = loadEscalation(paths);
+    assert.equal(e.level, level, `level: ${JSON.stringify(stored)}`);
+    assert.equal(e.streak, streak, `streak: ${JSON.stringify(stored)}`);
+  }
+});
+
+test("恢复出来的非法 symptom 不会让唤醒纸说「上一轮undefined」", () => {
+  const paths = escalationPaths();
+  writeFileSync(join(paths.meta, "escalation.json"), JSON.stringify({
+    level: 2, streak: 2, symptom: "bogus", detail: "某次失败",
+  }));
+  const e = loadEscalation(paths);
+  assert.equal(e.level, 2);
+  assert.equal(e.streak, 2);
+  assert.equal(e.symptom, null);
+  const hint = planFor(e).hint ?? "";
+  assert.doesNotMatch(hint, /undefined/);
+  assert.match(hint, /上一轮/);
+});
+
+test("合法的 symptom 原样保留，timeoutNotice 仍能触发", () => {
+  const paths = escalationPaths();
+  writeFileSync(join(paths.meta, "escalation.json"), JSON.stringify({
+    level: 1, streak: 1, symptom: "timeout", detail: "超时",
+  }));
+  const e = loadEscalation(paths);
+  assert.equal(e.symptom, "timeout");
+  assert.match(timeoutNotice(FRESH, e) ?? "", /时间上限/);
+});
+
+test("escalation.json 字面是 null / 标量 / 数组时返回 FRESH，daemon 启动不会崩", () => {
+  const paths = escalationPaths();
+  for (const garbage of ["null", "42", '"oops"', "[1,2]", "true"]) {
+    writeFileSync(join(paths.meta, "escalation.json"), garbage);
+    assert.deepEqual(loadEscalation(paths), FRESH, `${garbage} 不是 escalation`);
+  }
 });

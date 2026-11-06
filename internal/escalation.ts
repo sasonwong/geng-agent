@@ -23,13 +23,30 @@ export interface Plan {
 
 const FRESH: Escalation = { level: 0, streak: 0, symptom: null, detail: "" };
 
+/** Counts are non-negative safe integers: a fraction or a negative falls through
+ *  planFor's default, and a NaN feeds the backoff arithmetic. */
+function countOrZero(v: unknown): number {
+  return typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : 0;
+}
+
 export function loadEscalation(paths: Paths): Escalation {
-  const raw = readJson<Partial<Escalation>>(join(paths.meta, "escalation.json"), {});
+  // readJson's fallback only covers a missing or unparseable file; a file that literally
+  // holds `null`, an array or a scalar comes back as-is and `raw.level` throws. The daemon
+  // calls this before its main loop, so one bad file is a daemon that never starts.
+  const raw = readJson<unknown>(join(paths.meta, "escalation.json"), {});
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return { ...FRESH };
+  // The file on disk is input: a restored snapshot or a hand edit can hold anything.
+  const o = raw as Record<string, unknown>;
   return {
-    level: typeof raw.level === "number" ? raw.level : 0,
-    streak: typeof raw.streak === "number" ? raw.streak : 0,
-    symptom: (raw.symptom as Symptom) ?? null,
-    detail: typeof raw.detail === "string" ? raw.detail : "",
+    level: Math.min(countOrZero(o.level), 4),
+    streak: countOrZero(o.streak),
+    // symptom has to be a key of SYMPTOM_LABEL, or the packet says "上一轮undefined"
+    // and timeoutNotice never fires.
+    symptom:
+      typeof o.symptom === "string" && Object.hasOwn(SYMPTOM_LABEL, o.symptom)
+        ? (o.symptom as Symptom)
+        : null,
+    detail: typeof o.detail === "string" ? o.detail : "",
   };
 }
 
