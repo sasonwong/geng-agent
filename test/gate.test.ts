@@ -128,6 +128,38 @@ test("a commit identity that is not a noreply address is caught", () => {
   assert.equal(r.out.includes("dev@corp.example"), false, "公开日志里不能印身份值");
 });
 
+test("a bare login noreply is the legacy form: it credits whoever owns that login", () => {
+  const dir = repo();
+  commit(dir, { "README.md": "ok\n" });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "x"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: {
+      ...CLEAN_GIT,
+      GIT_AUTHOR_EMAIL: "someone@users.noreply.github.com",
+      GIT_COMMITTER_EMAIL: "someone@users.noreply.github.com",
+    },
+  });
+  const r = scan(dir);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /提交身份: /);
+});
+
+test("the modern noreply — digits, a plus, and an App's [bot] — is the one that passes", () => {
+  const dir = repo();
+  commit(dir, { "README.md": "ok\n" });
+  execFileSync("git", ["commit", "-q", "--allow-empty", "-m", "x"], {
+    cwd: dir,
+    encoding: "utf8",
+    env: {
+      ...CLEAN_GIT,
+      GIT_AUTHOR_EMAIL: "5640022+geng-agent-bots[bot]@users.noreply.github.com",
+      GIT_COMMITTER_EMAIL: "5640022+geng-agent-bots[bot]@users.noreply.github.com",
+    },
+  });
+  assert.equal(scan(dir).code, 0);
+});
+
 // 下面几条钉的是「门没看见」和「门说干净」长得一模一样的那几种形状。旧实现把
 // `git show :<path>` 的失败一律 `catch { continue }`，于是非 ASCII 文件名、读不到的
 // blob、二进制内容都能换来一行 gate: ok；从子目录跑则干脆只扫那一个目录。

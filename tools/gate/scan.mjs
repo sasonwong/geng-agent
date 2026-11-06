@@ -166,9 +166,12 @@ for (const [f, text] of contents) {
 // that a green line means "these checks ran and found nothing", and zero files or zero
 // commits makes the same green line mean "there was nothing to check". `git log` exits
 // non-zero when there is no commit yet, so that case is caught rather than thrown.
+// 2017 年前的形式是 `login@users.noreply.github.com`，没有 `+数字`。它长得像下面这一种，
+// 但 GitHub 会把它对到同名账号上：提交不是"未归属"，而是记在了别人名下（真出现过两次，
+// 两次都是照抄旧文档的例子）。后缀不够，得看有没有那串数字。
 const noreply = (email) =>
   email === "noreply@github.com" ||
-  email.endsWith("@users.noreply.github.com") ||
+  /^\d+\+[^@\s]+@users\.noreply\.github\.com$/.test(email) ||
   email.endsWith(".invalid");
 
 let emails = new Set();
