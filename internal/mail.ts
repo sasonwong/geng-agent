@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ExpectedError } from "./errors.ts";
 import { createServer, type Server } from "node:http";
 import { makePaths, type Paths } from "./paths.ts";
 import { allocate, newFile } from "./ids.ts";
@@ -50,14 +51,35 @@ export function loadMailConfig(root: string): MailConfig | null {
   return Object.keys(out).length === 0 ? null : out;
 }
 
+/**
+ * `Number("")` is 0, and `listen(0)` asks the OS for a *random* port: a bind written as
+ * `127.0.0.1:` or `127.0.0.1:http` used to start a healthy listener the tunnel could never
+ * reach, and mail simply stopped arriving with no error anywhere. A malformed bind is a
+ * typo the operator has to be told about.
+ */
+function parseBind(raw: string): { host: string; port: number } {
+  const at = raw.lastIndexOf(":");
+  if (at === -1) {
+    throw new ExpectedError(`secrets/mail.env 的 GENG_MAIL_BIND 要写成 host:port，拿到 ${JSON.stringify(raw)}`);
+  }
+  const host = raw.slice(0, at).trim() || "127.0.0.1";
+  const text = raw.slice(at + 1).trim();
+  const port = Number(text);
+  if (text === "" || !Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new ExpectedError(`secrets/mail.env 的 GENG_MAIL_BIND 端口要是 1-65535，拿到 ${JSON.stringify(text)}`);
+  }
+  return { host, port };
+}
+
 export function readMailEnv(root: string): MailEnv | null {
   const file = readEnvFile(join(root, "secrets", "mail.env"));
-  const token = process.env.GENG_MAIL_TOKEN ?? file.GENG_MAIL_TOKEN ?? "";
+  // `||`, not `??`: an empty variable exported into the environment must not shadow a
+  // good value in the file and quietly disable the mailbox.
+  const token = process.env.GENG_MAIL_TOKEN || file.GENG_MAIL_TOKEN || "";
   if (token === "") return null;
   // loopback by default: the tunnel is the only thing that should reach it
-  const bind = process.env.GENG_MAIL_BIND ?? file.GENG_MAIL_BIND ?? "127.0.0.1:8788";
-  const [host, port] = bind.split(":");
-  return { token, bind: { host: host || "127.0.0.1", port: Number(port ?? 8788) } };
+  const bind = process.env.GENG_MAIL_BIND || file.GENG_MAIL_BIND || "127.0.0.1:8788";
+  return { token, bind: parseBind(bind) };
 }
 
 /**

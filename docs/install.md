@@ -498,7 +498,7 @@ wrangler secret put GENG_MAIL_TOKEN < <(sed -n 's/^GENG_MAIL_TOKEN=//p' secrets/
 ```
 
 Cloudflare 那边三步在 `deploy/mail-worker/README.md`：`wrangler deploy` + 两个 secret、
-tunnel 上加一个指向 `http://localhost:8788` 的 hostname、Email Routing 加一条 "Send to a Worker"。
+tunnel 上加一个指向 `http://127.0.0.1:8788` 的 hostname（端点只绑 IPv4 loopback；写 `localhost` 时若先解析成 `::1`，隧道连不上而报 502）、Email Routing 加一条 "Send to a Worker"。
 **机器上已经有 tunnel 就不要新建**，加一个 Public Hostname 就够。
 
 行为上要知道的三件事：**只收不回**（`say` 只说到会话）；**收信是 pull**——邮件只进

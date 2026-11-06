@@ -10,6 +10,7 @@ import {
   loadMailConfig,
   mailId,
   pendingMail,
+  readMailEnv,
   startMailServer,
   type MailConfig,
 } from "../internal/mail.ts";
@@ -23,6 +24,43 @@ function mailFile(dir: string, id: string): string {
 }
 
 const FROM = "someone@example.org";
+
+test("a malformed mail bind is an error, not a random port", () => {
+  // Number("") is 0 and listen(0) picks a port the tunnel cannot reach: a healthy
+  // listener, no error, and mail that never arrives. An empty environment variable
+  // shadowing a good file is the same silent failure one level up.
+  const root = mkdtempSync(join(tmpdir(), "geng-mail-bind-"));
+  const saved: Record<string, string | undefined> = {
+    GENG_MAIL_TOKEN: process.env.GENG_MAIL_TOKEN,
+    GENG_MAIL_BIND: process.env.GENG_MAIL_BIND,
+  };
+  try {
+    delete process.env.GENG_MAIL_TOKEN;
+    delete process.env.GENG_MAIL_BIND;
+    mkdirSync(join(root, "secrets"), { recursive: true });
+    const file = join(root, "secrets", "mail.env");
+    const write = (bind: string): void =>
+      writeFileSync(file, `GENG_MAIL_TOKEN=tok\nGENG_MAIL_BIND=${bind}\n`);
+
+    write("127.0.0.1:8788");
+    assert.deepEqual(readMailEnv(root)?.bind, { host: "127.0.0.1", port: 8788 });
+    for (const bad of ["127.0.0.1:", "127.0.0.1:http", "127.0.0.1:99999", "127.0.0.1"]) {
+      write(bad);
+      assert.throws(() => readMailEnv(root), /1-65535|host:port/, `${bad} 不能变成 0`);
+    }
+
+    write("127.0.0.1:8788");
+    process.env.GENG_MAIL_TOKEN = "";
+    process.env.GENG_MAIL_BIND = "";
+    assert.equal(readMailEnv(root)?.token, "tok", "空的环境变量不该盖掉文件里的值");
+    assert.equal(readMailEnv(root)?.bind.port, 8788);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});
 
 function fixture(cfg: MailConfig = { "bot@example.com": { instance: "alice", allow: [FROM] } }): {
   root: string;

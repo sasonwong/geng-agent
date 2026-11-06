@@ -21,9 +21,9 @@ Worker 手里的 token 只能投递，容器里那个 token 不存在。
 | `.wrangler/`、`.dev.vars` | 这个目录，本地临时 | 否（已 gitignore） |
 | `GENG_MAIL_URL`、`GENG_MAIL_TOKEN` | **Cloudflare 的 Worker secret**，只有云端有一份 | 否 |
 
-token 要和收信端点比的那一串**一模一样**。部署脚本先找仓库根的 `secrets/mail.env`（在跑实例的
-宿主上它就是端点用的那份），找不到才要你从 `GENG_MAIL_TOKEN` 给——不让人再手打一遍，也允许
-在别的机器上部署时用同一个值：
+token 要和收信端点比的那一串**一模一样**。优先用环境变量 `GENG_MAIL_TOKEN`；没给时才去读
+仓库根的 `secrets/mail.env`（在跑实例的宿主上它就是端点用的那份）——不让人再手打一遍，也允许
+在别的机器上部署时用同一个值。两个都没有就报错退出，不会拿空 token 推上去：
 
 ```bash
 cd deploy/mail-worker
@@ -32,7 +32,7 @@ npx wrangler login                      # 一次，凭据落在仓库外
 ```
 
 `deploy.sh` 依次做：`npm ci` → 确认 `wrangler whoami` 有凭据 → `wrangler deploy` → 把 URL
-推成 secret → 从 `GENG_MAIL_TOKEN`（或仓库根 `secrets/mail.env`）取 token 推成 secret →
+推成 secret → 取 token（先 `GENG_MAIL_TOKEN`，其次仓库根 `secrets/mail.env`）推成 secret →
 `secret list` 给你看一眼。
 两个 secret 都**不**放进 `wrangler.jsonc`：写进配置文件就得进 git，而 `--var` 传的普通变量
 下一次不带参数部署就会丢；secret 在 Cloudflare 上跨部署保留。
@@ -44,7 +44,7 @@ npx wrangler login                      # 一次，凭据落在仓库外
 **Public Hostname**：
 
 - Subdomain `geng-mail`、Domain `your-domain`
-- Service `http://localhost:8788`
+- Service `http://127.0.0.1:8788`（端点只绑 IPv4 的 loopback；写 `localhost` 时若先解析成 `::1`，隧道会连不上而报 502）
 
 面板会顺手建好 DNS 记录，hostname 就是 `GENG_MAIL_URL`。
 
@@ -56,8 +56,11 @@ cloudflared tunnel route dns geng-mail geng-mail.your-domain
 # 再把它跑成常驻服务（包自带的 unit 或自己写一个），ingress 就是上面那一条 hostname → 8788
 ```
 
-两处顺序不能颠倒：token 要在 Worker 部署**之前**存在（否则 Worker 拿到 401，Cloudflare 把信退回去），
-tunnel 要在填 `GENG_MAIL_URL` 之前通（否则它指向一个 502）。验证：
+顺序按脚本来：`wrangler deploy` 先跑（secret 在 Cloudflare 上跨部署保留，不会被这次部署抹掉），
+紧接着把两个 secret 推上去，**最后**才到面板把 Email Routing 指到这个 Worker。真正不能颠倒的是
+「有信进来之前，token 和 tunnel 都得就位」：否则 Worker 回 401、或者 URL 指向一个 502，两种都会
+让 Cloudflare 退信。第一次部署时路由还没指过来，所以脚本里 deploy 与 secret 之间的那段窗口是空的；
+重部署时若路由已经生效，先确认 secret 仍是当前值。验证：
 
 ```
 curl -s -o /dev/null -w '%{http_code}\n' -X POST https://geng-mail.your-domain/
