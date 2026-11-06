@@ -687,7 +687,10 @@ export const PROBE = [
     // "proxy works" while the thing this is supposed to prevent is happening.
     'if curl -s -m 5 --noproxy "*" -o /dev/null https://github.com/ 2>/dev/null; then echo NET_DIRECT_OK; else echo NET_DIRECT_BLOCKED; fi',
     'if curl -s -m 20 -o /dev/null https://github.com/ 2>/dev/null; then echo PROXY_OK; else echo PROXY_DEAD; fi',
-    'if curl -s -m 3 -o /dev/null http://169.254.169.254/ 2>/dev/null; then echo META_REACHABLE; else echo META_BLOCKED; fi',
+    // Its own route, not the proxy: through the proxy this measures our refusal, and a 403
+    // from the proxy was being read as "the metadata answered". `%{http_code}` prints 000
+    // when no connection was made, which is what "no route" actually looks like.
+    'printf "META_CODE=%s\\n" "$(no_proxy=* curl -s -m 3 -o /dev/null -w \"%{http_code}\" http://169.254.169.254/ 2>/dev/null)"',
     // the real attack path is the host on our own gateway, not a fixed docker0 address
     // `\\$3`, not `\\$3` once: the JS string has to hand the shell a literal `\$3`, or the
     // shell expands `$3` (empty) inside the double quotes and awk prints the whole line.
@@ -695,6 +698,20 @@ export const PROBE = [
     "true",
   ].join("; "),
 ];
+
+/**
+ * The status code the probe got from the metadata address over its own route, or null when
+ * the probe did not report one.
+ *
+ * A status is not a success story: `000` is curl's "no connection was made", and every
+ * other code means something answered — which, for an address that must not be routable at
+ * all, is the finding. Reading curl's exit status instead conflated the two: a refusal
+ * from our own proxy exits 0 and looked exactly like a host that answered.
+ */
+export function metaCode(probeOut: string): string | null {
+  const m = /META_CODE=(\d{3})/.exec(probeOut);
+  return m === null ? null : (m[1] as string);
+}
 
 /** Which problems belong to this instance: its own key, plus what is file-wide ("*")
  *  or shared by every instance ("ops"). The rest belong to somebody else. */
@@ -806,10 +823,16 @@ async function probe(root: string, instance: string): Promise<Check[]> {
               ? `${onHost} 个，个数相同但内容不同（${digestOnHost.slice(0, 8)} → ${digestInContainer.slice(0, 8)}）—— 旧挂载或半同步的 checkout`
               : `宿主 image/extensions 里 ${onHost} 个（${digestOnHost.slice(0, 8)}），容器里 ${inContainer} 个（${digestInContainer.slice(0, 8)}）`;
   checks.push({ name: "工具挂载", ok: mounted, detail });
+  const meta = metaCode(out);
   checks.push({
     name: "云元数据不可达",
-    ok: out.includes("META_BLOCKED"),
-    detail: out.includes("META_REACHABLE") ? "169.254.169.254 可达 —— 凭证可能泄露" : "不可达",
+    ok: meta === "000",
+    detail:
+      meta === null
+        ? "探针没报 META_CODE —— 那一段脚本没跑到"
+        : meta === "000"
+          ? "不可达"
+          : `169.254.169.254 可达（HTTP ${meta}）—— 凭证可能泄露`,
   });
   checks.push({
     name: "宿主 docker 不可达",
