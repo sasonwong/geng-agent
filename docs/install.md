@@ -651,6 +651,8 @@ data/<instance>/
   run/          socket 目录，整目录挂成容器里的 /run/geng
   daemon.log    一行一轮；轮转了就有 daemon.log.1
   net.log       一行一次出网；last-stderr.log 是某轮 stderr 的尾巴，有才写
+data/_gateway/  gateway 自己的 chats.json / offsets.json（全机器一份，不是某个实例的）
+data/_ops/      ops bot 的 outbox 和搜索额度；它的对话记录在 data/ops/people/
 secrets/<instance>.env   GitHub App 的两个 id；--env-file 注入，永不挂载（模型 key 不在这个文件里）
 secrets/<instance>.model.env  模型 key 与上游地址，只有宿主读；容器问，读不到
 secrets/bots.json        每个实例一个 bot（token 就是路由键）
