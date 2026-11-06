@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import { dirname, join } from "node:path";
 import type { MailConfig, MailEnv } from "./mail.ts";
 import { MODEL_FILE_VARS } from "./model.ts";
+import { ExpectedError } from "./errors.ts";
 
 /**
  * Env files under `secrets/`, and the values that have to match something outside this
@@ -11,15 +12,26 @@ import { MODEL_FILE_VARS } from "./model.ts";
  * quietly does nothing, and no log says which.
  */
 
+/**
+ * One `.env` line as key and value. A hand-written file often says `export NAME=value`;
+ * stripping that prefix here means read and write share one ruler — otherwise `export
+ * NAME` and `NAME` are two different keys and writing the second cannot replace the
+ * first. Comments, blank lines and lines without `=` are not entries.
+ */
+function parseEnvLine(raw: string): { key: string; value: string } | null {
+  const line = raw.trim().replace(/^export\s+/i, "");
+  if (line === "" || line.startsWith("#")) return null;
+  const at = line.indexOf("=");
+  if (at === -1) return null;
+  return { key: line.slice(0, at).trim(), value: line.slice(at + 1).trim() };
+}
+
 export function readEnvFile(path: string): Record<string, string> {
   if (!existsSync(path)) return {};
   const out: Record<string, string> = {};
   for (const raw of readFileSync(path, "utf8").split("\n")) {
-    const line = raw.trim();
-    if (line === "" || line.startsWith("#")) continue;
-    const at = line.indexOf("=");
-    if (at === -1) continue;
-    out[line.slice(0, at).trim()] = line.slice(at + 1).trim();
+    const parsed = parseEnvLine(raw);
+    if (parsed !== null) out[parsed.key] = parsed.value;
   }
   return out;
 }
@@ -31,14 +43,18 @@ export function readEnvFile(path: string): Record<string, string> {
  * occurrence left the *old* value winning after the write.
  */
 export function writeEnvValue(path: string, name: string, value: string): void {
+  // A value with a newline writes an extra line into the .env, and readEnvFile is
+  // last-wins: one `secrets set` would add a second GENG_MODEL_KEY that then won.
+  if (/[\r\n]/.test(value)) {
+    throw new ExpectedError(`secrets: ${name} 的值不能包含换行符（\n / \r），那会注入额外的 env 行`);
+  }
   const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n") : [];
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   let replaced = false;
   const out: string[] = [];
   for (const raw of lines) {
-    const line = raw.trim();
-    const at = line === "" || line.startsWith("#") ? -1 : line.indexOf("=");
-    const mine = at !== -1 && line.slice(0, at).trim() === name;
+    const parsed = parseEnvLine(raw);
+    const mine = parsed !== null && parsed.key === name;
     if (!mine) {
       out.push(raw);
       continue;

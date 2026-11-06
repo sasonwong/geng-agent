@@ -1,21 +1,13 @@
-import { spawn } from "node:child_process";
+import { dockerRun } from "./docker.ts";
 import type { Policy } from "./policy.ts";
 import type { Env } from "./meta.ts";
 
 /** The image the next cycle will actually run, by content id rather than by tag. */
-export function imageId(policy: Policy): Promise<string | null> {
-  return new Promise((resolve) => {
-    const p = spawn("docker", ["image", "inspect", "--format", "{{.Id}}", policy.container.image], {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    let text = "";
-    p.stdout.setEncoding("utf8");
-    p.stdout.on("data", (c: string) => {
-      text += c;
-    });
-    p.on("error", () => resolve(null));
-    p.on("close", (code) => resolve(code === 0 ? text.trim() || null : null));
-  });
+export async function imageId(policy: Policy): Promise<string | null> {
+  // This runs while the wake packet is being assembled: a wedged docker daemon used to
+  // hold the whole waking open here, with nothing to hand the container and no log line.
+  const r = await dockerRun(["image", "inspect", "--format", "{{.Id}}", policy.container.image], true);
+  return r.code === 0 ? r.text.trim() || null : null;
 }
 
 /**
@@ -33,7 +25,11 @@ export function describeEnvChange(before: Env | undefined, now: Env): string | n
   // An id we could not read is not evidence of a change: `docker image inspect` fails when
   // the daemon is unreachable, and claiming "环境变了" then is a page that lies about the
   // one thing it says rarely enough to be believed.
-  const image = now.imageId !== null && (before.imageId ?? null) !== now.imageId;
+  // Both sides have to be known: suppressing only `now === null` still reported a change
+  // when docker was unreachable last waking and answered this one — that null is not
+  // evidence of a different world either.
+  const beforeImage = before.imageId ?? null;
+  const image = now.imageId !== null && beforeImage !== null && beforeImage !== now.imageId;
   const search = (before.search ?? false) !== (now.search ?? false);
   return image || search ? "环境变了。" : null;
 }
