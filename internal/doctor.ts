@@ -6,7 +6,7 @@ import { connect } from "node:net";
 import { listSnapshots, restore, restoredLooksWhole, rusticAvailable } from "./backup.ts";
 import { formatDuration } from "./schedule.ts";
 import { readJson, readText } from "./fs.ts";
-import { readBots, botProblems } from "./bots.ts";
+import { readBots, botIssues, type BotIssue } from "./bots.ts";
 import { loadMailConfig, readMailEnv } from "./mail.ts";
 import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
@@ -375,16 +375,28 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   );
 
   const bots = readBots(root);
-  const issues = botProblems(bots, (key) => existsSync(join(root, "data", key)));
+  const issues = botIssues(bots, (key) => existsSync(join(root, "data", key)));
+  // A broken bot belonging to bob is not a FAIL for alice. ops and file-wide problems
+  // do reach every instance, so they stay in this check; the rest get their own warn
+  // rather than silently disappearing from doctor's output.
+  const { own, others } = botWiring(instance, issues);
   checks.push(
     optional(
       "bot 接线",
       bots[instance] !== undefined,
-      issues.length === 0 ? null : issues.slice(0, 3).join("；"),
+      own.length === 0 ? null : own.slice(0, 3).join("；"),
       `没配：只有它自己的闹钟能叫醒它${issues.length > 0 ? `（bots.json 另有 ${issues.length} 处问题）` : ""}`,
-      "bots.json 的每一项都能解析",
+      "这个实例的 bot 能解析",
     ),
   );
+  if (others.length > 0) {
+    checks.push({
+      name: "bots.json 其他条目",
+      ok: false,
+      warnOnly: true,
+      detail: others.slice(0, 3).join("；"),
+    });
+  }
 
   const sessions = listSessionFiles(p.sessionDir);
   const bad = sessions
@@ -670,6 +682,18 @@ export const PROBE = [
     "true",
   ].join("; "),
 ];
+
+/** Which problems belong to this instance: its own key, plus what is file-wide ("*")
+ *  or shared by every instance ("ops"). The rest belong to somebody else. */
+export function botWiring(instance: string, issues: BotIssue[]): { own: string[]; others: string[] } {
+  const own = issues
+    .filter((i) => i.key === instance || i.key === "ops" || i.key === "*")
+    .map((i) => i.problem);
+  const others = issues
+    .filter((i) => i.key !== instance && i.key !== "ops" && i.key !== "*")
+    .map((i) => i.problem);
+  return { own, others };
+}
 
 /** Whether anything is listening on the book socket right now. */
 function socketAlive(path: string): Promise<boolean> {

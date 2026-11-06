@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { addBot, botProblems, describeBot, editAllow, readBots, writeBots } from "../internal/bots.ts";
+import { addBot, botIssues, botProblems, describeBot, editAllow, readBots, writeBots } from "../internal/bots.ts";
+import { botWiring } from "../internal/doctor.ts";
 
 /** A root with a data/ tree, because "@me resolves to nobody" looks the same as "no PRs". */
 function root(instances: string[] = ["alice"]): string {
@@ -87,4 +88,21 @@ test("the description says the three states apart, because allow=0 and allow=abs
   assert.match(describeBot({ token: "t" }), /allow=不限/);
   assert.match(describeBot({ token: "t", allow: [] }), /0 人/);
   assert.match(describeBot({ token: "t", allow: [1, 2] }), /2 人/);
+});
+
+// A broken bot belonging to bob used to be a FAIL on alice's doctor: the list was
+// flattened, so both instances saw every other instance's problems under their own name.
+test("another instance's broken bot is not this instance's problem", () => {
+  const issues = botIssues(
+    { alice: { token: "t", chat: 1 }, bob: { token: "" }, ops: { token: "o" } },
+    (key) => key !== "ghost",
+  );
+  const { own, others } = botWiring("alice", issues);
+  assert.deepEqual(others, ["bob：没有 token"]);
+  // ops 的 chat 没配是给每个实例看的，不是 bob 那种「别人的问题」
+  assert.deepEqual(own, ["ops：没有 chat，运维消息发不出去"]);
+  // file-wide and shared problems still reach every instance
+  const wide = botWiring("alice", botIssues({ alice: { token: "t" } }, () => true));
+  assert.equal(wide.own.length, 1);
+  assert.match(wide.own[0] as string, /没有 ops 这个 bot/);
 });
