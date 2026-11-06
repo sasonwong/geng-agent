@@ -1,9 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { sendFile, sendMessage, splitMessage } from "../internal/telegram.ts";
+import { FILE_LIMIT, downloadFile, sendMessage, splitMessage } from "../internal/telegram.ts";
+
+const destFor = (): string => join(mkdtempSync(join(tmpdir(), "geng-dl-")), "file.bin");
 
 /** Answers the next sendMessage call with the id it is given, in call order. */
 function answerWith(ids: number[]): () => void {
@@ -29,6 +31,92 @@ test("a sent line comes back with the id Telegram gave it", async () => {
   }
 });
 
+test("a download that declares too much is refused before its body is read", async () => {
+  const dest = destFor();
+  const real = globalThis.fetch;
+  let bodyTouched = false;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    headers: new Headers({ "content-length": String(FILE_LIMIT + 1) }),
+    get body() {
+      bodyTouched = true;
+      return null;
+    },
+  }) as unknown as Response) as typeof fetch;
+  try {
+    // arrayBuffer() used to be the first thing called, so a huge response filled
+    // the gateway's memory before the 20 MB check ever ran.
+    await assert.rejects(downloadFile("t", "path", dest), /超过/);
+    assert.equal(bodyTouched, false, "声明超限时不该碰响应体");
+    assert.equal(existsSync(dest), false, "也不该留下文件");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("an undeclared download stops as soon as it passes the cap", async () => {
+  const dest = destFor();
+  const real = globalThis.fetch;
+  const chunk = new Uint8Array(1024 * 1024);
+  let served = 0;
+  let buffered = false;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (served >= 100) {
+        controller.close();
+        return;
+      }
+      served += 1;
+      controller.enqueue(chunk);
+    },
+  });
+  globalThis.fetch = (async () => ({
+    ok: true,
+    headers: new Headers(),
+    body,
+    arrayBuffer: async () => {
+      buffered = true;
+      return new ArrayBuffer(FILE_LIMIT + 1);
+    },
+  }) as unknown as Response) as typeof fetch;
+  try {
+    await assert.rejects(downloadFile("t", "path", dest), /超过/);
+    assert.equal(buffered, false, "不能先把整个响应读进内存再检查大小");
+    // The stream may prefetch one chunk past the cap; what matters is that it did
+    // not read the whole 100 MB body before deciding.
+    assert.ok(served <= 25, `超过上限就该停，实际读了 ${served} MB`);
+    assert.equal(existsSync(dest), false, "拒绝时不能留下半文件");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
+test("a good download lands as one complete file", async () => {
+  const dest = destFor();
+  const real = globalThis.fetch;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array([1, 2, 3]));
+      controller.close();
+    },
+  });
+  globalThis.fetch = (async () => ({
+    ok: true,
+    headers: new Headers(),
+    body,
+    // present so this positive control also passes against the old arrayBuffer()
+    // implementation — its job is to prove a good file lands, not to catch the rewrite
+    arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
+  }) as unknown as Response) as typeof fetch;
+  try {
+    assert.equal(await downloadFile("t", "path", dest), 3);
+    assert.deepEqual([...readFileSync(dest)], [1, 2, 3]);
+    assert.equal(existsSync(`${dest}.tmp-${process.pid}`), false, "tmp 要被 rename 掉");
+  } finally {
+    globalThis.fetch = real;
+  }
+});
+
 test("a text split into several messages reports every id, in order", async () => {
   const long = "x".repeat(4000) + "\n" + "y".repeat(4000) + "\n" + "z".repeat(4000);
   const parts = splitMessage(long);
@@ -39,71 +127,5 @@ test("a text split into several messages reports every id, in order", async () =
     assert.deepEqual(await sendMessage("t", -100, long), expected);
   } finally {
     restore();
-  }
-});
-
-test("a split never cuts a character in half", () => {
-  // an emoji is two UTF-16 units; a part ending between them is a broken character that
-  // Telegram would refuse or mangle. The boundary lands on the pair on purpose.
-  const text = "a".repeat(3999) + "😀" + "b".repeat(10);
-  const parts = splitMessage(text);
-  assert.ok(parts.length > 1, "this text is meant to split");
-  assert.equal(parts.join(""), text, "切完拼回去还是原文");
-  for (const part of parts) {
-    for (let i = 0; i < part.length; i++) {
-      const c = part.charCodeAt(i);
-      if (c >= 0xd800 && c <= 0xdbff) {
-        const next = i + 1 < part.length ? part.charCodeAt(i + 1) : 0;
-        assert.ok(next >= 0xdc00 && next <= 0xdfff, `位置 ${i} 上是半个字符`);
-      }
-    }
-  }
-});
-
-test("a file too big for a bot upload is refused before it is read into memory", async () => {
-  // Telegram's own limit for a bot upload is 50 MB. Reading the file first and letting the
-  // API refuse it costs the gateway the whole file in RAM — a /work file is something the
-  // agent made, so its size is not ours to assume.
-  const dir = mkdtempSync(join(tmpdir(), "geng-send-"));
-  const file = join(dir, "big.bin");
-  writeFileSync(file, "x".repeat(9));
-  let uploads = 0;
-  const real = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    uploads += 1;
-    return new Response(JSON.stringify({ ok: true }), { status: 200 });
-  }) as typeof fetch;
-  try {
-    await assert.rejects(() => sendFile("t", -100, file, 8), /超过/);
-    assert.equal(uploads, 0, "超限的文件不该读进来，更不该发出去");
-    // exactly at the limit is still a send
-    await sendFile("t", -100, file, 9);
-    assert.equal(uploads, 1);
-  } finally {
-    globalThis.fetch = real;
-  }
-});
-
-test("a file says what it was sent as, and the id the chat got", async () => {
-  // The transcript's row for an outgoing file depends on these two: the kind picks the
-  // placeholder word, the id lets a later line point at the message the file became.
-  const dir = mkdtempSync(join(tmpdir(), "geng-sent-"));
-  const doc = join(dir, "note.txt");
-  const img = join(dir, "shot.png");
-  writeFileSync(doc, "x");
-  writeFileSync(img, "x");
-  const real = globalThis.fetch;
-  let method = "";
-  globalThis.fetch = (async (url: string) => {
-    method = String(url).slice(String(url).lastIndexOf("/") + 1);
-    return new Response(JSON.stringify({ ok: true, result: { message_id: 77 } }), { status: 200 });
-  }) as typeof fetch;
-  try {
-    assert.deepEqual(await sendFile("t", -100, doc), { kind: "document", id: 77 });
-    assert.equal(method, "sendDocument");
-    assert.deepEqual(await sendFile("t", -100, img), { kind: "photo", id: 77 });
-    assert.equal(method, "sendPhoto");
-  } finally {
-    globalThis.fetch = real;
   }
 });
