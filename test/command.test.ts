@@ -23,6 +23,18 @@ test("the container writes nothing but the page it calls its own", () => {
   assert.match(argv, new RegExp(`-v ${paths.identity}:/state/identity.md`));
 });
 
+test("the agent's home is writable, not only the pi dir inside it", () => {
+  // `HOME=/home/agent` and the rootfs is read-only: only `/home/agent/.pi/agent` was a
+  // tmpfs, so anything writing to `~/.cache` — `gh run view --log` is the one that got
+  // caught — died with EROFS and looked like a network failure. The tmpfs on the home
+  // itself is what makes that an answer rather than a per-tool workaround.
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "你是…");
+  const dests = args.filter((_, i) => i > 0 && args[i - 1] === "--tmpfs").map((a) => a.split(":")[0]);
+  assert.ok(dests.includes("/home/agent"), `家目录不是 tmpfs：${dests.join(", ")}`);
+  assert.ok(dests.includes("/home/agent/.pi/agent"), "pi 目录的 tmpfs 被合掉了");
+});
+
 test("the tools are loaded from outside the agent's home", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   tools(root, ["ledger.ts", "say-mute.ts", "websearch.ts"]);
