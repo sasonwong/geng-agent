@@ -18,6 +18,52 @@ import { readModelKey, modelUpstream } from "./model.ts";
  */
 export const MODEL_PREFIX = "/model";
 
+/**
+ * Headers that describe one connection, not the request, plus the ones undici refuses
+ * to let a caller set. pi talks to us over a local socket; forwarding `connection`,
+ * `transfer-encoding`, `te`, `upgrade` or a `proxy-*` header makes `fetch()` throw
+ * before a single byte reaches the provider, and the round reads that as a model error.
+ * `Object.entries` is lower-cased by node:http already, so the set is case-insensitive.
+ */
+const HOP = new Set([
+  "accept-charset",
+  "accept-encoding",
+  "authorization",
+  "connection",
+  "content-length",
+  "cookie",
+  "cookie2",
+  "date",
+  "dnt",
+  "expect",
+  "host",
+  "keep-alive",
+  "origin",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "proxy-connection",
+  "referer",
+  "set-cookie",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "via",
+]);
+
+/** Only the host's credential crosses. Everything else about the request survives. */
+export function modelHeaders(inbound: IncomingMessage["headers"], key: string): Record<string, string> {
+  const headers: Record<string, string> = {};
+  for (const [name, value] of Object.entries(inbound)) {
+    if (typeof value !== "string") continue;
+    const lower = name.toLowerCase();
+    if (HOP.has(lower) || lower.startsWith("proxy-") || lower.startsWith("sec-")) continue;
+    headers[lower] = value;
+  }
+  headers.authorization = `Bearer ${key}`;
+  return headers;
+}
+
 export async function proxyModel(
   p: Paths,
   req: IncomingMessage,
@@ -39,16 +85,11 @@ export async function proxyModel(
   }
   const suffix = (req.url ?? "").slice(MODEL_PREFIX.length) || "/";
   const target = upstream.replace(/\/$/, "") + suffix;
-  // The inbound authorization is dropped, not merged: the only credential on the wire is
-  // the host's, and a container that invents one cannot smuggle it upstream.
-  const headers: Record<string, string> = {};
-  for (const [name, value] of Object.entries(req.headers)) {
-    if (typeof value !== "string") continue;
-    const lower = name.toLowerCase();
-    if (lower === "authorization" || lower === "host" || lower === "content-length" || lower === "connection") continue;
-    headers[lower] = value;
-  }
-  headers.authorization = `Bearer ${found.key}`;
+  const headers = modelHeaders(req.headers, found.key);
+  const method = (req.method ?? "POST").toUpperCase();
+  // undici refuses a body on GET/HEAD outright. A provider that answers a health check
+  // with GET must not turn into a 500 just because the client sent a few stray bytes.
+  const sendBody = method !== "GET" && method !== "HEAD" && body.length > 0;
 
   const controller = new AbortController();
   // A round that is killed takes the provider request with it, instead of leaving a
@@ -59,9 +100,9 @@ export async function proxyModel(
     if (!res.writableFinished) controller.abort();
   });
   const response = await fetchImpl(target, {
-    method: req.method ?? "POST",
+    method,
     headers,
-    body: body.length === 0 ? undefined : new Uint8Array(body),
+    body: sendBody ? new Uint8Array(body) : undefined,
     signal: controller.signal,
   });
   const out: Record<string, string> = { "content-type": response.headers.get("content-type") ?? "application/json" };
