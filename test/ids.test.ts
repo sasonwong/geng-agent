@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -76,12 +76,10 @@ test("a holder does not delete a lock that is no longer the one it took", () => 
   ensureDirs(requiredDirs(p));
   const lock = `${p.ids}.lock`;
   writeFileSync(lock, "mine");
-  const other = `${lock}.other`;
-  writeFileSync(other, "the one that took over");
 
-  releaseLock(lock, statSync(other));
+  releaseLock(lock, { token: "the one that took over" });
   assert.equal(existsSync(lock), true, "删了接手者的锁");
 
-  releaseLock(lock, statSync(lock));
+  releaseLock(lock, { token: "mine" });
   assert.equal(existsSync(lock), false, "自己的锁要能删掉");
 });
