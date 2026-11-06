@@ -68,6 +68,20 @@ test("a restored tree is found even when rustic nests the absolute paths", () =>
   assert.deepEqual(restoredLooksWhole(target), { ok: true, missing: [] });
 });
 
+test("a snapshot from before the rename has session/, and it is still whole", () => {
+  // Restores are for the day it went wrong. If today's directory name were required, every
+  // snapshot taken before the rename would read as broken.
+  const paths = fixture();
+  const target = join(paths.root, "old");
+  const nested = join(target, "data", "alice");
+  mkdirSync(join(nested, "book"), { recursive: true });
+  mkdirSync(join(nested, "meta"), { recursive: true });
+  mkdirSync(join(nested, "session"), { recursive: true });
+  writeFileSync(join(nested, "book", "identity.md"), "我是 alice\n");
+  writeFileSync(join(nested, "meta", "deploy.json"), "{}\n");
+  assert.deepEqual(restoredLooksWhole(target), { ok: true, missing: [] });
+});
+
 test("an empty or partial restore is reported, not passed", () => {
   const paths = fixture();
   const target = join(paths.root, "empty");

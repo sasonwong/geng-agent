@@ -335,8 +335,12 @@ export function restoredLooksWhole(dir: string): { ok: boolean; missing: string[
   const instanceDir = findInstanceRoot(dir);
   if (!instanceDir) return { ok: false, missing: ["book/"] };
   const missing: string[] = [];
-  for (const rel of ["meta/deploy.json", "sessions"]) {
-    if (!existsSync(join(instanceDir, rel))) missing.push(rel);
+  if (!existsSync(join(instanceDir, "meta", "deploy.json"))) missing.push("meta/deploy.json");
+  // `session/` is what a snapshot taken before the rename contains. A restore is judged by
+  // the shape of the day it was taken, not by today's names: refusing those would say "your
+  // backups are broken" exactly when someone reaches for one.
+  if (!existsSync(join(instanceDir, "sessions")) && !existsSync(join(instanceDir, "session"))) {
+    missing.push("sessions");
   }
   try {
     if (readdirSync(join(instanceDir, "book")).length === 0) missing.push("book/ 是空的");
