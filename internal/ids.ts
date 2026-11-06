@@ -1,7 +1,7 @@
-import { closeSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from "node:fs";
+import { closeSync, fstatSync, mkdirSync, openSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Paths } from "./paths.ts";
-import { mtimeMs, readJson, writeJson } from "./fs.ts";
+import { readJson, writeJson } from "./fs.ts";
 
 /**
  * The numbered ids in the book, handed out from one place.
@@ -59,17 +59,54 @@ export function lockIsStale(ageMs: number | null, nowMs: number): boolean {
   return ageMs !== null && nowMs - ageMs > 10_000;
 }
 
+/** Which file a lock is, not just where it lives: the name gets reused by the next holder. */
+interface LockOwner {
+  dev: number;
+  ino: number;
+}
+
+function lockOf(lock: string): (LockOwner & { mtimeMs: number }) | null {
+  try {
+    const st = statSync(lock);
+    return { dev: st.dev, ino: st.ino, mtimeMs: st.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Delete a lock only if it is still the file the caller judged: its own (release) or the
+ * stale one it just read (takeover).
+ *
+ * A holder that was wrongly declared dead wakes up after its lock was replaced. An
+ * unconditional `rmSync` then deletes the new holder's lock, a third process walks in,
+ * and two allocations interleave — the same double number, from the other end. Indicating
+ * that a lock whose `stat` fails for any reason (EMFILE, EACCES) was already handled on
+ * the reading side: it is not called stale, so nothing is deleted.
+ */
+export function releaseLock(lock: string, owner: LockOwner): void {
+  const current = lockOf(lock);
+  if (current !== null && current.dev === owner.dev && current.ino === owner.ino) {
+    rmSync(lock, { force: true });
+  }
+}
+
 function withIdsLock<T>(paths: Paths, run: () => T): T {
   const lock = `${paths.ids}.lock`;
   mkdirSync(dirname(lock), { recursive: true });
   const waited = Date.now();
+  let owner: LockOwner = { dev: -1, ino: -1 };
   for (;;) {
     try {
-      closeSync(openSync(lock, "wx"));
+      const fd = openSync(lock, "wx");
+      const st = fstatSync(fd);
+      closeSync(fd);
+      owner = { dev: st.dev, ino: st.ino };
       break;
     } catch {
-      if (lockIsStale(mtimeMs(lock), Date.now())) {
-        rmSync(lock, { force: true }); // its holder is gone: take it over
+      const dead = lockOf(lock);
+      if (dead !== null && lockIsStale(dead.mtimeMs, Date.now())) {
+        releaseLock(lock, dead); // its holder is gone: take it over
         continue;
       }
       if (Date.now() - waited > 5_000) {
@@ -81,7 +118,7 @@ function withIdsLock<T>(paths: Paths, run: () => T): T {
   try {
     return run();
   } finally {
-    rmSync(lock, { force: true });
+    releaseLock(lock, owner);
   }
 }
 
