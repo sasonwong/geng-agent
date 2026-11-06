@@ -18,7 +18,7 @@
 
 | 要什么 | 为什么 | 怎么验 |
 |---|---|---|
-| Node ≥ 22.18 | 直接跑 TypeScript，没有构建步骤 | `node --version` |
+| Node ≥ 22.21.0 | 直接跑 TypeScript（22.18 起就行），但网关的 `NODE_USE_ENV_PROXY=1` 要 22.21.0 / 24 起才生效 | `node --version` |
 | node 的**绝对路径** | systemd 的 PATH 里没有 nvm；`env node` 会让 unit 每十秒以 127 退出 | `command -v node` 记下来 |
 | docker + 当前用户在 `docker` 组 | 每轮醒来是一个 `--rm` 容器 | `docker ps`（不是 `sudo docker ps`） |
 | `rustic`、`flock` | 备份、单实例锁（`flock` 写在 unit 里） | `rustic --version`、`flock --help` |
@@ -34,7 +34,7 @@
 |---|---|
 | docker 拉镜像 | `/etc/systemd/system/docker.service.d/proxy.conf`（`NO_PROXY` 要含 localhost 和私网段） |
 | 构建里的 apt / npm | `DOCKER_BUILD_PROXY=http://…:PORT deploy/build.sh`——构建容器在桥接网络里看不见 `127.0.0.1`，所以脚本只在设了它时才切 `--network=host` |
-| 网关连 Telegram | unit 里的 `NODE_USE_ENV_PROXY=1`（Node 的 `fetch` 默认不读 `HTTP(S)_PROXY`） |
+| 网关连 Telegram | `geng-gateway.service` 里的 `NODE_USE_ENV_PROXY=1`（Node 的 `fetch` 默认不读 `HTTP(S)_PROXY`）+ `secrets/gateway.env` 里的 `HTTP_PROXY`/`HTTPS_PROXY`；不写这个文件就是直连。**这个开关要 Node ≥ 22.21.0 或 ≥ 24**：更旧的 Node 会忽略它、绕过代理直连，症状和「Telegram 不通」一样；网关启动时会直接报版本，不会悄悄直连 |
 
 **agent 容器本身不需要配代理**：它没有网络，模型和搜索走 socket，其余 HTTPS 走容器里的 3128。
 
@@ -670,7 +670,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  geng@.service  ge
 ## 附：一页验收
 
 ```bash
-command -v node && node --version          # ≥ 22.18
+command -v node && node --version          # ≥ 22.21.0（网关走代理那条路的要求）
 docker ps                                  # 不需要 sudo
 node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
 # 其中五条是"漏配"的唯一出口：搜索接线 / 邮件接线 / bot 接线 / GitHub App / 备份

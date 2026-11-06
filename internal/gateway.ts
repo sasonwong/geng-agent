@@ -325,8 +325,31 @@ export function targetChat(
   return typeof chat === "number" ? chat : null;
 }
 
+/**
+ * `geng-gateway.service` sets NODE_USE_ENV_PROXY=1 so `fetch` honours the HTTP(S)_PROXY in
+ * secrets/gateway.env. Node only began reading that switch in 22.21.0 / 24.0.0 (23 never
+ * had it); on an older runtime the variable is silently ignored and the gateway goes out
+ * directly — which looks exactly like "Telegram is down" while every setting is right.
+ */
+export function assertProxySupport(
+  env: NodeJS.ProcessEnv = process.env,
+  nodeVersion: string = process.versions.node,
+): void {
+  const configured = [
+    "HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy",
+  ].some((key) => (env[key] ?? "") !== "");
+  if (!configured) return;
+  const [major = NaN, minor = NaN] = nodeVersion.split(".").map(Number);
+  if (major >= 24 || (major === 22 && minor >= 21)) return;
+  throw new ExpectedError(
+    `配了 HTTP(S)_PROXY，但这台机器的 Node ${nodeVersion} 不认 NODE_USE_ENV_PROXY：` +
+      "要 22.21.0 或 24 以上。否则网关会绕过代理直连，看起来就像 Telegram 挂了。",
+  );
+}
+
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
+  assertProxySupport();
   const root = o.root;
   const botsFile = join(root, "secrets", "bots.json");
   // both are re-read on SIGHUP: editing either one is an operator action, and restarting

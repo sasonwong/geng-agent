@@ -2,7 +2,9 @@
 
 ## 工具链
 
-Node ≥ 22.18，直接跑 TypeScript（类型擦除），**没有构建步骤**。
+Node ≥ 22.21.0，直接跑 TypeScript（类型擦除），**没有构建步骤**。类型擦除本身 22.18 就够，
+但网关用 `NODE_USE_ENV_PROXY=1` 读代理，这个开关 22.21.0 / 24.0.0 起才有；低版本会静默
+直连，看起来像 Telegram 不通。`assertProxySupport()` 在网关启动时挡住这种组合。
 
 ```bash
 npm run check     # tsc --noEmit
