@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths } from "../internal/paths.ts";
 import { defaultPolicy } from "../internal/policy.ts";
-import { maybeBackup, backupRepo, listSnapshots, parseSnapshots, restore, restoredLooksWhole, writeDeployMeta } from "../internal/backup.ts";
+import { excludeArgs, maybeBackup, backupRepo, listSnapshots, parseSnapshots, restore, restoredLooksWhole, writeDeployMeta } from "../internal/backup.ts";
 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
@@ -35,6 +35,17 @@ test("restore refuses when there is nothing to restore from", async () => {
   const result = await restore({ paths, target: join(paths.root, "x") });
   assert.equal(result.ok, false);
   assert.match(result.detail, /rustic\.env|没有仓库/);
+});
+
+test("the agent's scratch is left out of the snapshot, and nothing else named tmp", () => {
+  // 一份被杀的轮次不会跑测试的清理：539 个 mkdtemp 目录、33MB，里面有 `secrets/*.env`
+  // 夹具。它们进快照只是把垃圾多存一份（实测 1890 个文件、8MB），还让 doctor 在 data 里
+  // 报出一个 key 文件。排除的是 work 里的那个 scratch，不是所有叫 tmp 的目录。
+  const globs = excludeArgs();
+  assert.equal(globs.length % 2, 0, `argv 不成对：${globs.join(" ")}`);
+  for (let i = 0; i < globs.length; i += 2) assert.equal(globs[i], "--glob");
+  assert.ok(globs.includes("!**/workspace/tmp"), globs.join(" "));
+  assert.equal(globs.includes("!**/tmp"), false, "所有 tmp 都被排除了");
 });
 
 test("the repo lives outside the directory being backed up", () => {

@@ -30,7 +30,17 @@ const EXCLUDES = [
   "__pycache__",
   ".next",
   "*.tmp-*",
+  // The agent's own scratch. Tests run inside it — `mkdtemp` honours `TMPDIR`, and a round
+  // that gets killed never runs their cleanup: 539 directories, 33MB, `secrets/*.env`
+  // fixtures among them. Nothing there is worth a snapshot, and it was enough to make
+  // `doctor` report a key file under `data/`.
+  "workspace/tmp",
 ];
+
+/** What rustic is told to leave out, as argv: a `--glob` and an every-directory glob per entry. */
+export function excludeArgs(): string[] {
+  return EXCLUDES.flatMap((g) => ["--glob", `!**/${g}`]);
+}
 
 const BACKUP_TIMEOUT_MS = 120_000;
 const FORGET_TIMEOUT_MS = 120_000;
@@ -224,7 +234,7 @@ export async function maybeBackup(o: BackupOptions): Promise<BackupOutcome> {
 
   writeDeployMeta(paths);
 
-  const globs = EXCLUDES.flatMap((g) => ["--glob", `!**/${g}`]);
+  const globs = excludeArgs();
   const result = await run(
     [...baseArgs(repo), "backup", paths.data, ...globs],
     env,
