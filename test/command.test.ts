@@ -23,16 +23,41 @@ test("the container writes nothing but the page it calls its own", () => {
   assert.match(argv, new RegExp(`-v ${paths.identity}:/state/identity.md`));
 });
 
-test("the agent's home is writable, not only the pi dir inside it", () => {
-  // `HOME=/home/agent` and the rootfs is read-only: only `/home/agent/.pi/agent` was a
-  // tmpfs, so anything writing to `~/.cache` — `gh run view --log` is the one that got
-  // caught — died with EROFS and looked like a network failure. The tmpfs on the home
-  // itself is what makes that an answer rather than a per-tool workaround.
+test("the scratch mounts are writable by the agent, not only present", () => {
+  // `HOME=/home/agent` and the rootfs is read-only, so anything writing to `~/.cache` —
+  // `gh run view --log` is the one that got caught — died with EROFS and looked like a
+  // network failure. A tmpfs over the home is the answer, but a tmpfs mounted over a
+  // directory that exists in the image inherits its 0755: the agent is not the owner, so
+  // the same mkdir fails with EACCES instead. `mode=1777` is what makes it writable, and
+  // it is the difference between the fix and a fix that reports BLOCKED.
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "你是…");
-  const dests = args.filter((_, i) => i > 0 && args[i - 1] === "--tmpfs").map((a) => a.split(":")[0]);
-  assert.ok(dests.includes("/home/agent"), `家目录不是 tmpfs：${dests.join(", ")}`);
-  assert.ok(dests.includes("/home/agent/.pi/agent"), "pi 目录的 tmpfs 被合掉了");
+  const tmpfs = args.filter((_, i) => i > 0 && args[i - 1] === "--tmpfs");
+  const dests = tmpfs.map((a) => a.split(":")[0]);
+  for (const want of ["/tmp", "/home/agent", "/home/agent/.pi/agent"]) {
+    assert.ok(dests.includes(want), `${want} 没有可写的地方：${dests.join(", ")}`);
+  }
+  const home = tmpfs.find((a) => a.startsWith("/home/agent:")) ?? "";
+  assert.match(home, /mode=1777/, `家目录的 tmpfs 不是 agent 可写的：${home}`);
+});
+
+test("the scratch caps stay under a third of the memory limit", () => {
+  // tmpfs pages count against `container.memory` and cannot be reclaimed, so a cache that
+  // grows without a cap does not fail with ENOSPC — it OOMs the round that is talking to
+  // the model. The cap is the point; these three numbers are only worth having while their
+  // sum leaves the round room to work.
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const { args } = buildCommand(makePaths(root, "alice"), { ...defaultPolicy() }, "geng-alice", "你是…");
+  const mb = (s: string): number => {
+    const m = /size=(\d+)([mg])/i.exec(s);
+    assert.ok(m !== null, `读不出 size：${s}`);
+    return Number(m[1]) * (m[2]?.toLowerCase() === "g" ? 1024 : 1);
+  };
+  const caps = args
+    .filter((_, i) => i > 0 && args[i - 1] === "--tmpfs")
+    .reduce((sum, a) => sum + mb(a), 0);
+  const memory = args[args.indexOf("--memory") + 1] ?? "";
+  assert.ok(caps <= mb(`size=${memory}`) / 3, `tmpfs 上限 ${caps}m 超过内存 ${memory} 的三分之一`);
 });
 
 test("the tools are loaded from outside the agent's home", () => {

@@ -83,16 +83,27 @@ export function buildCommand(
     "ALL",
     "--security-opt",
     "no-new-privileges",
-    // The root filesystem is read-only: what pi and git may write is /work, the agent's
-    // own home (a tmpfs, refilled from the image at start), and /tmp.
+    // The root filesystem is read-only, and that is about *immutability*, not persistence:
+    // a writable layer would also be gone at exit, but until then it could rewrite `pi`, the
+    // credential helper and `/etc/gitconfig`, which is the channel this round gets its
+    // tokens through. So the writable places are named, few, and capped: /work (disk, in the
+    // backup), and two tmpfs that only ever hold the round's own scratch.
+    //
+    // Everything a tmpfs can hold comes out of the same `container.memory`, and those pages
+    // cannot be reclaimed, so the three caps together stay under a third of it — a runaway
+    // cache should hit ENOSPC in a scratch dir, not OOM the round that is using the model.
     "--read-only",
     "--tmpfs",
-    "/tmp:rw,nosuid,size=64m",
+    "/tmp:rw,nosuid,size=512m",
     // The home itself, not only the pi dir inside it: `HOME` is where tools drop their
-    // caches, and on the read-only rootfs `mkdir ~/.cache` fails. That surfaced as
-    // `gh run view --log` dying with EROFS, which reads like a network error.
+    // caches, and `mkdir ~/.cache` used to fail on the read-only rootfs — `gh run view
+    // --log` died on its cache and the error read like a network failure. `mode=1777` is
+    // not decoration: a tmpfs mounted over a directory that exists in the image inherits
+    // that directory's 0755, and the agent is not its owner, so without it the same mkdir
+    // fails with EACCES instead of EROFS. This tmpfs masks the image's `/home/agent`
+    // rather than being filled from it; the defaults pi needs come from the mounts below.
     "--tmpfs",
-    "/home/agent:rw,nosuid,size=32m",
+    "/home/agent:rw,nosuid,size=128m,mode=1777",
     "--tmpfs",
     "/home/agent/.pi/agent:rw,size=32m",
     // the proxy lives on loopback, bridged to the book socket by `geng-pi`
