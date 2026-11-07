@@ -50,6 +50,10 @@ import { advance, loadEscalation, parkNotice, planFor, saveEscalation, slowDownN
 
 const POLL_MS = 5_000;
 const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
+// A policy file is edited by hand, so one that does not parse is a normal event. The first
+// waits are short because a person who just saved the fix wants it picked up, not waited
+// out; the last is a minute because after that nobody is watching.
+const POLICY_RETRY_MS = [1_000, 2_000, 5_000, 15_000, 60_000];
 
 export interface DaemonOptions {
   root: string;
@@ -232,6 +236,39 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // and this is the daemon's own first line, which has to land somewhere.
     if (!existsSync(paths.daemonLog)) writeText(paths.daemonLog, "");
   }
+  // writeOps creates its own outbox when it needs one; a preview must not create it.
+  const ops = dry ? join(paths.root, "data", "_ops") : ensureGatewayDirs(paths.root).ops;
+  // Exiting on a policy that does not parse is not a failure a restart can fix: systemd
+  // starts the unit again, the same read throws on the next start, and that pair repeats
+  // every ten seconds forever — no ops line, no daemon.log line, and `status` shows a stale
+  // "last woke" that reads like "it is asleep". So a failed read keeps the last good policy
+  // and says so once per distinct complaint.
+  const told = new Set<string>();
+  const complain = (err: ExpectedError): void => {
+    if (told.has(err.message)) return;
+    told.add(err.message);
+    log(`policy.json 读不出来：${err.message}`);
+    // A preview and a one-off round report the error themselves; only a daemon holding on
+    // for a fix is worth paging a person about.
+    if (!dry && !o.once) {
+      writeOps(ops, `daemon@${paths.instance}`, `policy.json 读不出来，停在原地等你修：${err.message}`);
+    }
+  };
+  const loadOrWait = async (): Promise<Policy> => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const loaded = loadPolicy(paths.policy);
+        if (attempt > 1) log("policy.json 读得出来了，继续");
+        return loaded;
+      } catch (err) {
+        if (!(err instanceof ExpectedError)) throw err;
+        complain(err);
+        if (dry || o.once) throw err;
+        const waitMs = POLICY_RETRY_MS[Math.min(attempt, POLICY_RETRY_MS.length) - 1] ?? 60_000;
+        await sleep(waitMs);
+      }
+    }
+  };
   // Spent at the top of every cycle, not only at startup: the page promises the agent
   // "before the next waking", and reading it only at startup made that a promise for the
   // next restart.
@@ -244,10 +281,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       ...proposal.rejected.map((r) => `${r.key} 没采用（${r.reason}）`),
     ];
     if (lines.length > 0) {
-      writeOps(ensureGatewayDirs(paths.root).ops, `daemon@${paths.instance}`, `改了运行参数：${lines.join("；")}`);
+      writeOps(ops, `daemon@${paths.instance}`, `改了运行参数：${lines.join("；")}`);
     }
   };
-  let policy: Policy = loadPolicy(paths.policy);
+  let policy: Policy = await loadOrWait();
 
   let releaseLock: (() => void) | null = null;
   if (!o.dry) {
@@ -325,8 +362,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
   }
 
-  // writeOps creates its own outbox when it needs one; a preview must not create it.
-  const ops = dry ? join(paths.root, "data", "_ops") : ensureGatewayDirs(paths.root).ops;
   // A preview computes the same note without touching the disk: `dry` must not eat what
   // it is showing, but it must still say what a real start would say.
   const leftover = leftoverCut(paths, !o.dry);
@@ -342,11 +377,19 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // policy.json is read at the top of every cycle, and a proposal is spent there too:
     // both are files, and applying them by restarting would abort a waking in flight —
     // which is the whole cost a restart has. A cycle already running keeps its policy.
-    applyProposalNow();
-    const reloaded = loadPolicy(paths.policy);
-    if (JSON.stringify(reloaded) !== JSON.stringify(policy)) {
-      policy = reloaded;
-      log(`policy.json 变了：${policySummary(policy)}`);
+    try {
+      applyProposalNow();
+      const reloaded = loadPolicy(paths.policy);
+      told.clear();
+      if (JSON.stringify(reloaded) !== JSON.stringify(policy)) {
+        policy = reloaded;
+        log(`policy.json 变了：${policySummary(policy)}`);
+      }
+    } catch (err) {
+      // Same rule as the first read: a half-saved file keeps the last good policy for this
+      // cycle instead of aborting a waking in flight.
+      if (!(err instanceof ExpectedError)) throw err;
+      complain(err);
     }
     // Recomputed every round, not once at startup: each waking starts a fresh container
     // from the image tag, so a rebuild is picked up by itself — and this comparison is the
