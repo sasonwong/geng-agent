@@ -26,6 +26,22 @@ test("keyFiles: 按文件名找，删掉 seen，也不往 node_modules 里钻", 
   rmSync(root, { recursive: true, force: true });
 });
 
+test("keyFiles: 工作台的 scratch 不算，workspace 的其余部分照扫", () => {
+  // 被杀的轮次把测试根留在 `workspace/tmp`，里面有 `secrets/*.env` 夹具；这条检查是
+  // "凭据不在 data 里"，不是"测试残留不在 data 里"。其余 workspace 仍然要扫：token 是
+  // 能通过 socket 拿到、再用重定向写成文件的。
+  const root = tree((r) => {
+    mkdirSync(join(r, "workspace", "tmp", "geng-test-abc", "secrets"), { recursive: true });
+    writeFileSync(join(r, "workspace", "tmp", "geng-test-abc", "secrets", "alice.env"), "x");
+    mkdirSync(join(r, "workspace", "geng-agent"), { recursive: true });
+    writeFileSync(join(r, "workspace", "geng-agent", "leak.env"), "x");
+    mkdirSync(join(r, "book"), { recursive: true });
+    writeFileSync(join(r, "book", "model.key"), "x");
+  });
+  assert.deepEqual(keyFiles(root), [join(root, "book", "model.key"), join(root, "workspace", "geng-agent", "leak.env")]);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("scanLogBodies: token 粘在日志里也能认出来（这条以前说「干净」）", () => {
   const root = tree((r) => {
     mkdirSync(join(r, "usage"), { recursive: true });

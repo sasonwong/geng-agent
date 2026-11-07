@@ -552,6 +552,12 @@ const SKIP_DIRS = new Set(["seen", "node_modules", ".git"]);
 
 /** Key-shaped *file names* under data/. A token pasted into a log has another shape: see scanLogBodies. */
 export function keyFiles(dir: string): string[] {
+  // `workspace/tmp` is the agent's scratch, and a round that gets killed leaves its test
+  // roots there — complete data trees with `secrets/*.env` fixtures in them. Scanning it
+  // reported credentials in the book on every run, which is the shape of a check that
+  // teaches people to ignore it. The rest of the workspace is still scanned: a token
+  // written out as a file there is a real leak, and the socket is one way to get one.
+  const scratch = join(dir, "workspace", "tmp");
   const hits: string[] = [];
   const walk = (d: string) => {
     let entries;
@@ -563,7 +569,7 @@ export function keyFiles(dir: string): string[] {
     for (const e of entries) {
       const full = join(d, e.name);
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(full);
+        if (!SKIP_DIRS.has(e.name) && full !== scratch) walk(full);
       } else if (/\.(env|pem|key)$/.test(e.name)) {
         hits.push(full);
       }
