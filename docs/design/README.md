@@ -59,7 +59,7 @@
 
 | 文件 | 谁写 | 约束 |
 |---|---|---|
-| `identity.md` | 它，直接写文件 | 书里唯一一个它直接写的文件（容器里另外能写的只有 `/work` 和两个 tmpfs）；没有长度上限——每张纸原样贴它，多写一句就多付一句 |
+| `identity.md` | 它，直接写文件 | 书里唯一一个它直接写的文件（容器里另外能写的只有 `/work` 和三个 tmpfs）；没有长度上限——每张纸原样贴它，多写一句就多付一句 |
 | `journal/` `open-loops/` | 它发起，宿主落盘 | id 由宿主发，它拿不到文件名 |
 | `journal/discarded/` `open-loops/closed/` | 它发起，宿主搬文件 | 丢掉的东西不删，只是换个地方待着 |
 | `waiting.json` | 它发起，宿主落盘 | 下次什么时候醒 + 为什么 |
@@ -606,9 +606,13 @@ Telegram 给的消息号记成 `<chat>-<message_id>`，所以它想引用自己�
 所以纸面上通常是八条。书本身不挂：`/state`、`/inbox`、`/people`、`/mail`、`/outbox`、`/files`
 都不在容器里，读写全是 id 加 socket。
 
-**根文件系统是只读的**，容器能写的是四处：`identity.md`、`/work`、`~/.pi/agent` 和 `/tmp`。
-前两个是它的，后两个是 tmpfs——`~/.pi/agent` 每次醒来由镜像里的 `/opt/pi-npm` 重新填满（那是它
-加载插件的目录，也是 pi 写 `trust.json` 的地方），`/tmp` 是 64 MB 的临时空间，谁都能写、谁也不留。
+**根文件系统是只读的**，而只读守的是"运行时不可改"，不是"不持久"——可写层同样在退出时消失，
+但它在那之前能改掉 `pi`、凭据助手和 `/etc/gitconfig`。所以能写的地方是数得出来的：`identity.md`、
+`/work`，和三个 tmpfs（`/tmp`、`$HOME`、`~/.pi/agent`）。`/work` 是磁盘上的工作台，进备份；
+三个 tmpfs 只放这一轮自己的临时东西，上限之和压在 `container.memory` 的三分之一以内——这些页
+不可回收，撑爆应该发生在 scratch 里（ENOSPC），而不是把正在调模型的那一轮 OOM 掉。
+`~/.pi/agent` 里 pi 要的包由入口脚本 `geng-pi` 每轮从镜像的 `/opt/pi-npm` 复制进来：tmpfs 是
+遮住下层，不会自己长出东西来。那里也是 pi 写 `trust.json` 的地方。
 
 **网络**：容器没有网络（`--network none`）。出去的路只有两条，都在 book socket 上：
 模型流量（daemon 补 key 转发）和 HTTP/SOCKS 代理。代理默认放通所有公网目的地——挡的不是

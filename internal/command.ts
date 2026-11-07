@@ -101,7 +101,8 @@ export function buildCommand(
     // not decoration: a tmpfs mounted over a directory that exists in the image inherits
     // that directory's 0755, and the agent is not its owner, so without it the same mkdir
     // fails with EACCES instead of EROFS. This tmpfs masks the image's `/home/agent`
-    // rather than being filled from it; the defaults pi needs come from the mounts below.
+    // rather than being filled from it: `geng-pi` copies pi's packages in at the start of
+    // the waking, and settings/models arrive as the mounts below.
     "--tmpfs",
     "/home/agent:rw,nosuid,size=128m,mode=1777",
     "--tmpfs",
