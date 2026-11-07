@@ -86,6 +86,13 @@ function lockOf(lock: string): (LockOwner & { mtimeMs: number }) | null {
  * and two allocations interleave — the same double number, from the other end. A `stat`
  * that fails for any reason (EMFILE, EACCES) means nothing is deleted: the reading side
  * already refuses to call such a lock stale.
+ *
+ * Known limit: the comparison and the unlink are two operations, so two processes taking
+ * over the same corpse at the same instant can still delete each other's lock. `lockOf`
+ * has the same shape: it pairs a `stat` with a later `read`, and a path replaced between
+ * them hands back one file's mtime with another's token.
+ * shortcut: check-then-unlink, a two-syscall window; upgrade to an atomic steal (rename to
+ * a private name, only one rename wins) if ids ever collide again.
  */
 export function releaseLock(lock: string, owner: LockOwner): void {
   if (lockOf(lock)?.token === owner.token) rmSync(lock, { force: true });
