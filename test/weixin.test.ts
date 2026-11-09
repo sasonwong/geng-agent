@@ -21,6 +21,7 @@ import { splitText, weixinChannel } from "../internal/channels/weixin/channel.ts
 import { systemFacts } from "../internal/packet.ts";
 import { loginWeixin } from "../internal/channels/weixin/login.ts";
 import type { Inbound, SendContext } from "../internal/channels/channel.ts";
+import { failedAttempt, SEND_ATTEMPTS } from "../internal/channels/core.ts";
 
 function tempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "geng-weixin-"));
@@ -392,6 +393,78 @@ test("a closed window, a full budget, or a missing context holds the whole item 
   outcome = await weixinChannel.send(sendContext(roots[3] as string, config(server.url), ["刚好一条"]));
   assert.equal(outcome.ack, true);
   assert.equal(server.seen.length, 1);
+});
+
+test("a mid-element failure holds on budget at k=5 but only the attempt cap ends k=1/k=2", async (t) => {
+  // One element, five bubbles: splitText cuts 10,000 characters into five 2,000-character
+  // parts. The server fails the k-th bubble of every attempt. An element that fails half
+  // way is sent again whole (sent=0, so the gateway does not trim it) and writes no `said`
+  // row, because onSent runs after the last bubble (channel.ts:456-458).
+  const roots: string[] = [];
+  t.after(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+
+  async function run(k: number) {
+    const root = tempRoot();
+    roots.push(root);
+    let inAttempt = 0;
+    const server = await fakeServer(() =>
+      ++inAttempt === k ? { body: { ret: -1, errmsg: "boom" } } : { body: {} },
+    );
+    t.after(async () => server.close());
+    writeState(root, { alice: state() });
+    const said: string[] = [];
+    const failures = new Map<string, number>();
+    const attempts: { before: number; after: number; hold: boolean; giveUp: boolean }[] = [];
+    for (;;) {
+      inAttempt = 0;
+      const before = readState(root).alice?.sentSinceInbound ?? 0;
+      const outcome = await weixinChannel.send(
+        sendContext(root, config(server.url), ["a".repeat(10_000)], (part) => said.push(part.text)),
+      );
+      const after = readState(root).alice?.sentSinceInbound ?? 0;
+      if (outcome.hold === true) {
+        attempts.push({ before, after, hold: true, giveUp: false });
+        break;
+      }
+      assert.equal(outcome.ack, false);
+      const { giveUp } = failedAttempt(failures, "item");
+      attempts.push({ before, after, hold: false, giveUp });
+      if (giveUp) break;
+    }
+    assert.deepEqual(said, [], "a half-sent element leaves no said row");
+    return { attempts, requests: server.seen.length };
+  }
+
+  // k=5: four bubbles go out on each of the first two attempts; 8 + 5 > BUBBLE_LIMIT
+  // holds the third before anything is sent.
+  const k5 = await run(5);
+  assert.deepEqual(k5.attempts, [
+    { before: 0, after: 4, hold: false, giveUp: false },
+    { before: 4, after: 8, hold: false, giveUp: false },
+    { before: 8, after: 8, hold: true, giveUp: false },
+  ]);
+  assert.equal(k5.requests, 10, "four bubbles out plus the failed fifth, twice");
+
+  // k=1/k=2: the budget never blocks (at worst 4 + 5 = 9); the attempt cap is what ends
+  // it. Asserted against SEND_ATTEMPTS so a changed cap moves the expectation with it,
+  // and separately that the budget check passed on every attempt.
+  const k2 = await run(2);
+  assert.equal(k2.attempts.length, SEND_ATTEMPTS);
+  assert.equal(k2.attempts.at(-1)?.giveUp, true);
+  assert.deepEqual(k2.attempts.map((a) => a.before), [0, 1, 2, 3, 4]);
+  for (const attempt of k2.attempts) {
+    assert.equal(attempt.hold, false);
+    assert.ok(attempt.before + 5 <= BUBBLE_LIMIT);
+  }
+  assert.equal(k2.requests, SEND_ATTEMPTS * 2, "the first bubble left once per attempt");
+
+  const k1 = await run(1);
+  assert.equal(k1.attempts.length, SEND_ATTEMPTS);
+  assert.equal(k1.attempts.at(-1)?.giveUp, true);
+  assert.equal(k1.attempts.at(-1)?.after, 0);
+  assert.equal(k1.requests, SEND_ATTEMPTS);
 });
 
 test("ret=-2 holds, ret=-14 marks the session expired and stops", async (t) => {
