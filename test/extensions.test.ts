@@ -109,3 +109,43 @@ test("a link left behind in the writable directory cannot point a download out o
     rmSync(real, { recursive: true, force: true });
   }
 });
+
+// image/ is outside the tsconfig program and the extension's pi imports resolve only in
+// the image, so this import is a runtime one: a literal specifier would make `npm run
+// check` follow a module it cannot resolve. What is pinned is the event name — `pi.on()`
+// takes any string, and a typo makes the hook never fire while nothing reports it.
+test("the compact hook is registered on the event pi fires, and passes the fold through", async () => {
+  const specifier: string = "../image/extensions/compact.ts";
+  const { default: compact } = (await import(specifier)) as {
+    default: (pi: { on: (event: string, handler: (e: unknown) => unknown) => void }) => void;
+  };
+  let event = "";
+  let handler: ((e: unknown) => unknown) | undefined;
+  compact({
+    on: (name, h) => {
+      event = name;
+      handler = h;
+    },
+  });
+  assert.equal(event, "session_before_compact", "写错事件名时钩子不触发，只会安静地退回付费摘要");
+  assert.ok(handler);
+
+  const result = handler({
+    preparation: {
+      messagesToSummarize: [{ role: "user", content: "本轮：把那封信回掉" }],
+      turnPrefixMessages: [{ role: "user", content: "插一句" }],
+      firstKeptEntryId: "entry-7",
+      tokensBefore: 1234,
+    },
+    branchEntries: [{ type: "message", message: { role: "user", content: "本轮：把那封信回掉" } }],
+  }) as { compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number } };
+  assert.deepEqual(Object.keys(result.compaction).sort(), [
+    "firstKeptEntryId",
+    "summary",
+    "tokensBefore",
+  ]);
+  assert.equal(result.compaction.firstKeptEntryId, "entry-7");
+  assert.equal(result.compaction.tokensBefore, 1234);
+  assert.match(result.compaction.summary, /本轮：把那封信回掉/);
+  assert.match(result.compaction.summary, /早先的 2 条消息已折叠/);
+});

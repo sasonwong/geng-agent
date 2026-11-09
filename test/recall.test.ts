@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { bookHandler } from "../internal/book.ts";
-import { openText, recallText } from "../internal/recall.ts";
+import { lastJournalLine, openText, recallText } from "../internal/recall.ts";
 import { ensureDirs } from "../internal/fs.ts";
 
 function fixture() {
@@ -172,6 +172,79 @@ test("session 里 content 为 null 或数组含 null 元素，recall 都不崩",
     ].join("\n") + "\n",
   );
   assert.match(recallText(p, { sources: ["sessions"], query: "你好" }), /R1[\s\S]*你好/);
+});
+
+test("session 视图里留着工具说了什么，不是只有 [tool] 这个名字", () => {
+  const p = fixture();
+  const dir = join(p.sessionDir, "--proj-x");
+  mkdirSync(dir, { recursive: true });
+  const long = "x".repeat(5_000);
+  writeFileSync(
+    join(dir, "session-1.jsonl"),
+    [
+      JSON.stringify({ type: "message", message: { role: "user", content: "跑一下" } }),
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolName: "bash",
+          isError: false,
+          content: [{ type: "text", text: "a.txt\nb.txt" }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolName: "read",
+          isError: true,
+          content: [{ type: "text", text: long }],
+        },
+      }),
+    ].join("\n") + "\n",
+  );
+  const body = openText(p, "R1", 0).text;
+  // 压缩之后指回 session 才读得到工具的回答；只有 [bash] 的话，指过去也是空的
+  assert.match(body, /\[bash\] a\.txt\nb\.txt/);
+  // 失败也是一条事实：不写出来的话，失败的输出和成功的长得一样
+  assert.match(body, /\[read 出错\]/);
+  // 一条 5000 字的输出不能把一页撑满，截断处要说清原长
+  assert.match(body, /…（截断，原 5000 字）/);
+  assert.doesNotMatch(body, new RegExp("x{2500}"));
+  // 搜索和 open 走同一条渲染
+  assert.match(recallText(p, { sources: ["sessions"], query: "a.txt" }), /R1[\s\S]*a\.txt/);
+});
+
+test("the page quotes the newest live journal line, not the name that sorts last", () => {
+  const p = fixture();
+  const first = join(p.journal, "J20260302-1.md");
+  const tenth = join(p.journal, "J20260302-10.md");
+  const discarded = join(p.journalDiscarded, "J20260302-2.md");
+  const stray = join(p.journal, "notes.md");
+  writeFileSync(first, "钟表上更新的那条\n");
+  writeFileSync(tenth, "名字排在后面的那条\n");
+  writeFileSync(discarded, "丢掉的一条\n");
+  writeFileSync(stray, "不是一条日记\n");
+  const at = (s: string) => new Date(s);
+  utimesSync(first, at("2026-03-02T09:00:00Z"), at("2026-03-02T09:00:00Z"));
+  utimesSync(tenth, at("2026-03-02T08:00:00Z"), at("2026-03-02T08:00:00Z"));
+  // a discarded entry is not the last thing it wrote, and a stray note is not an entry
+  utimesSync(discarded, at("2026-03-02T10:00:00Z"), at("2026-03-02T10:00:00Z"));
+  utimesSync(stray, at("2026-03-02T11:00:00Z"), at("2026-03-02T11:00:00Z"));
+  assert.equal(lastJournalLine(p), "钟表上更新的那条");
+  // the helper keeps the whole line; the page cuts it and marks the cut
+  const long = join(p.journal, "J20260302-3.md");
+  writeFileSync(long, "长".repeat(300) + "\n");
+  utimesSync(long, at("2026-03-02T09:30:00Z"), at("2026-03-02T09:30:00Z"));
+  assert.equal(lastJournalLine(p), "长".repeat(300));
+  assert.equal(lastJournalLine(fixture()), null);
 });
 
 test("offset 越过末尾时说清有多长，而不是给一页空白", () => {

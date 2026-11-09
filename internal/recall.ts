@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { listFiles } from "./ids.ts";
 import { basename, join } from "node:path";
 import type { Paths } from "./paths.ts";
-import { readJson, writeJson } from "./fs.ts";
+import { mtimeMs, readJson, writeJson } from "./fs.ts";
 
 /**
  * The reading half of the book, on the host.
@@ -53,9 +53,13 @@ function when(file: string): string {
   }
 }
 
+function firstRawLine(text: string): string {
+  return (text.split("\n").find((l) => l.trim() !== "") ?? "").trim();
+}
+
+/** A listing header is one line: a long entry is cut there, with no marker. */
 function firstLine(text: string): string {
-  const line = text.split("\n").find((l) => l.trim() !== "") ?? "";
-  return line.trim().slice(0, LINE);
+  return firstRawLine(text).slice(0, LINE);
 }
 
 /** A discarded entry stays here: the book records that it happened, not only what is left. */
@@ -76,6 +80,21 @@ function journalItems(p: Paths): Item[] {
         };
       }),
   );
+}
+
+/**
+ * The first line of the newest live journal entry, or null.
+ *
+ * The page quotes this one line so a waking can see what it last thought without a tool
+ * call. Discarded entries do not count: taking something back is not the last thing it
+ * wrote. mtime, not the name — `J…-10` sorts before `J…-2` as text. The whole line is
+ * returned even when it is long: the page cuts it with `excerpt`, which says it did.
+ */
+export function lastJournalLine(p: Paths): string | null {
+  const newest = files(p.journal, ".md")
+    .filter((f) => /^J\d+-\d+\.md$/.test(basename(f)))
+    .sort((a, b) => (mtimeMs(b) ?? 0) - (mtimeMs(a) ?? 0))[0];
+  return newest ? firstRawLine(read(newest)) || null : null;
 }
 
 /** Open and closed alike: a closed one is still the answer to "how did that end". */
@@ -212,10 +231,19 @@ function inboxItems(p: Paths): Item[] {
 }
 
 interface SessionLine {
-  message?: { role?: string; content?: unknown };
+  message?: { role?: string; content?: unknown; toolName?: string; isError?: boolean };
 }
 
-/** One line of transcript per record: what was said, and which tool ran. */
+/** How much of one tool result the session view keeps. The marker says what was dropped. */
+const OUTPUT = 2_000;
+
+/**
+ * One line of transcript per record: what was said, what ran, and what came back.
+ *
+ * Tool output is capped: every recall renders every session, and one `bash` can be a
+ * hundred thousand characters. The cap prints its own size, so a reader knows the output
+ * did not end there instead of believing it did.
+ */
 function render(lines: string[]): string {
   const out: string[] = [];
   for (const line of lines) {
@@ -227,7 +255,6 @@ function render(lines: string[]): string {
       continue;
     }
     const role = rec.message?.role;
-    if (role !== "user" && role !== "assistant") continue;
     const parts: string[] = [];
     const content = rec.message?.content;
     if (typeof content === "string") parts.push(content);
@@ -238,6 +265,21 @@ function render(lines: string[]): string {
       }
     }
     const text = parts.join(" ").trim();
+    // A tool result is its own message in the transcript. Leaving it out made `open` show
+    // the call and not the answer, so a compacted round could point back to nothing.
+    if (role === "toolResult") {
+      const name = typeof rec.message?.toolName === "string" ? rec.message.toolName : "工具";
+      const failed = rec.message?.isError === true ? " 出错" : "";
+      const kept =
+        text === ""
+          ? "（没有输出）"
+          : text.length <= OUTPUT
+            ? text
+            : `${text.slice(0, OUTPUT)}…（截断，原 ${text.length} 字）`;
+      out.push(`  [${name}${failed}] ${kept}`);
+      continue;
+    }
+    if (role !== "user" && role !== "assistant") continue;
     if (text !== "") out.push(`${role === "user" ? "←" : "→"} ${text}`);
   }
   return out.join("\n");

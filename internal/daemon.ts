@@ -42,6 +42,7 @@ import { readAttention } from "./attention.ts";
 import { countTouched } from "./touch.ts";
 import { systemPromptFor } from "./prompt.ts";
 import { startBookServer } from "./book.ts";
+import { lastJournalLine } from "./recall.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
 import { describeEnvChange, imageId } from "./env.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
@@ -536,6 +537,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       lowInbox,
       mutes: readMutes(paths.mute, nowMs),
       lastSaid: meta.lastSaid ?? null,
+      lastJournal: lastJournalLine(paths),
       lastCycle: meta.lastCycle ?? null,
       lastWords: (() => {
         const t = lastSaidIn(paths.data);
