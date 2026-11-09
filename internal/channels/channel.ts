@@ -25,12 +25,35 @@ export interface Channel {
   describe?(instance: string, cfg: unknown, chats: Chats | undefined): string;
   /** Run until `signal` aborts. Every normalized message goes through `onInbound`. */
   start(ctx: StartContext): Promise<void>;
+  /**
+   * Can this channel send right now? The core asks before the tripwire records an
+   * attempt: a held item is retried every two seconds, and counting those attempts as
+   * sends would trip the brake on a message that never left.
+   *
+   * A non-null answer is returned to the sweep as-is; `null` means "go ahead and send".
+   */
+  ready?(ctx: SendContext): SendResult | null;
   send(ctx: SendContext): Promise<SendResult>;
   typing?(ctx: TypingContext): Promise<void>;
   /** `gateway --check`: prove the credential without starting a poll. */
   check?(cfg: unknown): Promise<string>;
   /** The same three states doctor uses: absent is a warn, present-and-wrong is a FAIL. */
   doctor?(root: string, instance: string): ChannelCheck[];
+  /** A manual login for channels that do not use a pasted token (a QR scan). */
+  login?(ctx: LoginContext): Promise<void>;
+}
+
+export interface LoginContext {
+  root: string;
+  instance: string;
+  /** A human-readable name the operator chose, when the login flow can use one. */
+  name?: string;
+  /** Override the service address; tests use a local server. */
+  baseUrl?: string;
+  log(line: string): void;
+  /** Ask the operator for a code shown on their phone; absent when nothing can prompt. */
+  ask?(question: string): Promise<string>;
+  signal: AbortSignal;
 }
 
 export interface ChannelCheck {

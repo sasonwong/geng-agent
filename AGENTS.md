@@ -71,6 +71,12 @@ id 分配、刹车窗口、盘的形状。
 - 每个 place 带 `channel` / `canFile` / `canQuote`；`/say` 在排队前检查，不留给 gateway 事后丢。
 - home 按能力排，不按谁最后说话：Telegram 私聊 2、只能回复的私聊 1、群 0。
 - 半写坏的凭据文件不能让 poller 停掉：token 空时沿用旧值，`merge()` 负责这件事。
+- 微信只做回复：`context_token` 是回复锚点，没有它不许发；主人说话后 24 小时、约 10 条气泡，
+  不够就整条 `hold`。`-14` 停在原地并写一行，重登永远是扫码，不做自动重登。
+- `message_id` 是 uint64：`weixin/client.ts` 的 reviver 保住字面量；chat id 由 `sha256(userId)`
+  合成到 `-8e15` 附近，不碰 Telegram 的 id 段。
+- 微信 token 只在 `secrets/weixin.json`；`data/_gateway/weixin.json` 是 gateway 独占的会话状态
+  （cursor / context_token / 窗口），不进容器。
 
 ## 写代码时的固定动作
 

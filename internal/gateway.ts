@@ -120,7 +120,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const mailbox = loadedMail === null ? null : { cfg: loadedMail };
   if (!CHANNELS.some((channel) => Object.keys(configs[channel.id] ?? {}).length > 0) && mailbox === null) {
     throw new ExpectedError(
-      `没有渠道也没有信箱：先写 ${join(root, "secrets", "bots.json")} 或 ${join(root, "secrets", "mail.json")}`,
+      `没有渠道也没有信箱：先写 ${join(root, "secrets", "bots.json")}、${join(root, "secrets", "weixin.json")} 或 ${join(root, "secrets", "mail.json")}`,
     );
   }
 
@@ -199,31 +199,36 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       writeOps(ops, "gateway", `${key} 要发给不认识的 chat ${item.chat}，没发。`);
       return { ack: true, sent: 0, error: null }; // acknowledged: retrying will never make it known
     }
-    if (trip(key, item.messages)) return { ack: false, sent: 0, error: null };
     const { steps, refused } = sendPlan(p.workspace, item.files ?? [], item.attachments ?? []);
+    const sendCtx = {
+      root,
+      instance: key,
+      cfg,
+      chat,
+      item,
+      steps,
+      ...(item.replyTo === undefined ? {} : { replyTo: item.replyTo }),
+      onSent: (part: { text: string; nativeId?: string }) => {
+        appendSaid(p.data, chat, {
+          at: new Date().toISOString(),
+          dir: "out",
+          text: part.text,
+          ...(part.nativeId === undefined ? {} : { id: `${chat}-${part.nativeId}` }),
+        });
+      },
+      log,
+      ops: (line: string) => writeOps(ops, "gateway", line),
+    };
+    // A channel that is waiting (a window, a quota) must not be counted as an attempt:
+    // the sweep hands the same item back every two seconds and would trip its own brake.
+    const early = channel.ready?.(sendCtx) ?? null;
+    if (early !== null) return early;
     for (const given of refused) {
       writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
     }
+    if (trip(key, item.messages)) return { ack: false, sent: 0, error: null };
     try {
-      return await channel.send({
-        root,
-        instance: key,
-        cfg,
-        chat,
-        item,
-        steps,
-        ...(item.replyTo === undefined ? {} : { replyTo: item.replyTo }),
-        onSent: (part) => {
-          appendSaid(p.data, chat, {
-            at: new Date().toISOString(),
-            dir: "out",
-            text: part.text,
-            ...(part.nativeId === undefined ? {} : { id: `${chat}-${part.nativeId}` }),
-          });
-        },
-        log,
-        ops: (line) => writeOps(ops, "gateway", line),
-      });
+      return await channel.send(sendCtx);
     } catch (err) {
       // a channel reports its own failures; a throw here is only the unexpected
       return { ack: false, sent: 0, error: err as Error };
