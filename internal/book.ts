@@ -6,7 +6,7 @@ import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
-import { forwardPlain, handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
+import { handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
 import { keyCanMute, writeOps } from "./mute.ts";
 import { parseReplyTo } from "./quote.ts";
 import { openText, recallText } from "./recall.ts";
@@ -39,6 +39,9 @@ export const BOOK_SOCKET_IN_CONTAINER = "/run/geng/book.sock";
 const MAX_BODY = 32 * 1024;
 // A model request is a conversation plus tool schemas; a few megabytes is generous.
 const MAX_MODEL_BODY = 32 * 1024 * 1024;
+// One string for the net.log line and the answer: two copies of it disagree the day one is
+// reworded, and the reader that gets the terse one is the one debugging.
+const PLAIN_HTTP_REFUSED = "明文 HTTP 不走代理：请用 https（CONNECT）";
 
 /**
  * A value for a test, a function for the daemon.
@@ -537,32 +540,16 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       req.on("error", guard);
       return;
     }
-    // A proxy client names the whole URL in the request line. Without this the request
-    // would fall through to the JSON routes and come back 405, which reads as "the proxy is
-    // broken" in the middle of a container that has no other way out.
+    // A proxy client names the whole URL in the request line. Only https leaves this daemon,
+    // and it arrives as CONNECT; an absolute `http://` request is refused with a reason here
+    // instead of falling through to the JSON routes, whose 405 reads as "the proxy is
+    // broken" in a container that has no other way out. 501, not 405: the two answers have
+    // to differ by status code and not only by body, or a caller that does not read bodies
+    // reads this refusal as the same misroute. (405 would also owe an `Allow` header.)
     if (/^http:\/\//i.test(url)) {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      let refused = false;
-      req.on("data", (c: Buffer) => {
-        if (refused) return;
-        size += c.length;
-        if (size > MAX_MODEL_BODY) {
-          refused = true;
-          chunks.length = 0;
-          reply(413, { error: "请求体太大" });
-          req.resume();
-          return;
-        }
-        chunks.push(c);
-      });
-      req.on("end", () => {
-        if (refused) return;
-        forwardPlain(req, res, Buffer.concat(chunks), rule(), chain(), (ok, why) =>
-          o.onNetwork?.({ target: url, ok, why }),
-        ).catch(guard);
-      });
-      req.on("error", guard);
+      o.onNetwork?.({ target: url, ok: false, why: PLAIN_HTTP_REFUSED });
+      reply(501, { error: PLAIN_HTTP_REFUSED });
+      req.resume();
       return;
     }
     // Plain text, not JSON, because the reader is `git`, not an agent: a credential helper

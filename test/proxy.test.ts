@@ -10,7 +10,6 @@ import { connect, createServer as createTcp } from "node:net";
 import {
   addrAllowed,
   chainFrom,
-  forwardPlain,
   hostAllowed,
   inCidr,
   checkTarget,
@@ -423,10 +422,12 @@ test("a chain does not buy an address the rules refuse", async () => {
   }
 });
 
-test("plain http is proxied too, and refused by the same address rules", async () => {
+test("a plain HTTP absolute-form request is refused with a reason, not forwarded", async () => {
+  const hits: string[] = [];
   const target = createHttp((req, res) => {
+    hits.push(req.url ?? "");
     res.writeHead(200, { "content-type": "text/plain" });
-    res.end(`hello ${req.url ?? ""}`);
+    res.end("SECRET");
   });
   await new Promise<void>((r) => target.listen(0, "127.0.0.1", () => r()));
   const up = makePaths(mkdtempSync(join(tmpdir(), "geng-proxy-")), "alice");
@@ -451,22 +452,80 @@ test("plain http is proxied too, and refused by the same address rules", async (
       req.end();
     });
   const port = (target.address() as { port: number }).port;
-  // The rule is read per request: the daemon reloads policy.json every cycle, so a
-  // snapshot taken when the endpoint started is a security setting that quietly stopped
-  // being read. One server, one `rule`, edited in between — that is the whole test.
-  let rule = { allow: ["*"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] };
-  const server = await startBookServer({ paths: up, log: () => {}, proxy: () => rule });
+  // Everything is allowed here on purpose: the refusal is structural, not a policy answer,
+  // so this says "plain http has no route" and not "this particular host was denied".
+  const server = await startBookServer({
+    paths: up,
+    log: () => {},
+    proxy: () => ({ allow: ["*"], cidrs: ["0.0.0.0/0"] }),
+  });
   try {
-    // the rule refuses it before anything is fetched: 127/8 is excluded
     const denied = await ask(`http://127.0.0.1:${port}/a`);
-    assert.equal(denied.status, 403);
-    assert.match(denied.body, /127\.0\.0\.1/);
+    assert.equal(denied.status, 501);
+    assert.match(denied.body, /https/);
+    assert.match(denied.body, /CONNECT/);
+    assert.deepEqual(hits, [], "明文 http 一次都不该被转发");
+  } finally {
+    server.close();
+    target.close();
+  }
+});
 
-    // the operator opens loopback in policy.json; no restart, no new endpoint
-    rule = { allow: ["*"], cidrs: ["0.0.0.0/0"] };
-    const ok = await ask(`http://127.0.0.1:${port}/a`);
-    assert.equal(ok.status, 200);
-    assert.equal(ok.body, "hello /a");
+test("the rule is read per connection, not snapshotted when the endpoint starts", async () => {
+  // `policy.json` is reloaded every cycle and the daemon answers through a getter for exactly
+  // this reason: a rule captured at startup keeps a host reachable after the operator took it
+  // out, and nothing says so. Same server, same client, one edit in between.
+  const target = createTcp((socket) => socket.on("data", (b) => socket.write(`echo:${String(b)}`)));
+  await new Promise<void>((r) => target.listen(0, "127.0.0.1", () => r()));
+  const up = makePaths(mkdtempSync(join(tmpdir(), "geng-proxy-")), "alice");
+  const port = (target.address() as { port: number }).port;
+  const events: { ok: boolean; why?: string }[] = [];
+  let rule = { allow: ["*"], cidrs: ["0.0.0.0/0"] };
+  const server = await startBookServer({
+    paths: up,
+    log: () => {},
+    proxy: () => rule,
+    onNetwork: (e) => events.push({ ok: e.ok, why: e.why }),
+  });
+  // The target echoes, so a 200 is a working tunnel and not only a status line.
+  const through = (): Promise<{ status: number; text: string }> =>
+    new Promise((resolve, reject) => {
+      const s = connect(socketPath(up));
+      let text = "";
+      let status = 0;
+      let sent = false;
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        s.destroy();
+        resolve({ status, text });
+      };
+      s.setEncoding("utf8");
+      s.on("data", (d: string) => {
+        text += d;
+        const m = /^HTTP\/1\.1 (\d{3})/.exec(text);
+        if (m !== null) status = Number(m[1]);
+        if (status === 200 && !sent && text.includes("\r\n\r\n")) {
+          sent = true;
+          s.write("ping");
+        }
+        if (text.includes("echo:ping") || status >= 400) finish();
+      });
+      s.on("error", reject);
+      s.on("connect", () => s.write(`CONNECT 127.0.0.1:${port} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`));
+      setTimeout(finish, 2000);
+    });
+  try {
+    const opened = await through();
+    assert.equal(opened.status, 200);
+    assert.match(opened.text, /echo:ping/);
+
+    // the operator edits policy.json — no restart, no new endpoint
+    rule = { allow: ["*"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] };
+    const refused = await through();
+    assert.equal(refused.status, 403, "同一个端点，第二次连接要看得到新规则");
+    assert.match(events.map((e) => e.why ?? "").join("\n"), /127\.0\.0\.1/);
   } finally {
     server.close();
     target.close();
@@ -579,62 +638,3 @@ test("a client that hangs up before the tunnel opens is a disconnect, not a cras
   assert.deepEqual(reports.map((r) => r[0]), [false], JSON.stringify(reports));
 });
 
-// 明文 HTTP 是那条路上唯一没人钉过的一段。`fetch` 在这里做两件这个文件明确不许做的事：
-// 把名字再解析一次（上面刚查过的那一个答案就不作数了），以及自己跟随 `Location:`——于是
-// 规则只被问过一次，问的是第一个地址，一个公开网站返回一条指向 169.254.169.254 的重定向
-// 就够了。重定向现在回到客户端手上，它下一次请求还会经过这里、还会被查。
-test("a plain-HTTP redirect goes back to the client, not to its target", async () => {
-  const hits: string[] = [];
-  const upstream = createHttp((req, res) => {
-    hits.push(req.url ?? "");
-    if (req.url === "/go") {
-      res.writeHead(302, { location: "/secret" });
-      res.end();
-      return;
-    }
-    res.writeHead(200, { "content-type": "text/plain" });
-    res.end("SECRET");
-  });
-  await new Promise<void>((r) => upstream.listen(0, "127.0.0.1", r));
-  const target = (upstream.address() as { port: number }).port;
-
-  const rule = { allow: ["127.0.0.1"], cidrs: ["127.0.0.0/8"] };
-  const proxy = createHttp((req, res) => {
-    void forwardPlain(req, res, Buffer.alloc(0), rule, null, () => {});
-  });
-  await new Promise<void>((r) => proxy.listen(0, "127.0.0.1", r));
-  const front = (proxy.address() as { port: number }).port;
-
-  // absolute-form is what a client sends a proxy; the path *is* a URL
-  const through = (url: string): Promise<{ status: number; body: string; location?: string }> =>
-    new Promise((resolve, reject) => {
-      const req = request({ host: "127.0.0.1", port: front, path: url, method: "GET" }, (res) => {
-        let body = "";
-        res.setEncoding("utf8");
-        res.on("data", (c: string) => (body += c));
-        res.on("end", () =>
-          resolve({ status: res.statusCode ?? 0, body, location: res.headers.location }),
-        );
-      });
-      req.on("error", reject);
-      req.end();
-    });
-
-  try {
-    // the path works at all, so the assertion below is about the redirect and not about a
-    // proxy that answers nothing
-    const direct = await through(`http://127.0.0.1:${target}/secret`);
-    assert.equal(direct.status, 200);
-    assert.equal(direct.body, "SECRET");
-
-    hits.length = 0;
-    const hop = await through(`http://127.0.0.1:${target}/go`);
-    assert.equal(hop.status, 302);
-    assert.equal(hop.location, "/secret");
-    assert.equal(hop.body, "");
-    assert.deepEqual(hits, ["/go"], "重定向的目标一次都没被取过");
-  } finally {
-    await new Promise<void>((r) => proxy.close(() => r()));
-    await new Promise<void>((r) => upstream.close(() => r()));
-  }
-});
