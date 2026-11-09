@@ -125,6 +125,46 @@ function rangeOpenUnder(danger: string, rules: string[]): boolean {
   return false;
 }
 
+/**
+ * The four variables git reads before any config. Three states, because a missing identity
+ * fails loudly ("Author identity unknown") where a wrong one does not: the app id in the
+ * address pushes fine and the commit arrives with no author at all. Both numbers are in
+ * this same env file, so this is the one comparison that can be made offline.
+ */
+export function gitIdentity(
+  env: Record<string, string>,
+  appId: string,
+): { ok: boolean; missing: boolean; detail: string } {
+  const vars = ["GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL"];
+  const set = vars.filter((k) => (env[k] ?? "") !== "");
+  const name = env["GIT_AUTHOR_NAME"] ?? "";
+  const emails = [env["GIT_AUTHOR_EMAIL"] ?? "", env["GIT_COMMITTER_EMAIL"] ?? ""];
+  if (set.length === 0) {
+    return {
+      ok: false,
+      missing: true,
+      detail:
+        "没配（GIT_AUTHOR_* / GIT_COMMITTER_*）：clone 里配过就用 clone 的，都没配时 git commit 会直接报 Author identity unknown",
+    };
+  }
+  if (set.length < vars.length) {
+    const absent = vars.filter((k) => !set.includes(k));
+    return {
+      ok: false,
+      missing: false,
+      detail: `只配了 ${set.join("、")}：还缺 ${absent.join("、")}，它会落到 clone 的 user.* 或 ~/.gitconfig——可能记到别人名下`,
+    };
+  }
+  if (appId !== "" && emails.some((e) => e.startsWith(`${appId}+`))) {
+    return {
+      ok: false,
+      missing: false,
+      detail: `邮箱里的数字是 App ID ${appId}，不是 bot 用户 id：push 会成功，提交在网页上没有作者——该写 <bot 用户 id>+<slug>[bot]@users.noreply.github.com`,
+    };
+  }
+  return { ok: true, missing: false, detail: `${name} <${emails[0]}>` };
+}
+
 export function checkInstance(root: string, instance: string, fix: boolean): Check[] {
   const p = makePaths(root, instance);
   const checks: Check[] = [];
@@ -337,6 +377,11 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
           ? `app ${gh.app.appId}，installation ${gh.app.installationId}`
           : `私钥签不动：${ghWhy}——git push 会要求密码`,
   });
+
+  // Same file as the ids above, and the same shape of failure as an unsigned key: nothing
+  // errors, the commit just lands with no author.
+  const ident = gitIdentity(envVars, gh.app?.appId ?? "");
+  checks.push({ name: "提交身份", ok: ident.ok, warnOnly: ident.missing, detail: ident.detail });
 
   checks.push({ name: "docker", ok: hasCmd("docker"), detail: "每一轮醒来是一个容器" });
   {
