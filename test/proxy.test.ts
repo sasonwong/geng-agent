@@ -461,10 +461,71 @@ test("a plain HTTP absolute-form request is refused with a reason, not forwarded
   });
   try {
     const denied = await ask(`http://127.0.0.1:${port}/a`);
-    assert.equal(denied.status, 405);
+    assert.equal(denied.status, 501);
     assert.match(denied.body, /https/);
     assert.match(denied.body, /CONNECT/);
     assert.deepEqual(hits, [], "明文 http 一次都不该被转发");
+  } finally {
+    server.close();
+    target.close();
+  }
+});
+
+test("the rule is read per connection, not snapshotted when the endpoint starts", async () => {
+  // `policy.json` is reloaded every cycle and the daemon answers through a getter for exactly
+  // this reason: a rule captured at startup keeps a host reachable after the operator took it
+  // out, and nothing says so. Same server, same client, one edit in between.
+  const target = createTcp((socket) => socket.on("data", (b) => socket.write(`echo:${String(b)}`)));
+  await new Promise<void>((r) => target.listen(0, "127.0.0.1", () => r()));
+  const up = makePaths(mkdtempSync(join(tmpdir(), "geng-proxy-")), "alice");
+  const port = (target.address() as { port: number }).port;
+  const events: { ok: boolean; why?: string }[] = [];
+  let rule = { allow: ["*"], cidrs: ["0.0.0.0/0"] };
+  const server = await startBookServer({
+    paths: up,
+    log: () => {},
+    proxy: () => rule,
+    onNetwork: (e) => events.push({ ok: e.ok, why: e.why }),
+  });
+  // The target echoes, so a 200 is a working tunnel and not only a status line.
+  const through = (): Promise<{ status: number; text: string }> =>
+    new Promise((resolve, reject) => {
+      const s = connect(socketPath(up));
+      let text = "";
+      let status = 0;
+      let sent = false;
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        s.destroy();
+        resolve({ status, text });
+      };
+      s.setEncoding("utf8");
+      s.on("data", (d: string) => {
+        text += d;
+        const m = /^HTTP\/1\.1 (\d{3})/.exec(text);
+        if (m !== null) status = Number(m[1]);
+        if (status === 200 && !sent && text.includes("\r\n\r\n")) {
+          sent = true;
+          s.write("ping");
+        }
+        if (text.includes("echo:ping") || status >= 400) finish();
+      });
+      s.on("error", reject);
+      s.on("connect", () => s.write(`CONNECT 127.0.0.1:${port} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`));
+      setTimeout(finish, 2000);
+    });
+  try {
+    const opened = await through();
+    assert.equal(opened.status, 200);
+    assert.match(opened.text, /echo:ping/);
+
+    // the operator edits policy.json — no restart, no new endpoint
+    rule = { allow: ["*"], cidrs: ["0.0.0.0/0", "!127.0.0.0/8"] };
+    const refused = await through();
+    assert.equal(refused.status, 403, "同一个端点，第二次连接要看得到新规则");
+    assert.match(events.map((e) => e.why ?? "").join("\n"), /127\.0\.0\.1/);
   } finally {
     server.close();
     target.close();
