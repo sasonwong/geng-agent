@@ -54,6 +54,26 @@ test("a query answers with the lines, and an empty answer says so", () => {
   assert.equal(recallText(p, { query: "闭嘴", sources: ["mail"] }), "没有哪一处提到「闭嘴」。");
 });
 
+test("a query answers with the newest matches, with dates, not the oldest", () => {
+  const p = fixture();
+  mkdirSync(p.people, { recursive: true });
+  const day = (d: number, hour: number) =>
+    JSON.stringify({
+      at: `2026-01-0${d}T0${hour}:00:00Z`,
+      dir: "in",
+      text: `第 ${d} 天的苹果问题`,
+      from: "@someone",
+    });
+  writeFileSync(join(p.people, "-1001.jsonl"), [1, 2, 3, 4].map((d) => day(d, d)).join("\n") + "\n");
+
+  const text = recallText(p, { sources: ["people"], query: "苹果" });
+  // three newest matches, oldest-to-newest inside the answer
+  assert.match(text, /2026-01-02 02:00/);
+  assert.match(text, /2026-01-03 03:00/);
+  assert.match(text, /2026-01-04 04:00/);
+  assert.doesNotMatch(text, /2026-01-01 01:00/);
+});
+
 test("opening a mail is what makes it no longer new, in the same call", () => {
   const p = fixture();
   mkdirSync(p.mail, { recursive: true });
