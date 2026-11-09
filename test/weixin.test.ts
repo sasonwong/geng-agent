@@ -81,7 +81,7 @@ const NOW = Date.now();
 
 function config(url: string, overrides: Partial<WeixinConfig> = {}): WeixinConfig {
   return {
-    token: "ilinkbot_test",
+    token: "fake-token",
     baseUrl: url,
     botId: "bot-1@im.bot",
     userId: "owner@im.wechat",
@@ -168,7 +168,7 @@ test("credentials are written 600, and a blank token is reported instead of disa
   assert.equal(statSync(credentialsFile(root)).mode & 0o777, 0o600);
   const read = readWeixin(root);
   assert.equal(read.problems.length, 0);
-  assert.equal(read.configs.alice?.token, "ilinkbot_test");
+  assert.equal(read.configs.alice?.token, "fake-token");
 
   saveWeixin(root, "bob", { token: "", userId: "b@im.wechat" });
   const broken = readWeixin(root);
@@ -199,7 +199,7 @@ test("an inbound owner message carries the context, opens the window, and keeps 
           from_user_id: "stranger@im.wechat",
           message_type: 1,
           create_time_ms: NOW,
-          context_token: "ctx-stranger",
+          context_token: "fake-context",
           item_list: [{ type: 1, text_item: { text: "hi" } }],
         },
       ],
@@ -426,7 +426,7 @@ test("a QR login writes the credential 600, prints the link, and leaves the sess
         body: {
           ret: 0,
           status: "confirmed",
-          bot_token: "ilinkbot_new",
+          bot_token: "fake-new",
           ilink_bot_id: "new@im.bot",
           ilink_user_id: "owner@im.wechat",
           baseurl: server.url,
@@ -439,7 +439,7 @@ test("a QR login writes the credential 600, prints the link, and leaves the sess
     await server.close();
     rmSync(root, { recursive: true, force: true });
   });
-  saveWeixin(root, "alice", config(server.url, { token: "old-token" }));
+  saveWeixin(root, "alice", config(server.url, { token: "fake-old" }));
   writeState(root, { alice: state({ expiredAt: new Date(NOW).toISOString() }) });
   const lines: string[] = [];
   const ac = new AbortController();
@@ -452,7 +452,7 @@ test("a QR login writes the credential 600, prints the link, and leaves the sess
     signal: ac.signal,
   });
   const cfg = readWeixin(root).configs.alice as WeixinConfig;
-  assert.equal(cfg.token, "ilinkbot_new");
+  assert.equal(cfg.token, "fake-new");
   assert.equal(cfg.userId, "owner@im.wechat");
   assert.equal(cfg.botId, "new@im.bot");
   assert.equal(cfg.name, "主人");
@@ -462,7 +462,7 @@ test("a QR login writes the credential 600, prints the link, and leaves the sess
   assert.equal(typeof readState(root).alice?.expiredAt, "string");
   assert.ok(lines.some((l) => l.includes("https://example.invalid/qr")));
   const qr = server.seen.find((s) => s.url.includes("get_bot_qrcode"));
-  assert.deepEqual(qr?.body.local_token_list, ["old-token"]);
+  assert.deepEqual(qr?.body.local_token_list, ["fake-old"]);
 });
 
 test("a re-scan of an already bound bot bumps savedAt, so a reload restarts the same token", async (t) => {

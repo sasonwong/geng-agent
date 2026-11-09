@@ -89,7 +89,7 @@ test("a well-formed whitelist and home still land in bots.json", async () => {
 test("channels list names the instance without printing its token", async () => {
   const r = root();
   const { saveWeixin } = await import("../internal/channels/weixin/state.ts");
-  saveWeixin(r, "alice", { token: "ilinkbot_secret_value", userId: "owner@im.wechat", botId: "bot@im.bot" });
+  saveWeixin(r, "alice", { token: "fake-token", userId: "owner@im.wechat", botId: "bot@im.bot" });
   const out = await run(["channels", "list", "--root", r]);
   assert.equal(out.code, 0, out.out);
   assert.match(out.out, /weixin\/alice/);

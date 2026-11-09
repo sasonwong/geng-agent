@@ -61,13 +61,13 @@ function inboxFiles(dir: string): string[] {
 test("an old outbox item with no channel follows the chat it names", () => {
   const mine: Chats = {
     known: {
-      "-8123456789012345": { kind: "private", channel: "weixin" },
-      "12345": { kind: "private" },
+      "-1001234": { kind: "private", channel: "weixin" },
+      "123456789": { kind: "private" },
     },
   };
-  assert.equal(outboxChannel({ chat: -8123456789012345 }, mine), "weixin");
-  assert.equal(outboxChannel({ chat: -8123456789012345, channel: "telegram" }, mine), "telegram");
-  assert.equal(outboxChannel({ chat: 12345 }, mine), "telegram");
+  assert.equal(outboxChannel({ chat: -1001234 }, mine), "weixin");
+  assert.equal(outboxChannel({ chat: -1001234, channel: "telegram" }, mine), "telegram");
+  assert.equal(outboxChannel({ chat: 123456789 }, mine), "telegram");
   assert.equal(outboxChannel({}, mine), "telegram");
 });
 

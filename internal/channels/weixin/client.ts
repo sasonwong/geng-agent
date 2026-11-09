@@ -87,6 +87,7 @@ export interface QrStatus {
 const BASE_INFO = { channel_version: CLIENT_VERSION, bot_agent: BOT_AGENT };
 
 const LOSSLESS = new Set(["message_id", "msg_id", "svr_id"]);
+const CTX = "context_token";
 
 /**
  * `message_id` is a uint64. `JSON.parse` rounds it to a float, which changes the id and
@@ -239,7 +240,7 @@ export async function sendText(
         client_id: `geng-${randomUUID()}`,
         message_type: 2,
         message_state: 2,
-        context_token: contextToken,
+        [CTX]: contextToken,
         item_list: [{ type: 1, text_item: { text } }],
       },
     },
@@ -260,7 +261,7 @@ export async function getConfig(
     baseUrl,
     token,
     "/ilink/bot/getconfig",
-    { ilink_user_id: userId, ...(contextToken === undefined ? {} : { context_token: contextToken }) },
+    { ilink_user_id: userId, ...(contextToken === undefined ? {} : { [CTX]: contextToken }) },
     { signal, timeoutMs: 10_000 },
   );
   checkRet(body, "getconfig");
