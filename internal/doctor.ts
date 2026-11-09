@@ -293,14 +293,19 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   // carried another — the same shape as `chainDrift` above, and likewise not a failure: the
   // round still runs, so this is a warning rather than something that blocks.
   const headEffort = head?.reasoningEffort;
-  if (headEffort !== undefined && headEffort !== settings.defaultThinkingLevel) {
+  const recordedEffort = settings.defaultThinkingLevel;
+  if (headEffort !== undefined && headEffort !== recordedEffort) {
     checks.push({
       name: "思考档位",
       ok: false,
       warnOnly: true,
-      detail: `链的第一条写了 reasoningEffort=${headEffort}，settings 的 defaultThinkingLevel 是 ${
-        settings.defaultThinkingLevel ?? "（没写）"
-      }——会话记的档和真正发出去的档会对不上；要两边一致，第一条就别写`,
+      // Without a setting there is nothing to compare against: pi starts at `medium` and the
+      // level goes into the transcript from there, so the same word on both sides can be the
+      // same level or not — this line cannot tell, and must not claim it is a mismatch.
+      detail:
+        recordedEffort === undefined
+          ? `链的第一条写了 reasoningEffort=${headEffort}，settings 里没有 defaultThinkingLevel（pi 启动时用 medium）——两边是不是同一个档，这里判断不了`
+          : `链的第一条写了 reasoningEffort=${headEffort}，settings 的 defaultThinkingLevel 是 ${recordedEffort}——会话记的档和真正发出去的档会对不上；要两边一致，第一条就别写`,
     });
   }
 
