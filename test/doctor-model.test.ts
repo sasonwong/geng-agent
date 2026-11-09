@@ -130,7 +130,12 @@ test("a hop's reasoning effort is shown, not just in the file", () => {
     );
     const found = check(root);
     assert.equal(found?.ok, true, String(found?.detail));
-    assert.match(String(found?.detail), /big-pickle（reasoningEffort=low）/);
+    // The whole line, not a substring: a hop that sets no effort has to print exactly as it
+    // did before, and only an exact assertion notices when that format drifts.
+    assert.equal(
+      String(found?.detail),
+      "2 跳：opencode-go/beam-free → opencode/big-pickle（reasoningEffort=low）",
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

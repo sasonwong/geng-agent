@@ -264,10 +264,10 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     name: "模型回退",
     ok: chainOk,
     warnOnly: head === undefined && chain.error === null && providers.error === null,
+    // A per-hop effort is set nowhere else the operator can read it back: without it two
+    // chains that differ only in `reasoning_effort` print the same line.
     detail: chainOk
-      ? // A per-hop effort is set nowhere else the operator can read it back: without it
-        // two chains that differ only in `reasoning_effort` print the same line.
-        `${chain.chain.length} 跳：${chain.chain
+      ? `${chain.chain.length} 跳：${chain.chain
           .map((e) => {
             const effort = e.reasoningEffort === undefined ? "" : `（reasoningEffort=${e.reasoningEffort}）`;
             return `${e.provider}/${e.model}${effort}`;
