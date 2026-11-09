@@ -614,10 +614,11 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 /** Directories that never hold config of ours and are huge: walking them only costs time. */
 const SKIP_DIRS = new Set(["seen", "node_modules", ".git"]);
 
-// The agent's scratch. A killed round leaves its test roots here — complete data trees with
-// `secrets/*.env` fixtures — so both scans below skip it; the rest of the workspace is still
-// scanned, because a token written out as a file there is a real leak. Kept in one place: two
-// copies drift, and a scan that reports fixtures on every run teaches people to ignore it.
+// The agent's scratch, skipped wholesale by both scans below. A killed round leaves whatever
+// it was writing here — often a complete data tree with `secrets/*.env` fixtures — and a scan
+// that reports that on every run teaches people to ignore the warning. The rest of the
+// workspace is still scanned: a token written out as a file there is a real leak. `backup.ts`
+// excludes the same path as a glob, so if the scratch moves, both move.
 const SCRATCH_DIR = join("workspace", "tmp");
 
 /** Key-shaped *file names* under data/. A token pasted into a log has another shape: see scanLogBodies. */
