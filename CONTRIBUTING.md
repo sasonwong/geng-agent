@@ -113,8 +113,10 @@ force push 一起放行，而重写 `main` 的代价是整个历史不可撤销�
 - 描述写**为什么**：原来的行为、为什么不对、改成了什么。不要复述 diff。
 - 写清验证方式。测试没覆盖的部分，明说怎么手工验证的，或者明说没验证。
 - 引用 issue / 审计编号（如 `L1`），不要把值本身抄进来。
-- 提交邮箱要能归属到账号（`<数字>+<login>@users.noreply.github.com`）。不带 `+数字` 的
-  `login@users.noreply.github.com` 是旧格式：GitHub 会把它对到同名账号，提交记在**别人**名下。
+- 提交邮箱要能归属到账号（`<数字>+<login>@users.noreply.github.com`）。数字是**账号的 user id**：
+  App 的 bot 用户写 `<bot 用户 id>+<slug>[bot]@…`，App ID 不是 user id——写错了不报错，提交只是
+  没有作者。不带 `+数字` 的 `login@users.noreply.github.com` 是旧格式：GitHub 会把它对到同名账号，
+  提交记在**别人**名下。
 
 ## 提交信息
 

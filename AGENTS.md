@@ -176,15 +176,17 @@ id 分配、刹车窗口、盘的形状。
   没配 App 时这条链路安静地拿不到凭据，git 会说"要密码"——`doctor` 的「GitHub App」先说话。
 - **没有 token 也能贡献**：`git format-patch` 出补丁，用 `say` 的 `files` 发给主人，宿主机上
   `git am` 落地。这条路随时可用，不依赖任何凭据。
-- **提交身份在 clone 里配好了，不要用 `-c` 覆盖它**：`data/<inst>/workspace/geng-agent/.git/config`
-  里是 `user.name=<Alice|Bob|Carol>` 和
-  `user.email=5640022+geng-agent-bots[bot]@users.noreply.github.com`。`HOME` 每轮都会被丢掉，
-  所以写进 `~/.gitconfig` 的东西活不过这一次醒来——这条配置只活在 clone 里。
+- **提交身份来自环境**：`secrets/<inst>.env` 里的 `GIT_AUTHOR_*` / `GIT_COMMITTER_*`。不在 clone
+  里，也不在 `~/.gitconfig`（`HOME` 每轮都会被丢掉），而 `git -c user.email=…` 会盖过它——别这么干。
 - **邮箱只能是 noreply 或 `*.invalid`**——真实域名会进历史、进 squash 提交、进每一份 clone，
   而提交元数据不在任何 diff 里，逐行扫描器永远看不见它。
-- **noreply 必须带 `+数字`**：`<数字>+<login>@users.noreply.github.com`。不带的那一种
-  （`login@users.noreply.github.com`）是 2017 年前的旧格式，GitHub 会把它对到同名账号上——
-  提交不是"未归属"，而是记在了别人名下。改已有的提交要 force-push，所以第一次就写对。
+- **noreply 里那串数字是账号的 user id，不是 App ID**：bot 提交写
+  `<bot 用户 id>+<slug>[bot]@users.noreply.github.com`。App ID 只用来签 installation token；拿它
+  当邮箱什么都不报错——push 照样成功，门禁照样绿，只是提交在网页上没有作者。值就在 `env` 里
+  （`git var GIT_AUTHOR_IDENT` 看得到），不要自己另写一个。名字是自由文本，只进 `git log`。
+  没配的时候 `git commit` 直接报 Author identity unknown——那种情况问主人，猜一个数字等于猜错。
+- **不带 `+数字` 的 `login@users.noreply.github.com` 是 2017 年前的旧格式**：GitHub 会把它对到
+  同名账号，提交不是"未归属"，而是记在了别人名下。改已有的提交要 force-push，所以第一次就写对。
 
 ## 文档
 

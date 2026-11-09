@@ -557,11 +557,24 @@ socket 不存在时，daemon 干脆不挂它（docker 会把缺失的宿主路�
    `Contents: Read and write`，`Metadata: Read-only` 自带；
 2. 在 App 页面生成一个 private key，存成 `secrets/gh-app.pem`（600）；
 3. 把 App 装到那个仓库/组织上，记下 installation id（`.../installations/<id>`）；
-4. 两个 id 写进 `secrets/alice.env`：
+4. 两个 id 和提交身份写进 `secrets/alice.env`：
 
 ```
 GENG_GH_APP_ID=123456
 GENG_GH_INSTALLATION_ID=7890
+GIT_AUTHOR_NAME=Alice
+GIT_AUTHOR_EMAIL=123456789+example-app[bot]@users.noreply.github.com
+GIT_COMMITTER_NAME=Alice
+GIT_COMMITTER_EMAIL=123456789+example-app[bot]@users.noreply.github.com
+```
+
+   后四行不是凭据，跟着 `--env-file` 进容器就够了。它们盖过 clone 里的 `user.name`/`user.email`，
+   所以老实例不用去改它的 clone。名字是自由文本，只进 `git log`；**归属全看邮箱里那串数字，它是
+   bot 用户 id，不是 App ID**——写成 App ID 一样 push 成功，只是提交在网页上没有作者（`author: null`），
+   而门禁只看邮箱的形状，拦不住。拿 id：
+
+```bash
+gh api 'users/example-app%5Bbot%5D' --jq .id    # slug 是 App 页面 URL 里那个，加 [bot]
 ```
 
 容器里没有 token，也没有会过期的 token：`git` 要凭据时，`/usr/local/bin/geng-gh-credential`
@@ -571,6 +584,8 @@ GENG_GH_INSTALLATION_ID=7890
 ```bash
 node cmd/geng/index.ts doctor --instance alice     # 「GitHub App」那一行
 git -C /work/geng remote -v                        # 在容器里：git pull 不再要密码
+git var GIT_AUTHOR_IDENT                           # 在容器里：身份来自上面那四行
+gh api repos/<owner>/<repo>/commits/<branch> --jq .author.login   # 推完第一条：空 = 数字写错了
 ```
 
 三态是分开的：没配 = `warn`（别的都正常）、配了但私钥签不动 = `FAIL`、签得动 = `ok`。
