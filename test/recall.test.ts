@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths, requiredDirs } from "../internal/paths.ts";
 import { bookHandler } from "../internal/book.ts";
-import { openText, recallText } from "../internal/recall.ts";
+import { lastJournalLine, openText, recallText } from "../internal/recall.ts";
 import { ensureDirs } from "../internal/fs.ts";
 
 function fixture() {
@@ -220,6 +220,26 @@ test("session 视图里留着工具说了什么，不是只有 [tool] 这个名�
   assert.doesNotMatch(body, new RegExp("x{2500}"));
   // 搜索和 open 走同一条渲染
   assert.match(recallText(p, { sources: ["sessions"], query: "a.txt" }), /R1[\s\S]*a\.txt/);
+});
+
+test("the page quotes the newest live journal line, not the name that sorts last", () => {
+  const p = fixture();
+  const first = join(p.journal, "J20260302-1.md");
+  const tenth = join(p.journal, "J20260302-10.md");
+  const discarded = join(p.journalDiscarded, "J20260302-2.md");
+  const stray = join(p.journal, "notes.md");
+  writeFileSync(first, "钟表上更新的那条\n");
+  writeFileSync(tenth, "名字排在后面的那条\n");
+  writeFileSync(discarded, "丢掉的一条\n");
+  writeFileSync(stray, "不是一条日记\n");
+  const at = (s: string) => new Date(s);
+  utimesSync(first, at("2026-03-02T09:00:00Z"), at("2026-03-02T09:00:00Z"));
+  utimesSync(tenth, at("2026-03-02T08:00:00Z"), at("2026-03-02T08:00:00Z"));
+  // a discarded entry is not the last thing it wrote, and a stray note is not an entry
+  utimesSync(discarded, at("2026-03-02T10:00:00Z"), at("2026-03-02T10:00:00Z"));
+  utimesSync(stray, at("2026-03-02T11:00:00Z"), at("2026-03-02T11:00:00Z"));
+  assert.equal(lastJournalLine(p), "钟表上更新的那条");
+  assert.equal(lastJournalLine(fixture()), null);
 });
 
 test("offset 越过末尾时说清有多长，而不是给一页空白", () => {

@@ -75,6 +75,8 @@ export interface PacketInput {
   envChanged: string | null;
   /** The last thing it said, when there is no transcript to read it from. */
   lastSaid: string | null;
+  /** The first line of the newest live journal entry; one line, not a summary. */
+  lastJournal: string | null;
   /** Why the previous waking happened and what it left behind, in the counts it prints. */
   lastCycle: {
     wake: WakeReason;
@@ -273,7 +275,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath } = input;
-  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastCycle, lastWords, thread, waiting, identity, mailPending } = input;
+  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastJournal, lastCycle, lastWords, thread, waiting, identity, mailPending } = input;
 
   const out: string[] = [];
 
@@ -311,6 +313,9 @@ export function buildPacket(input: PacketInput): string {
   } else if (lastSaid) {
     out.push(`你上次说完这句就没再说话了：「${excerpt(flatten(lastSaid), 120)}」`);
   }
+  // The last thing it wrote, not the last thing it said: a waking that never speaks still
+  // has a thought behind it, and the page is the only place that thought can resurface.
+  if (lastJournal) out.push(`你上次在日记里写的是：「${excerpt(flatten(lastJournal), 160)}」`);
 
   // the first page must not contradict itself: on birth there is no counting yet
   if (waking > 1) out.push("", `最近 24 小时醒了 ${wakes24h} 次。`);

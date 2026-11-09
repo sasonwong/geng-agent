@@ -46,6 +46,7 @@ function fixture(): {
     searchLeft: 12,
     envChanged: null,
     lastSaid: null,
+    lastJournal: null,
     lastCycle: null,
     lastWords: null,
     thread: null,
@@ -171,6 +172,16 @@ test("the previous waking is stated as counts, never as a story", () => {
   assert.match(many, /上一轮：你自己的闹钟，和 2 个人说了话，写了 1 个文件。/);
 
   assert.doesNotMatch(buildPacket(input({ lastCycle: null })), /上一轮：/);
+});
+
+test("the last thing it wrote is on the page, not behind a tool call", () => {
+  const { input } = fixture();
+  assert.match(
+    buildPacket(input({ lastJournal: "把那封信回掉，别催" })),
+    /你上次在日记里写的是：「把那封信回掉，别催」/,
+  );
+  // no journal is not a line: "the last thing you wrote" over nothing would be a lie
+  assert.doesNotMatch(buildPacket(input({ lastJournal: null })), /日记里写的/);
 });
 
 test("an empty open-loops directory is stated plainly", () => {

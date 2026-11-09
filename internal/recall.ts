@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { listFiles } from "./ids.ts";
 import { basename, join } from "node:path";
 import type { Paths } from "./paths.ts";
-import { readJson, writeJson } from "./fs.ts";
+import { mtimeMs, readJson, writeJson } from "./fs.ts";
 
 /**
  * The reading half of the book, on the host.
@@ -76,6 +76,20 @@ function journalItems(p: Paths): Item[] {
         };
       }),
   );
+}
+
+/**
+ * The first line of the newest live journal entry, or null.
+ *
+ * The page quotes this one line so a waking can see what it last thought without a tool
+ * call. Discarded entries do not count: taking something back is not the last thing it
+ * wrote. mtime, not the name — `J…-10` sorts before `J…-2` as text.
+ */
+export function lastJournalLine(p: Paths): string | null {
+  const newest = files(p.journal, ".md")
+    .filter((f) => /^J\d+-\d+\.md$/.test(basename(f)))
+    .sort((a, b) => (mtimeMs(b) ?? 0) - (mtimeMs(a) ?? 0))[0];
+  return newest ? firstLine(read(newest)) || null : null;
 }
 
 /** Open and closed alike: a closed one is still the answer to "how did that end". */
