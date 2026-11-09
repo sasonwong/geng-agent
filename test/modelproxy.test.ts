@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makePaths } from "../internal/paths.ts";
 import { proxyModel } from "../internal/modelproxy.ts";
+import { readChain } from "../internal/model.ts";
 
 function fixture(): ReturnType<typeof makePaths> {
   const root = mkdtempSync(join(tmpdir(), "geng-modelproxy-"));
@@ -105,7 +106,7 @@ test("a POST still carries its body to the provider", async () => {
 
 // ---- the chain: which route answers, and what it is told ----
 
-function chain(root: string, providers: unknown, chainSpec: string[], keyLines: string[] = []): ReturnType<typeof makePaths> {
+function chain(root: string, providers: unknown, chainSpec: unknown[], keyLines: string[] = []): ReturnType<typeof makePaths> {
   mkdirSync(join(root, "deploy"), { recursive: true });
   mkdirSync(join(root, "secrets"), { recursive: true });
   const line = (name: string, value: string): string => [name, value].join("=");
@@ -330,4 +331,62 @@ test("a provider that never answers is dropped for the next one", async () => {
   );
   assert.equal(calls.length, 2, "挂住的主力没有让位");
   assert.equal(fallbacks, 1);
+});
+
+// ---- per-route reasoning effort ----
+
+test("a chain entry may set its own reasoning effort, and a missing one keeps the client's", async () => {
+  const root = chainRoot();
+  const p = chain(root, { primary: "https://a.example/v1", backup: "https://b.example/v1" }, [
+    "primary/primary-model",
+    { provider: "backup", model: "backup-model", reasoningEffort: "high" },
+  ]);
+  const { fetchImpl, calls } = scripted([answer(429), answer(200)]);
+  const request = { model: "primary-model", reasoning_effort: "low", stream: true };
+  await proxyModel(p, post("/model/chat/completions"), fakeResponse(), Buffer.from(JSON.stringify(request)), fetchImpl);
+
+  const first = JSON.parse(Buffer.from(calls[0]?.init?.body as Uint8Array).toString("utf8"));
+  const second = JSON.parse(Buffer.from(calls[1]?.init?.body as Uint8Array).toString("utf8"));
+  assert.equal(first.reasoning_effort, "low", "没写 reasoningEffort 的那一跳不该动 pi 的选择");
+  assert.equal(second.reasoning_effort, "high");
+  assert.equal(second.stream, true, "换档不该捎走别的字段");
+});
+
+test("the primary entry's reasoning effort replaces the one pi sent", async () => {
+  const root = chainRoot();
+  const p = chain(root, { primary: "https://a.example/v1" }, [
+    { provider: "primary", model: "primary-model", reasoningEffort: "minimal" },
+  ]);
+  const { fetchImpl, calls } = scripted([answer(200)]);
+  await proxyModel(
+    p,
+    post("/model/chat/completions"),
+    fakeResponse(),
+    Buffer.from(JSON.stringify({ model: "primary-model", reasoning_effort: "low" })),
+    fetchImpl,
+  );
+  const sent = JSON.parse(Buffer.from(calls[0]?.init?.body as Uint8Array).toString("utf8"));
+  assert.equal(sent.reasoning_effort, "minimal");
+});
+
+test("a reasoning effort that is not a wire value is reported, not read as an absence", () => {
+  const root = chainRoot();
+  const p = chain(root, { primary: "https://a.example/v1", backup: "https://b.example/v1" }, [
+    "primary/primary-model",
+    { provider: "backup", model: "backup-model", reasoningEffort: "off" },
+  ]);
+  const parsed = readChain(p);
+  assert.equal(parsed.chain.length, 1, "前一条是好的，仍然该留下");
+  assert.match(String(parsed.error), /reasoningEffort/);
+});
+
+test("a misspelled key in a chain entry is an error, not a field nothing reads", () => {
+  const root = chainRoot();
+  const p = chain(root, { primary: "https://a.example/v1", backup: "https://b.example/v1" }, [
+    "primary/primary-model",
+    { provider: "backup", model: "backup-model", reasoning_effort: "high" },
+  ]);
+  const parsed = readChain(p);
+  assert.equal(parsed.chain.length, 1);
+  assert.match(String(parsed.error), /不认识的键/);
 });
