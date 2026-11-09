@@ -61,6 +61,17 @@ id 分配、刹车窗口、盘的形状。
 而且任何一个扩展加载失败都会让 pi 直接退出：它写错一个文件，下一轮还没醒就死，死前说不出话。
 要新工具就写在唤醒纸上，由操作者写进 `image/extensions/`。
 
+## 通道
+
+- 新通道写在 `internal/channels/` 里（一个文件或一个目录），实现 `Channel`（`channel.ts`），在 `index.ts` 加一行。
+  **不做运行时加载 `data/` 里的代码**：通道是代码，代码从 checkout 来。
+- 通道只做 wire：凭据、长轮询、cursor、`context_token`、媒体收发、typing、`--check`、`doctor`。
+  `inbox/`、`outbox/`、`people/`、`route()`、mute、attention、刹车归 core。
+- `Inbound` 只带 core 需要的事实。`SendContext.onSent` 每发出一条就回调，`people/` 仍然只有一个写者。
+- 每个 place 带 `channel` / `canFile` / `canQuote`；`/say` 在排队前检查，不留给 gateway 事后丢。
+- home 按能力排，不按谁最后说话：Telegram 私聊 2、只能回复的私聊 1、群 0。
+- 半写坏的凭据文件不能让 poller 停掉：token 空时沿用旧值，`merge()` 负责这件事。
+
 ## 写代码时的固定动作
 
 这个项目里反复出现的滑点，不是判断错，是手术错。固定动作比自觉靠谱：

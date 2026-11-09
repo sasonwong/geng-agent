@@ -1,253 +1,71 @@
-import { existsSync, rmSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { attentionActive, readAttention } from "./attention.ts";
+import { join } from "node:path";
 import { Tripwire } from "./tripwire.ts";
-import { quoteFor, quotedOf } from "./quote.ts";
 import { ExpectedError } from "./errors.ts";
 import type { Paths } from "./paths.ts";
 import { makePaths } from "./paths.ts";
-import { appendSaid, saidHasId } from "./people.ts";
-import { attachmentOf, hostPathForWorkPath, placeholderFor, type Attachment } from "./attach.ts";
+import { appendSaid } from "./people.ts";
 import { newestKnock, peekInbox } from "./inbox.ts";
 import { describeConfig, loadMailConfig, readMailEnv, startMailServer } from "./mail.ts";
-import { ensureGatewayDirs, ackOutbox, isMuted, outboxDir, readMutes, readOutbox, trimOutbox, writeOps } from "./mute.ts";
-import { readBots, type Bots } from "./bots.ts";
-import { newFile } from "./ids.ts";
-import { readJson, writeJson } from "./fs.ts";
 import {
-  getMe,
-  getUpdates,
-  isMentioned,
-  isReplyToBot,
-  downloadFile,
-  getFilePath,
-  sendFile,
-  sendMessage,
-  sendTyping,
-  senderName,
-  nameOf,
-  type BotConfig,
-  type BotIdentity,
-  type TgUpdate,
-} from "./telegram.ts";
+  ackOutbox,
+  ensureGatewayDirs,
+  outboxDir,
+  readOutbox,
+  trimOutbox,
+  writeOps,
+  type OutboxItem,
+} from "./mute.ts";
+import { readJson } from "./fs.ts";
+import { CHANNEL_BY_ID, CHANNELS } from "./channels/index.ts";
+import {
+  failedAttempt,
+  handleInbound,
+  readChats,
+  reloadPlan,
+  sendPlan,
+  type InboundHost,
+} from "./channels/core.ts";
+import type { Channel, Place, SendResult } from "./channels/channel.ts";
 
-export type RouteReason = "dm" | "mention" | "reply" | "listen" | "ambient" | "muted" | "guest" | "skip";
-
-export interface RouteInput {
-  /** False: not on the whitelist, so nothing about it is kept at all. */
-  allowed: boolean;
-  isDm: boolean;
-  isMention: boolean;
-  isReply: boolean;
-  listen: "all" | "mentions";
-  muted: boolean;
-  /** It asked to hear this chat for a while, so plain talk there wakes it too. */
-  listening: boolean;
-}
-
-export interface Route {
-  deliver: boolean;
-  /** A knock wakes it; the rest waits for a waking that is happening anyway. */
-  high: boolean;
-  reason: RouteReason;
-}
-
-/**
- * Direct address always wins, mute only silences the ambient. That is the whole
- * delivery policy: high frequency calls it, low frequency waits for it.
- */
-export function route(i: RouteInput): Route {
-  // before everything else, including silent-looking ambient: a stranger must not even
-  // be able to land in the pull bucket
-  if (!i.allowed) return { deliver: false, high: false, reason: "guest" };
-  if (i.isDm) return { deliver: true, high: true, reason: "dm" };
-  if (i.isMention) return { deliver: true, high: true, reason: "mention" };
-  if (i.isReply) return { deliver: true, high: true, reason: "reply" };
-  if (i.listening) return { deliver: true, high: true, reason: "listen" };
-  if (i.listen === "mentions") return { deliver: false, high: false, reason: "skip" };
-  return { deliver: true, high: false, reason: i.muted ? "muted" : "ambient" };
-}
+export {
+  alreadyStored,
+  failedAttempt,
+  HANDLE_ATTEMPTS,
+  noteChat,
+  readChats,
+  reloadPlan,
+  route,
+  SEND_ATTEMPTS,
+  sendPlan,
+  storeRemoteAttachment,
+  targetChat,
+} from "./channels/core.ts";
+export { mergeBots } from "./channels/telegram.ts";
+export type { Chats, KnownChat } from "./channels/channel.ts";
 
 export interface GatewayOptions {
   root: string;
   log?: (line: string) => void;
 }
 
-/**
- * One entry per chat this instance has ever been seen in. `home` is learned once and
- * then left alone: whoever spoke last must not decide where an unprompted word lands.
- */
-export interface KnownChat {
-  kind: "private" | "group";
-  who?: string;
-  title?: string;
-}
-
-export interface Chats {
-  home?: number;
-  known?: Record<string, KnownChat>;
-}
-
-export function readChats(file: string): Record<string, Chats> {
-  const raw = readJson<Record<string, unknown>>(file, {});
-  const out: Record<string, Chats> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    // the first shape was a bare chat id per instance
-    if (typeof value === "number") out[key] = { home: value, known: {} };
-    else if (value && typeof value === "object") out[key] = value as Chats;
-  }
-  return out;
-}
-
-export function noteChat(chats: Chats, chat: KnownChat, id: number, seen: boolean): boolean {
-  const known = (chats.known ??= {});
-  const key = String(id);
-  const before = JSON.stringify(known[key] ?? null);
-  known[key] = seen ? { ...chat } : (known[key] ?? chat);
-  // An unprompted word must not land in a room with an audience, so a private chat beats
-  // a group as home — but only the first of each: whoever spoke last still decides nothing.
-  const homeIsPrivate =
-    chats.home !== undefined && known[String(chats.home)]?.kind === "private";
-  if (chats.home === undefined) chats.home = id;
-  else if (chat.kind === "private" && !homeIsPrivate) chats.home = id;
-  return JSON.stringify(known[key]) !== before;
-}
-
 /** What the daemon shows the agent about where it may speak. */
-export function knownPlaces(
-  root: string,
-  key: string,
-): { id: number; label: string; home: boolean; kind: "private" | "group" }[] {
+export function knownPlaces(root: string, key: string): Place[] {
   const chats = readChats(join(root, "data", "_gateway", "chats.json"))[key];
   if (!chats) return [];
   const home = chats.home;
   return Object.entries(chats.known ?? {}).map(([id, c]) => ({
     id: Number(id),
-    label: c.kind === "private" ? `私聊${c.who ? ` ${c.who}` : ""}` : `群「${c.title ?? id}」`,
+    label:
+      c.kind === "private"
+        ? `${c.label ? `${c.label} ` : ""}私聊${c.who ? ` ${c.who}` : ""}`
+        : `${c.label ? `${c.label} ` : ""}群「${c.title ?? id}」`,
     home: Number(id) === home,
     kind: c.kind,
+    // files written before the channel contract existed are Telegram's, where both hold
+    channel: c.channel ?? "telegram",
+    canFile: c.canFile ?? true,
+    canQuote: c.canQuote ?? true,
   }));
-}
-
-/**
- * Fetch what came with a message and give it an id.
- *
- * The two writers of `files/` — this one and the mail endpoint — must name a file the same
- * way, or one of them produces files the other's readers cannot see: stored, backed up,
- * counted as disk use, and unreachable by `download`, `say` or `recall`.
- */
-export async function storeAttachment(
-  paths: Paths,
-  key: string,
-  token: string,
-  att: Attachment,
-  ops: string,
-): Promise<void> {
-  if (!att.fileId) return;
-  const { id, file } = newFile(paths, 0, att.name ?? "file");
-  try {
-    const filePath = await getFilePath(token, att.fileId);
-    const bytes = await downloadFile(token, filePath, file);
-    att.id = id;
-    att.bytes = bytes;
-  } catch (err) {
-    writeOps(ops, "gateway", `${key} 的文件没取到：${(err as Error).message}`);
-    att.note = "没取到";
-  }
-}
-
-/**
- * What a redelivered message keeps: the file the first delivery already stored.
- *
- * Telegram hands a message over again when a round crashed between handling it and
- * recording the offset, and the media behind `<chat>-<message_id>` cannot have changed.
- * Re-fetching it allocated a second id, so the inbox record's pointer moved to the new copy
- * and the first one stayed behind — stored, counted by the size cap, reachable by
- * `download` and listed by `recall`, with nothing pointing at it.
- *
- * A first delivery that failed (`note: 没取到`, no id) has nothing to keep, so a
- * redelivery retries the download.
- */
-export function alreadyStored(previous: { attachments?: Attachment[] } | null): Attachment | undefined {
-  const had = previous?.attachments?.[0];
-  return had !== undefined && had.id !== undefined ? had : undefined;
-}
-
-/**
- * A failed send is not a lost message and not an infinite retry.
- *
- * The sweep hands every outbox item back every two seconds, so acknowledging a failed one
- * (the old behaviour) made a two-second network blip unrecoverable: the words were gone and
- * the only trace was a line in the ops queue the agent cannot read. Retrying forever is the
- * other wrong answer — a chat the bot was thrown out of would keep the whole bot's outbox
- * stuck and, via the tripwire, mute it. Five attempts, then one line, and the file is moved
- * to `outbox/sent/` with its words intact.
- */
-export const SEND_ATTEMPTS = 5;
-
-/**
- * A message whose handling keeps failing is retried, then let go of with one line — the
- * same deal a failed send gets. Advancing the offset on the first failure used to turn a
- * transient write error (a full disk, a permissions blip) into a message lost for good:
- * Telegram never hands over an update behind a recorded offset again.
- */
-export const HANDLE_ATTEMPTS = 5;
-
-/** How long an empty poll waits before asking again: fast enough to notice, slow enough
- * not to spin. */
-const POLL_PAUSE_MS = 3_000;
-
-/** One thing a queued item still owes: a `/work` path the container named, or a host path. */
-export interface SendStep {
-  /** what goes back into the queue file when this step has not been sent yet */
-  given: string;
-  /** where the bytes actually are */
-  path: string;
-  name: string;
-  kind: "work" | "file";
-}
-
-/**
- * The upload half of an item, decided once, before anything is sent.
- *
- * Two reasons it is a plan and not a loop over `files` followed by a loop over
- * `attachments`: a `/work` path that cannot be published is refused here (a retry would
- * otherwise repeat the same line every two seconds), and the retry needs to know exactly
- * which of these already went out. A counted prefix over the two lists did not survive a
- * refusal in the middle: `["/etc/x", "/work/ok"]` would keep the refused one and drop the
- * sent one.
- */
-export function sendPlan(
-  workspace: string,
-  files: string[],
-  attachments: { path: string; name: string }[],
-): { steps: SendStep[]; refused: string[] } {
-  const steps: SendStep[] = [];
-  const refused: string[] = [];
-  for (const given of files) {
-    // the path came from inside the container, so it can be anything it likes: only
-    // /work is its own, and only files that exist there are sent
-    const host = hostPathForWorkPath(workspace, given);
-    if (host === null) {
-      refused.push(given);
-      continue;
-    }
-    steps.push({ given, path: host, name: basename(host), kind: "work" });
-  }
-  // the daemon resolved these from ids it handed out, so they are already host paths;
-  // nothing here can be talked into reading somewhere else
-  for (const a of attachments) steps.push({ given: a.path, path: a.path, name: a.name, kind: "file" });
-  return { steps, refused };
-}
-
-export function failedAttempt(
-  failures: Map<string, number>,
-  file: string,
-  max = SEND_ATTEMPTS,
-): { n: number; giveUp: boolean } {
-  const n = (failures.get(file) ?? 0) + 1;
-  failures.set(file, n);
-  return { n, giveUp: n >= max };
 }
 
 /**
@@ -259,71 +77,6 @@ const RATE_WINDOW_MS = 60_000;
 const RATE_LIMIT = 30;
 const REPEAT_LIMIT = 10;
 const PAUSE_MS = 10 * 60_000;
-
-/**
- * Which pollers a reload has to move. A poller is a long poll holding a token, so only a
- * token that changed (or a bot that came or went) needs a new one: allow, listen and chat
- * are read per message from `bots`, which is swapped under it.
- */
-export function reloadPlan(
-  running: Record<string, string>,
-  next: Record<string, string>,
-): { stop: string[]; start: string[] } {
-  return {
-    stop: Object.keys(running).filter((k) => running[k] !== next[k]).sort(),
-    start: Object.keys(next).filter((k) => next[k] !== running[k]).sort(),
-  };
-}
-
-/**
- * What a reload does with a bot whose token is missing or blank.
- *
- * A token is the one thing a reload cannot invent, so a missing one must mean "keep the
- * token this poller already holds" — deleting the entry instead stops the poller and takes
- * the bot down, which is the opposite of what the log line promises. A half-written
- * `bots.json` is exactly the case a reload is supposed to survive.
- *
- * A bot that has no token and no old one is dropped: there is nothing to poll with.
- *
- * `next` is the JSON as it was read, so it is deliberately typed as partial: a file that is
- * being written has holes, and the type says so rather than lying about it.
- */
-export function mergeBots(
-  running: Bots,
-  next: Record<string, Partial<BotConfig>>,
-): { bots: Bots; notes: string[] } {
-  const bots: Bots = {};
-  const notes: string[] = [];
-  for (const [key, cfg] of Object.entries(next)) {
-    const token = cfg.token;
-    if (typeof token === "string" && token.trim() !== "") {
-      bots[key] = { ...cfg, token };
-      continue;
-    }
-    const old = running[key];
-    if (old) {
-      bots[key] = { ...cfg, token: old.token };
-      notes.push(`重载：${key} 没有 token，沿用旧的`);
-    } else {
-      notes.push(`重载：${key} 没有 token，也没有旧的可用，跳过`);
-    }
-  }
-  return { bots, notes };
-}
-
-/**
- * Where a send goes: the chat the item names, else the one `bots.json` pins, else the first
- * chat this bot ever heard from. `null` is "nowhere" — nothing named a target and nobody has
- * ever written to it, so there is no address a retry could ever reach.
- */
-export function targetChat(
-  want: number | undefined,
-  pinned: number | undefined,
-  home: number | undefined,
-): number | null {
-  const chat = want ?? pinned ?? home;
-  return typeof chat === "number" ? chat : null;
-}
 
 /**
  * `geng-gateway.service` sets NODE_USE_ENV_PROXY=1 so `fetch` honours the HTTP(S)_PROXY in
@@ -351,29 +104,29 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   assertProxySupport();
   const root = o.root;
-  const botsFile = join(root, "secrets", "bots.json");
-  // both are re-read on SIGHUP: editing either one is an operator action, and restarting
-  // the process for it would drop the long polls and re-login every bot
-  let bots = readBots(root);
-  // a mailbox is a transport too: an instance may have mail and no bot at all
+
+  // Every channel reads its own secrets file. A channel that cannot parse its file says
+  // so and keeps what it could; none of them may take another channel down.
+  const configs: Record<string, Record<string, unknown>> = {};
+  for (const channel of CHANNELS) {
+    const loaded = channel.load(root);
+    for (const problem of loaded.problems) log(`${channel.id}：${problem}`);
+    configs[channel.id] = loaded.configs;
+  }
+  // a mailbox is a transport too: an instance may have mail and no chat channel
   const loadedMail = loadMailConfig(root);
   // a box rather than a bare `let`: the getter handed to the mail server stays non-null
   // for the life of the process, and only its contents are swapped by a reload
   const mailbox = loadedMail === null ? null : { cfg: loadedMail };
-  if (Object.keys(bots).length === 0 && mailbox === null) {
+  if (!CHANNELS.some((channel) => Object.keys(configs[channel.id] ?? {}).length > 0) && mailbox === null) {
     throw new ExpectedError(
-      `没有 bot 也没有信箱：先写 ${botsFile} 或 ${join(root, "secrets", "mail.json")}`,
+      `没有渠道也没有信箱：先写 ${join(root, "secrets", "bots.json")} 或 ${join(root, "secrets", "mail.json")}`,
     );
   }
 
   const { ops } = ensureGatewayDirs(root);
   const chatsFile = join(root, "data", "_gateway", "chats.json");
-  const offsetsFile = join(root, "data", "_gateway", "offsets.json");
   const chats = readChats(chatsFile);
-  const offsets = readJson<Record<string, number>>(offsetsFile, {});
-  // One count per failing update, in memory on purpose: a restart is a fresh set of
-  // attempts, and the offsets file already says where the next start resumes from.
-  const handleFailures = new Map<string, number>();
   const watch = new Map<string, Tripwire>();
 
   const watchFor = (key: string): Tripwire => {
@@ -405,313 +158,82 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     }
   };
 
-  const deliver = async (
-    key: string,
-    texts: string[],
-    want?: number,
-    files: string[] = [],
-    replyTo?: { chat: number; messageId: number },
-    attachments: { path: string; name: string }[] = [],
-  ): Promise<{
-    ack: boolean;
-    sent: number;
-    error: Error | null;
-    /** the upload steps still owed, when the failure was one of them */
-    left?: { files: string[]; attachments: { path: string; name: string }[] };
-  }> => {
-    const cfg = bots[key];
+  // One place where an inbound message lands, whichever channel carried it.
+  const inboundHost: InboundHost = {
+    root,
+    chats,
+    chatsFile,
+    ops,
+    log,
+    instanceData,
+  };
+
+  const sendItem = async (key: string, item: OutboxItem): Promise<SendResult> => {
+    const channelId = item.channel ?? "telegram";
+    const channel = CHANNEL_BY_ID[channelId];
+    if (!channel) {
+      writeOps(ops, "gateway", `${key} 要发到未知通道 ${channelId}，没发。`);
+      return { ack: true, sent: 0, error: null };
+    }
+    const cfg = configs[channelId]?.[key];
     if (!cfg) return { ack: false, sent: 0, error: null };
-    const mine = (chats[key] ??= { known: {} });
-    // bots.json can pin the home; otherwise the first chat it ever heard from is home,
-    // and a later group must be named explicitly to be spoken into
-    const chat = targetChat(want, cfg.chat, mine.home);
-    if (chat === null) {
+    const p = instanceData(key);
+    if (!p) {
+      writeOps(ops, "gateway", `收到发给未知实例 ${key} 的消息，已忽略。`);
+      return { ack: true, sent: 0, error: null };
+    }
+    const mine = chats[key];
+    const chat = item.chat ?? channel.defaultChat?.(cfg, mine) ?? mine?.home;
+    if (chat === undefined) {
       // Not a failure to retry: the sweep hands this back every two seconds and nothing
       // will have changed. Acknowledged, with one line, because the words were queued as
       // if they had somewhere to go and that is the part a person has to be told.
       writeOps(
         ops,
         "gateway",
-        `${key} 没有地方可发：bots.json 里没写 chat，也还没有人跟这个 bot 说过话。这条没送到，文件在 outbox/sent/ 里。`,
+        `${key} 没有地方可发：配置里没写 chat，也还没有人跟这个通道说过话。这条没送到，文件在 outbox/sent/ 里。`,
       );
       return { ack: true, sent: 0, error: null };
     }
-    if (want !== undefined && !mine.known?.[String(want)]) {
-      writeOps(ops, "gateway", `${key} 要发给不认识的 chat ${want}，没发。`);
+    if (item.chat !== undefined && !mine?.known?.[String(item.chat)]) {
+      writeOps(ops, "gateway", `${key} 要发给不认识的 chat ${item.chat}，没发。`);
       return { ack: true, sent: 0, error: null }; // acknowledged: retrying will never make it known
     }
-    if (trip(key, texts)) return { ack: false, sent: 0, error: null };
-    // a quote only means something inside the chat it came from; a mismatched one is
-    // dropped rather than sent into the wrong conversation
-    const reply = quoteFor(chat, replyTo);
-    const ids: (number | undefined)[] = [];
-    const p = instanceData(key);
-    let sent = 0;
-    for (const text of texts) {
-      let id: number | undefined;
-      try {
-        id = (await sendMessage(cfg.token, chat, text, reply))[0];
-      } catch (first) {
-        if (reply === undefined) {
-          // The parts before this one already went out; `sent` says so, and the sweep
-          // takes them out of the queue file instead of letting the retry say them twice.
-          return { ack: false, sent, error: first as Error };
-        }
-        try {
-          // a deleted message must not take the words down with it: once more without it
-          id = (await sendMessage(cfg.token, chat, text))[0];
-        } catch (real) {
-          return { ack: false, sent, error: real as Error };
-        }
-      }
-      ids.push(id);
-      // A part that went out is a part that was said: recorded at the moment it left, so a
-      // later failure in the same item cannot un-say it or double-say it on retry.
-      if (p) {
-        appendSaid(p.data, chat, {
-          at: new Date().toISOString(),
-          dir: "out",
-          text,
-          // The id Telegram gave this part: `<chat>-<message_id>`, the same shape the
-          // inbox uses, so a line of its own can be pointed at later just like anyone
-          // else's. Absent only if the send answered without one.
-          ...(id === undefined ? {} : { id: `${chat}-${id}` }),
-        });
-      }
-      sent += 1;
-    }
-    const { steps, refused } = sendPlan(p?.workspace ?? "", files, attachments);
+    if (trip(key, item.messages)) return { ack: false, sent: 0, error: null };
+    const { steps, refused } = sendPlan(p.workspace, item.files ?? [], item.attachments ?? []);
     for (const given of refused) {
       writeOps(ops, "gateway", `${key} 想发 ${given}，那不是 /work 里的文件，没发。`);
     }
-    for (const [i, step] of steps.entries()) {
-      try {
-        const sent = await sendFile(cfg.token, chat, step.path);
-        // A file is a message: it takes its id before the words after it get theirs, so
-        // the row has to be written here and not with the text. `at` is when the response
-        // arrived — an upper bound on the id's instant, milliseconds away.
-        if (p) {
+    try {
+      return await channel.send({
+        root,
+        instance: key,
+        cfg,
+        chat,
+        item,
+        steps,
+        ...(item.replyTo === undefined ? {} : { replyTo: item.replyTo }),
+        onSent: (part) => {
           appendSaid(p.data, chat, {
             at: new Date().toISOString(),
             dir: "out",
-            text: placeholderFor([{ kind: sent.kind }]),
-            ...(sent.id === undefined ? {} : { id: `${chat}-${sent.id}` }),
+            text: part.text,
+            ...(part.nativeId === undefined ? {} : { id: `${chat}-${part.nativeId}` }),
           });
-        }
-      } catch (err) {
-        // all the words went out — `sent` covers them — so only the uploads are retried,
-        // and only the ones that did not: `left` is what the queue file is rewritten to.
-        const owed = steps.slice(i);
-        return {
-          ack: false,
-          sent,
-          error: err as Error,
-          left: {
-            files: owed.filter((s) => s.kind === "work").map((s) => s.given),
-            attachments: owed.filter((s) => s.kind === "file").map((s) => ({ path: s.path, name: s.name })),
-          },
-        };
-      }
-    }
-    return { ack: true, sent, error: null };
-  };
-
-  const handleUpdate = async (key: string, me: BotIdentity, update: TgUpdate): Promise<void> => {
-    const message = update.message;
-    if (!message) return;
-    const cfg = bots[key];
-    if (!cfg) return;
-    // A pure whitelist, checked before anything else: a stranger must not be able to wake
-    // it, fill its inbox, download a file into /files, or — while the bot is new — become
-    // the home that unprompted words are later sent to.
-    const allowed = !cfg.allow || cfg.allow.includes(message.from?.id ?? 0);
-    if (!allowed) {
-      // the id is printed because it is exactly what has to be pasted into bots.json
-      log(`${key} ← guest ${message.from?.id ?? "?"}（没送）`);
-      return;
-    }
-    // text, or a caption on an attachment; anything else still has to be accounted for
-    const words = message.text ?? message.caption ?? "";
-    let att = attachmentOf(message);
-    if (words === "" && att === null) {
-      // A sticker is an attachment (`attachmentOf`), so it never reaches this branch: what
-      // lands here is a poll, a location, a dice — something with neither words nor a file.
-      log(`${key} ← 忽略（没有文字也没有附件）`);
-      return;
-    }
-    const mine = (chats[key] ??= { known: {} });
-    const seen = noteChat(
-      mine,
-      message.chat.type === "private"
-        ? { kind: "private", who: senderName(message) }
-        : { kind: "group", title: message.chat.title ?? `chat ${message.chat.id}` },
-      message.chat.id,
-      message.chat.type !== "private",
-    );
-    if (seen) writeJson(chatsFile, chats);
-
-    if (key === "ops") {
-      log(`ops 收到消息（不处理）：${senderName(message)}`);
-      return;
-    }
-    const p = instanceData(key);
-    if (!p) {
-      writeOps(ops, "gateway", `收到发给未知实例 ${key} 的消息，已忽略。`);
-      return;
-    }
-
-    const listen = cfg.listen ?? "all";
-    const mutes = readMutes(join(p.book, "mute.json"), Date.now());
-    const attention = readAttention(p.attention, Date.now());
-    const muted = isMuted(mutes, message.chat.id);
-
-    const decision = route({
-      allowed,
-      isDm: message.chat.type === "private",
-      isMention: isMentioned(message, me),
-      isReply: isReplyToBot(message, me),
-      listen,
-      muted: muted.muted,
-      listening: attentionActive(attention, message.chat.id, Date.now()),
-    });
-
-    if (!decision.deliver) {
-      log(`${key} ← ${decision.reason}（没送）`);
-      return;
-    }
-
-    const dir = decision.high ? p.inbox : p.inboxLow;
-    const id = `${message.chat.id}-${message.message_id}`;
-    const file = join(dir, `${id}.json`);
-    // A redelivered message (crash between handling and recording the offset) lands on
-    // the same file: rewrite it, but do not log the same words twice. The record can also
-    // sit in seen/ — a round finished with it while the offset never moved — or in the
-    // other half of the inbox, if the route changed in between; either way it is the same
-    // message, not a new one, and its stored file must not be fetched again.
-    const previous = [p.inbox, p.inboxLow, p.inboxSeen]
-      .map((d) => join(d, `${id}.json`))
-      .find((f) => existsSync(f));
-    const redelivered = previous !== undefined;
-    // fetch first, so the message is never announced without the thing it came with —
-    // unless the first delivery already did (see alreadyStored)
-    if (att) {
-      const had = redelivered
-        ? alreadyStored(previous === undefined ? null : readJson<{ attachments?: Attachment[] } | null>(previous, null))
-        : undefined;
-      if (had !== undefined) att = had;
-      else await storeAttachment(p, key, cfg.token, att, ops);
-    }
-    // the same message must not sit in two halves at once: the round reads them both
-    if (previous !== undefined && previous !== file && dirname(previous) !== p.inboxSeen) {
-      try {
-        rmSync(previous, { force: true });
-      } catch {
-        // the next round moves it aside anyway
-      }
-    }
-    const quoted = quotedOf(message.chat.id, message.reply_to_message, nameOf);
-    const at = new Date().toISOString();
-    // The quote is not copied here: the transcript line below carries it, and that is what
-    // the page and `open("P…")` read. A second copy in a file no reader opens is a field
-    // somebody has to keep true for nothing.
-    writeJson(file, {
-      id,
-      text: words,
-      from: senderName(message),
-      at,
-      chat: message.chat.id,
-      ...(att ? { attachments: [att] } : {}),
-    });
-    // Only what was actually delivered: a message the policy chose not to forward must
-    // not reappear later in the transcript. Guarded by the id, not by "first delivery":
-    // a redelivery whose record the round already consumed would otherwise be logged as
-    // new words again, and a first delivery whose transcript write failed would never be.
-    if (!saidHasId(p.data, message.chat.id, id)) {
-      // the transcript keeps a placeholder so a file does not read as silence
-      const said = words !== "" ? words : placeholderFor(att ? [att] : []);
-      appendSaid(p.data, message.chat.id, {
-        at,
-        dir: "in",
-        text: said,
-        from: senderName(message),
-        id,
-        ...(quoted ? { quote: quoted } : {}),
+        },
+        log,
+        ops: (line) => writeOps(ops, "gateway", line),
       });
-    }
-    log(
-      `${key} ← ${decision.reason}${decision.high ? " (唤醒)" : ""}${att ? ` ${att.kind}${att.note ? `(${att.note})` : ""}` : ""}`,
-    );
-  };
-
-  const poll = async (key: string, signal: AbortSignal): Promise<void> => {
-    const cfg = bots[key];
-    if (!cfg) return;
-    const me = await getMe(cfg.token);
-    // the whitelist is printed because a wrong one is silent: too few and nobody can
-    // wake it, one missing id and its conversation partner quietly stops reaching it
-    const allow =
-      cfg.allow === undefined
-        ? "allow=不限"
-        : cfg.allow.length === 0
-          ? "allow=0（谁都进不来）"
-          : `allow=${cfg.allow.length} 人`;
-    log(
-      `${key} 上线：@${me.username}${cfg.listen ? ` listen=${cfg.listen}` : ""} ${allow}` +
-        ` home=${cfg.chat ?? chats[key]?.home ?? "未知"}`,
-    );
-    for (;;) {
-      const updates = await getUpdates(cfg.token, offsets[key] ?? 0, undefined, signal);
-      if (signal.aborted) return;
-      if (updates.length === 0) {
-        // An empty batch from a live long poll just waited 50 seconds; one from a
-        // swallowed failure (a dropped connection, a 429) came back in milliseconds, and
-        // without a pause the loop spins on a down network as fast as fetch can refuse.
-        // The pause is abortable, so a reload does not wait it out.
-        await new Promise<void>((r) => {
-          const t = setTimeout(r, POLL_PAUSE_MS);
-          signal.addEventListener("abort", () => {
-            clearTimeout(t);
-            r();
-          }, { once: true });
-        });
-        if (signal.aborted) return;
-        continue;
-      }
-      for (const update of updates) {
-        // Handle first, record the offset after: recording it first means a crash in
-        // between loses the message for good, and Telegram will never hand it over again.
-        // The same holds for a failed handling: the offset stays put, so the next poll
-        // hands the update over again (redelivery is safe by design) — up to
-        // HANDLE_ATTEMPTS, because a permanently broken update must not wedge the bot.
-        let failure: Error | null = null;
-        try {
-          await handleUpdate(key, me, update);
-        } catch (err) {
-          failure = err as Error;
-        }
-        if (failure === null) {
-          handleFailures.delete(String(update.update_id));
-        } else {
-          const { n, giveUp } = failedAttempt(handleFailures, String(update.update_id), HANDLE_ATTEMPTS);
-          writeOps(ops, "gateway", `${key} 处理消息出错（第 ${n} 次）：${failure.message}`);
-          if (!giveUp) break; // offset not recorded: Telegram hands it over again
-          writeOps(
-            ops,
-            "gateway",
-            `${key} 处理这条消息失败 ${n} 次，放弃了：${failure.message}。这条消息丢了，后面的照常。`,
-          );
-          handleFailures.delete(String(update.update_id));
-        }
-        offsets[key] = update.update_id + 1;
-        writeJson(offsetsFile, offsets);
-      }
+    } catch (err) {
+      // a channel reports its own failures; a throw here is only the unexpected
+      return { ack: false, sent: 0, error: err as Error };
     }
   };
 
-  // One long poll per bot, keyed so a reload can stop exactly the one it has to. Telegram
-  // allows one consumer per token: a changed token means the old poll must end before the
-  // new one starts, or both get 409 and the bot looks dead.
-  const pollers = new Map<string, { token: string; stop: () => Promise<void> }>();
+  // One long poll per instance per channel, keyed so a reload can stop exactly the one it
+  // has to. Telegram allows one consumer per token: a changed token means the old poll
+  // must end before the new one starts, or both get 409 and the bot looks dead.
+  const pollers = new Map<string, { fingerprint: string; stop: () => Promise<void> }>();
 
   // one reload at a time: two SIGHUPs a second apart must not stop the same poller twice.
   // A SIGHUP that arrives mid-reload leaves a mark and gets its own pass afterwards, so
@@ -733,39 +255,55 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     process.exit(1);
   };
 
-  const startPoller = (key: string): void => {
-    const cfg = bots[key];
-    if (!cfg || pollers.has(key)) return;
+  const startPoller = (channel: Channel, key: string): void => {
+    const id = `${channel.id}:${key}`;
+    const initial = configs[channel.id]?.[key];
+    if (!initial || pollers.has(id)) return;
     const ac = new AbortController();
-    const done = poll(key, ac.signal).catch((err: unknown) => {
-      if (ac.signal.aborted) return;
-      // this entry is still in the map here, so more than one means another bot is alive;
-      // exitIfIdle will then not exit, and nothing else ever restarts this one
-      const line = `${key} 的轮询断了：${(err as Error).message}${
-        pollers.size > 1 ? "（别的 bot 还在跑，它要 reload 一次才回来）" : ""
-      }`;
-      log(line);
-      // the same fact in the only place a person looks: journald alone is not a signal
-      writeOps(ops, "gateway", line);
-    });
-    const entry = { token: cfg.token, stop: async () => {
-      ac.abort();
-      await done;
-    } };
-    pollers.set(key, entry);
+    const done = channel
+      .start({
+        root,
+        instance: key,
+        // read per message: an allow/listen edit must take effect without dropping the poll
+        cfg: () => configs[channel.id]?.[key] ?? initial,
+        chats: chats[key],
+        signal: ac.signal,
+        log,
+        ops: (line) => writeOps(ops, "gateway", line),
+        onInbound: (msg) => handleInbound(inboundHost, key, msg),
+      })
+      .catch((err: unknown) => {
+        if (ac.signal.aborted) return;
+        // this entry is still in the map here, so more than one means another poller is
+        // alive; exitIfIdle will then not exit, and nothing else ever restarts this one
+        const line = `${channel.id}/${key} 的轮询断了：${(err as Error).message}${
+          pollers.size > 1 ? "（别的渠道还在跑，它要 reload 一次才回来）" : ""
+        }`;
+        log(line);
+        // the same fact in the only place a person looks: journald alone is not a signal
+        writeOps(ops, "gateway", line);
+      });
+    const entry = {
+      fingerprint: channel.fingerprint(initial),
+      stop: async () => {
+        ac.abort();
+        await done;
+      },
+    };
+    pollers.set(id, entry);
     // a poller that died on its own (a token that was wrong at startup) must be startable
     // again by the next reload, so it leaves the map when its loop ends
     void done.finally(() => {
-      if (pollers.get(key) === entry) pollers.delete(key);
+      if (pollers.get(id) === entry) pollers.delete(id);
       exitIfIdle();
     });
   };
 
-  const stopPoller = async (key: string): Promise<void> => {
-    const p = pollers.get(key);
+  const stopPoller = async (id: string): Promise<void> => {
+    const p = pollers.get(id);
     if (!p) return;
     await p.stop();
-    if (pollers.get(key) === p) pollers.delete(key);
+    if (pollers.get(id) === p) pollers.delete(id);
   };
 
   const readMail = (): void => {
@@ -787,28 +325,29 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   };
 
   const doReload = async (): Promise<void> => {
-    const next = readBots(root);
-    if (Object.keys(next).length === 0) {
-      log("重载：bots.json 是空的或读不出来，一个 bot 都没动");
-    } else {
-      const merged = mergeBots(bots, next);
+    for (const channel of CHANNELS) {
+      const next = channel.load(root);
+      for (const problem of next.problems) log(`${channel.id}：${problem}`);
+      if (Object.keys(next.configs).length === 0) {
+        log(`重载：${channel.id} 是空的或读不出来，一个都没动`);
+        continue;
+      }
+      const merged = channel.merge(configs[channel.id] ?? {}, next.configs);
       for (const line of merged.notes) log(line);
-      const kept = merged.bots;
-      const tokens = (b: Bots): Record<string, string> =>
-        Object.fromEntries(Object.entries(b).map(([k, c]) => [k, c.token]));
-      const plan = reloadPlan(tokens(bots), tokens(kept));
+      const fingerprints = (m: Record<string, unknown>): Record<string, string> =>
+        Object.fromEntries(Object.entries(m).map(([key, cfg]) => [key, channel.fingerprint(cfg)]));
+      const plan = reloadPlan(fingerprints(configs[channel.id] ?? {}), fingerprints(merged.configs));
       // stop, swap, start: the new poller must read the new token, and the old one has to
-      // be gone before it starts polling or Telegram answers 409 to both
-      for (const key of plan.stop) await stopPoller(key);
-      bots = kept;
-      for (const key of plan.start) startPoller(key);
-      log(`重载：bots ${Object.keys(kept).length} 个（起 ${plan.start.length} 停 ${plan.stop.length}）`);
-      for (const [key, cfg] of Object.entries(kept)) {
-        log(
-          `重载 ${key}：${cfg.listen ? `listen=${cfg.listen} ` : ""}` +
-            `allow=${cfg.allow === undefined ? "不限" : `${cfg.allow.length} 人`}` +
-            ` home=${cfg.chat ?? chats[key]?.home ?? "未知"}`,
-        );
+      // be gone before it starts polling or both get 409
+      for (const key of plan.stop) await stopPoller(`${channel.id}:${key}`);
+      configs[channel.id] = merged.configs;
+      for (const key of plan.start) startPoller(channel, key);
+      log(
+        `重载：${channel.id} ${Object.keys(merged.configs).length} 个（起 ${plan.start.length} 停 ${plan.stop.length}）`,
+      );
+      for (const [key, cfg] of Object.entries(merged.configs)) {
+        const detail = channel.describe?.(key, cfg, chats[key]);
+        log(`重载 ${channel.id}/${key}：${detail ?? "已配置"}`);
       }
     }
     readMail();
@@ -841,7 +380,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   // before anything is awaited: SIGHUP's default action is to kill the process, and a
   // reload arriving during startup would look exactly like a crash
   process.on("SIGHUP", () => {
-    log("收到 SIGHUP：重读 bots.json 和 mail.json");
+    log("收到 SIGHUP：重读渠道配置和 mail.json");
     void reload();
   });
 
@@ -852,8 +391,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
   const showTyping = async (key: string): Promise<void> => {
     const p = instanceData(key);
-    const cfg = bots[key];
-    if (!p || !cfg) return;
+    if (!p) return;
     // intent.json exists exactly while a waking is in flight, and only then is anybody
     // waiting for an answer
     const intent = readJson<{ startedAt?: string } | null>(p.intent, null);
@@ -862,11 +400,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     if (Number.isFinite(since) && Date.now() - since > 30 * 60_000) return; // a dead cycle must not type forever
     const knock = newestKnock(peekInbox(p.inbox));
     if (!knock || typeof knock.chat !== "number") return;
-    const last = typedAt.get(key) ?? 0;
+    const chat = knock.chat;
+    const channelId = chats[key]?.known?.[String(chat)]?.channel ?? "telegram";
+    const channel = CHANNEL_BY_ID[channelId];
+    const cfg = configs[channelId]?.[key];
+    if (!channel?.typing || !cfg) return;
+    const stamp = `${channelId}:${key}`;
+    const last = typedAt.get(stamp) ?? 0;
     if (Date.now() - last < TYPING_REFRESH_MS) return;
-    typedAt.set(key, Date.now());
+    typedAt.set(stamp, Date.now());
     try {
-      await sendTyping(cfg.token, knock.chat);
+      await channel.typing({ root, instance: key, cfg, chat });
     } catch {
       // a status is not worth failing the sweep over
     }
@@ -877,8 +421,12 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
   const sweep = async (): Promise<void> => {
     for (;;) {
-      // read per pass: a reload may have added or removed a bot since the last one
-      for (const key of Object.keys(bots)) {
+      // read per pass: a reload may have added or removed an instance since the last one
+      const keys = new Set<string>();
+      for (const channel of CHANNELS) {
+        for (const key of Object.keys(configs[channel.id] ?? {})) keys.add(key);
+      }
+      for (const key of keys) {
         try {
           await showTyping(key);
         } catch {
@@ -890,16 +438,17 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
             ackOutbox(dir, item.file);
             continue;
           }
-          let outcome: Awaited<ReturnType<typeof deliver>>;
+          let outcome: SendResult;
           try {
-            outcome = await deliver(key, item.messages, item.chat, item.files, item.replyTo, item.attachments);
+            outcome = await sendItem(key, item);
           } catch (err) {
-            // deliver reports its own failures; a throw here is only the unexpected
+            // sendItem reports its own failures; a throw here is only the unexpected
             outcome = { ack: false, sent: 0, error: err as Error };
           }
           // What went out leaves the queue: a retry says only the rest, not the parts
           // already delivered (and already in the transcript).
           if (outcome.sent > 0 || outcome.left !== undefined) trimOutbox(item.file, outcome.sent, outcome.left);
+          if (outcome.hold) continue;
           if (outcome.ack) {
             ackOutbox(dir, item.file);
             sendFailures.delete(item.file);
@@ -924,10 +473,11 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
 
   if (mailbox !== null) {
     const mailEnv = readMailEnv(root);
-    // a mailbox is a second transport: a field missing here must not take Telegram down
-    // with it, and it must not be quiet either — ops is the only place a person looks
+    // a mailbox is a second transport: a field missing here must not take the chat
+    // channels down with it, and it must not be quiet either — ops is the only place a
+    // person looks
     const broken = (why: string): void => {
-      const line = `信箱没起来：${why}。telegram 照常。`;
+      const line = `信箱没起来：${why}。别的渠道照常。`;
       log(line);
       writeOps(ops, "gateway", line);
     };
@@ -944,7 +494,9 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   }
 
   void sweep();
-  for (const key of Object.keys(bots)) startPoller(key);
+  for (const channel of CHANNELS) {
+    for (const key of Object.keys(configs[channel.id] ?? {})) startPoller(channel, key);
+  }
   // the pollers come and go on reload, so what keeps this process alive is the promise
   // that never settles — not a list of loops captured at startup
   await new Promise<void>(() => {});

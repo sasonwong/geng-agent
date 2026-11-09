@@ -350,7 +350,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         // whenever a bot is added to a group. A snapshot taken here was a second answer,
         // and it refused to speak into a chat the page had just told it about.
         minWakeMs: () => policy.cycle.minWakeMinutes * 60_000,
-        places: () => knownPlaces(paths.root, o.instance).map((p) => p.id),
+        places: () => knownPlaces(paths.root, o.instance),
         proxy: () => ({ allow: policy.container.proxyAllow, cidrs: policy.container.proxyAllowCidrs }),
         chain: () => chainFrom(policy.container.proxyChain),
         onNetwork: (event) => {

@@ -8,7 +8,7 @@ import { initInstance } from "../../internal/init.ts";
 import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
 import { runGateway } from "../../internal/gateway.ts";
-import { getMe } from "../../internal/telegram.ts";
+import { CHANNELS } from "../../internal/channels/index.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 import { describeConfig, loadMailConfig, readMailEnv } from "../../internal/mail.ts";
 import { addBot, describeBot, editAllow, readBots } from "../../internal/bots.ts";
@@ -34,7 +34,7 @@ const USAGE = `geng <command> [options]
   backup <instance> [--list]         立刻拍一张快照 / 列已有快照
   restore <instance> [<id>] --yes    恢复到 backup/<instance>.restore-<时间>/（默认最近一张；
                                      没有 --yes 不动手；不直接覆盖 data/，自己拷回去）
-  gateway [--check]                  跑消息搬运（需要 secrets/bots.json）；--check 只验 token
+  gateway [--check]                  跑消息搬运（需要至少一个渠道配置）；--check 只验凭据
   bots add <inst> [--token-stdin] [--listen all|mentions] [--allow 1,2] [--chat N]
                                      往 secrets/bots.json 里加一个 bot（token 从 stdin 读）
   bots allow <inst> add|rm <ids>     改白名单（逗号分隔）；只有 add 过的人才叫得醒它
@@ -474,13 +474,12 @@ async function main(): Promise<number> {
 
     case "gateway": {
       if (args.check) {
-        const bots = readBots(args.root);
-        const names = Object.keys(bots);
+        const loaded = CHANNELS.map((channel) => ({ channel, ...channel.load(args.root) }));
         const mailCfg = loadMailConfig(args.root);
         const mailEnv = readMailEnv(args.root);
-        if (names.length === 0 && mailCfg === null) {
+        if (!loaded.some((x) => Object.keys(x.configs).length > 0) && mailCfg === null) {
           console.error(
-            `没有 bot 也没有信箱：先写 ${join(args.root, "secrets", "bots.json")} 或 secrets/mail.json`,
+            `没有渠道也没有信箱：先写 ${join(args.root, "secrets", "bots.json")} 或 secrets/mail.json`,
           );
           return 2;
         }
@@ -496,20 +495,19 @@ async function main(): Promise<number> {
             }
           }
         }
-        for (const name of names) {
-          const token = bots[name]?.token ?? "";
-          if (token === "") {
-            console.error(`FAIL ${name}: 没有 token`);
+        for (const { channel, configs, problems } of loaded) {
+          for (const problem of problems) {
+            console.error(`FAIL ${channel.id}: ${problem}`);
             bad++;
-            continue;
           }
-          try {
-            const me = await getMe(token);
-            const chat = bots[name]?.chat;
-            console.log(`ok   ${name.padEnd(10)} @${me.username}${chat ? `  chat=${chat}` : "  chat=未设（它给 bot 发第一条消息后自动记住）"}`);
-          } catch (err) {
-            console.error(`FAIL ${name}: ${(err as Error).message}`);
-            bad++;
+          for (const [key, cfg] of Object.entries(configs)) {
+            try {
+              const detail = channel.check === undefined ? "已配置" : await channel.check(cfg);
+              console.log(`ok   ${channel.id}/${key.padEnd(10)} ${detail}`);
+            } catch (err) {
+              console.error(`FAIL ${channel.id}/${key}: ${(err as Error).message}`);
+              bad++;
+            }
           }
         }
         return bad === 0 ? 0 : 1;

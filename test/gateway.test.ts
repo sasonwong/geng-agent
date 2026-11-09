@@ -78,6 +78,17 @@ test("outbox items keep message order and are acked into sent/", () => {
   assert.equal(readdirSync(join(dir, "sent")).length, 1);
 });
 
+test("an outbox item names its channel, and an old item still means telegram", () => {
+  // The queue is written by the book and read by the gateway; an item that predates the
+  // field must keep working, and a new one must not have to be guessed from the chat id.
+  const dir = mkdtempSync(join(tmpdir(), "geng-test-"));
+  writeJson(join(dir, "001.json"), { messages: ["一"] });
+  writeJson(join(dir, "002.json"), { messages: ["二"], channel: "weixin" });
+  const items = readOutbox(dir);
+  assert.equal(items[0]?.channel, undefined);
+  assert.equal(items[1]?.channel, "weixin");
+});
+
 test("a private chat beats a group as home, and only the first of each counts", () => {
   const chats: import("../internal/gateway.ts").Chats = { known: {} };
   noteChat(chats, { kind: "group", title: "群" }, -222, true);
@@ -121,8 +132,8 @@ test("the page is told where it may speak, and which one is the default", () => 
   );
   const places = knownPlaces(root, "alice");
   assert.deepEqual(places, [
-    { id: 111, label: "私聊 telegram:@owner", home: true, kind: "private" },
-    { id: -222, label: "群「g」", home: false, kind: "group" },
+    { id: 111, label: "私聊 telegram:@owner", home: true, kind: "private", channel: "telegram", canFile: true, canQuote: true },
+    { id: -222, label: "群「g」", home: false, kind: "group", channel: "telegram", canFile: true, canQuote: true },
   ]);
 });
 

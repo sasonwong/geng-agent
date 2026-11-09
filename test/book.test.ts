@@ -234,7 +234,7 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   // the quote names its conversation, so the item carries it too: the gateway sends
   // where `chat` says, and a quote that only lived inside replyTo would go home instead
   // the file name is the id; the payload carries only what the gateway reads
-  assert.deepEqual(written, { chat: -1001, messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } });
+  assert.deepEqual(written, { chat: -1001, channel: "telegram", messages: ["在吗", "我看了"], replyTo: { chat: -1001, messageId: 151 } });
 
   // a chat the daemon does not know is refused before anything is queued
   const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], to: -999 }));
@@ -243,12 +243,13 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   // and a quote it cannot parse is a refusal, not a message without one
   const quote = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], replyTo: "151" }));
   assert.equal(quote.status, 400);
-  // an empty `to` is a blank, not chat 0: the number it used to become passed every check
+  // an empty `to` is a blank, not chat 0: the only place stands in for it, and the
+  // queue carries its real id rather than the 0 the old parser invented
   const blank = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], to: "" }));
   assert.equal(blank.status, 200);
   const blankId = (blank.body as { id: string }).id;
   const blankWritten = JSON.parse(readText(join(paths.outbox, `${blankId}.json`)) ?? "{}");
-  assert.equal("chat" in blankWritten, false, "空 to 被当成 chat 0 写进了队列");
+  assert.equal(blankWritten.chat, -1001, "空 to 用唯一的地方，而不是 chat 0");
 });
 
 test("a chat the gateway learned after the daemon started can be spoken into", async () => {
@@ -267,7 +268,7 @@ test("a chat the gateway learned after the daemon started can be spoken into", a
   const server = await startBookServer({
     paths,
     log: () => {},
-    places: () => knownPlaces(root, "alice").map((p) => p.id),
+    places: () => knownPlaces(root, "alice"),
   });
   try {
     const sock = socketPath(paths);
@@ -305,6 +306,39 @@ test("a quote is the id the listing printed, and it says which conversation", as
   const nowhere = await say({ messages: ["喂"] });
   assert.equal(nowhere.status, 400);
   assert.match(String((nowhere.body as { error: string }).error), /要写 to/);
+});
+
+test("a channel that cannot carry files or quotes refuses at the book, not the gateway", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const weixin = {
+    id: -9_000_000_000_000_001,
+    label: "微信 私聊 主人",
+    home: true,
+    kind: "private" as const,
+    channel: "weixin",
+    canFile: false,
+    canQuote: false,
+  };
+  const handle = bookHandler(paths, { places: [weixin] });
+  const say = async (body: unknown) =>
+    handle({ url: "/say", method: "POST" } as never, JSON.stringify(body));
+
+  const text = await say({ messages: ["在吗"] });
+  assert.equal(text.status, 200);
+  const queued = JSON.parse(readText(join(paths.outbox, `${(text.body as { id: string }).id}.json`)) ?? "{}");
+  assert.equal(queued.chat, weixin.id);
+  assert.equal(queued.channel, "weixin", "队列自己说走哪条通道");
+
+  const file = await say({ messages: ["x"], files: ["/work/x"] });
+  assert.equal(file.status, 400);
+  assert.match(String((file.body as { error: string }).error), /不能发文件/);
+
+  const quote = await say({ messages: ["x"], replyTo: `${weixin.id}-151` });
+  assert.equal(quote.status, 400);
+  assert.match(String((quote.body as { error: string }).error), /不能引用/);
+  assert.equal(readdirSync(paths.outbox).length, 1, "被拒的那两次不该入队");
 });
 
 test("a file leaves the book as bytes over the same socket, and only by id", async () => {

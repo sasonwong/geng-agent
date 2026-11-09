@@ -364,7 +364,7 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 llm=4 net=1 backup=ok(...)`。`f
 
 ```bash
 systemctl --user reload geng-gateway
-journalctl --user -u geng-gateway -n 5    # 应有「重载 alice：… allow=4 人」
+journalctl --user -u geng-gateway -n 5    # 应有「重载 telegram/alice：… allow=4 人」
 ```
 
 出现 `Stopping`/`Started` 这一对就说明 HUP 变成了重启（handler 没装上）——只有「重载」行才是真
@@ -430,7 +430,7 @@ node cmd/geng/index.ts gateway --check    # 只验 token，不进轮询
 systemctl --user enable --now geng-gateway
 ```
 
-验证：`geng gateway --check` 每个 bot 打印 `ok @username`；启动行打印 `allow=N 人`（`0 人` 和
+验证：`geng gateway --check` 每个 bot 打印 `ok   telegram/alice … @username`；启动行打印 `allow=N 人`（`0 人` 和
 `不限` 要能一眼看出来）；然后给 bot 发一句话，看 `data/alice/inbox/` 出现文件、`people/` 出现一行。
 
 最后一项只能拿**另一个 bot** 验：人说的话在 privacy 还生效时也会到，自己的账号测不出来。让群里

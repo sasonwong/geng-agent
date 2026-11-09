@@ -48,7 +48,9 @@ export function keyCanMute(key: string): boolean {
 }
 
 export interface OutboxItem {
-  /** Which chat it meant to speak into; absent means home. */
+  /** Which channel sends it. Absent is telegram: the only one that wrote before this field. */
+  channel?: string;
+  /** Which chat it meant to speak into; absent means the channel's default. */
   chat?: number;
   /** Container paths under /work that go out with the words. */
   files?: string[];
@@ -74,6 +76,7 @@ export function readOutbox(dir: string): OutboxItem[] {
   }
   for (const f of files) {
     const raw = readJson<{
+      channel?: unknown;
       messages?: unknown;
       chat?: unknown;
       files?: unknown;
@@ -85,6 +88,9 @@ export function readOutbox(dir: string): OutboxItem[] {
       : [];
     items.push({
       file: join(dir, f),
+      ...(typeof raw.channel === "string" && raw.channel.trim() !== ""
+        ? { channel: raw.channel.trim() }
+        : {}),
       files: Array.isArray(raw.files) ? raw.files.filter((x): x is string => typeof x === "string") : [],
       // rebuilt, not cast: an item written by an older build may carry fields the queue no
       // longer has (a file id, once), and the gateway only ever hands over these two

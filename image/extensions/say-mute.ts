@@ -34,8 +34,9 @@ const sayTool = tool({
     "对一个人说话。一次调用里的几句一起送到（按顺序），分几次调用就是隔一阵说一句；没人问你的时候也可以说。\n" +
     "to: chat id（纯数字）。只有一个地方能说话时可以省略，两处以上必须写。\n" +
     "files: 一起发出去的文件，两种写法——别人发来的写 id（形如 \"F12\"，不用先 download），自己做的写 /work/… 路径。\n" +
+    "不能发文件的通道会在排队前直接拒绝，不会假装发出去。\n" +
     "replyTo: 引用某一句话，写那条消息的 id（形如 M-1001234567890-151；对话里每句后面也有 #…），" +
-    "写了它就发到那条消息所在的会话，to 可以省。\n" +
+    "写了它就发到那条消息所在的会话，to 可以省。不能引用的通道会直接拒绝。\n" +
     "返回 {id, count}：id 是这条排队记录的编号（不是 Telegram 的消息号，那要等发出去之后才有）。发不出去会明说哪一处不对。",
   parameters: {
     type: "object",
@@ -71,8 +72,9 @@ const sayTool = tool({
     // A `/work` path that is not there is refused by the gateway with a line in `_ops`,
     // which is the operator's channel: the agent would believe the file had gone out. This
     // runs in the same container, so it can see the file while copying it is still an
-    // option. A path outside /work is the book's refusal, and that one comes back here.
-    const missing = files.filter((f) => !existsSync(f));
+    // option. An `F12` id is not a path — the host resolves it — and a path outside /work
+    // is the book's refusal, which comes back here.
+    const missing = files.filter((f) => f.startsWith("/") && !existsSync(f));
     if (missing.length > 0) {
       return {
         content: [
