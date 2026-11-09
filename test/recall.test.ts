@@ -174,6 +174,54 @@ test("session 里 content 为 null 或数组含 null 元素，recall 都不崩",
   assert.match(recallText(p, { sources: ["sessions"], query: "你好" }), /R1[\s\S]*你好/);
 });
 
+test("session 视图里留着工具说了什么，不是只有 [tool] 这个名字", () => {
+  const p = fixture();
+  const dir = join(p.sessionDir, "--proj-x");
+  mkdirSync(dir, { recursive: true });
+  const long = "x".repeat(5_000);
+  writeFileSync(
+    join(dir, "session-1.jsonl"),
+    [
+      JSON.stringify({ type: "message", message: { role: "user", content: "跑一下" } }),
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", name: "bash", arguments: { command: "ls" } }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolName: "bash",
+          isError: false,
+          content: [{ type: "text", text: "a.txt\nb.txt" }],
+        },
+      }),
+      JSON.stringify({
+        type: "message",
+        message: {
+          role: "toolResult",
+          toolName: "read",
+          isError: true,
+          content: [{ type: "text", text: long }],
+        },
+      }),
+    ].join("\n") + "\n",
+  );
+  const body = openText(p, "R1", 0).text;
+  // 压缩之后指回 session 才读得到工具的回答；只有 [bash] 的话，指过去也是空的
+  assert.match(body, /\[bash\] a\.txt\nb\.txt/);
+  // 失败也是一条事实：不写出来的话，失败的输出和成功的长得一样
+  assert.match(body, /\[read 出错\]/);
+  // 一条 5000 字的输出不能把一页撑满，截断处要说清原长
+  assert.match(body, /…（截断，原 5000 字）/);
+  assert.doesNotMatch(body, new RegExp("x{2500}"));
+  // 搜索和 open 走同一条渲染
+  assert.match(recallText(p, { sources: ["sessions"], query: "a.txt" }), /R1[\s\S]*a\.txt/);
+});
+
 test("offset 越过末尾时说清有多长，而不是给一页空白", () => {
   const p = fixture();
   mkdirSync(p.journal, { recursive: true });

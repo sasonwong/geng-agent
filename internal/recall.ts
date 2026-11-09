@@ -212,10 +212,19 @@ function inboxItems(p: Paths): Item[] {
 }
 
 interface SessionLine {
-  message?: { role?: string; content?: unknown };
+  message?: { role?: string; content?: unknown; toolName?: string; isError?: boolean };
 }
 
-/** One line of transcript per record: what was said, and which tool ran. */
+/** How much of one tool result the session view keeps. The marker says what was dropped. */
+const OUTPUT = 2_000;
+
+/**
+ * One line of transcript per record: what was said, what ran, and what came back.
+ *
+ * Tool output is capped: every recall renders every session, and one `bash` can be a
+ * hundred thousand characters. The cap prints its own size, so a reader knows the output
+ * did not end there instead of believing it did.
+ */
 function render(lines: string[]): string {
   const out: string[] = [];
   for (const line of lines) {
@@ -227,7 +236,6 @@ function render(lines: string[]): string {
       continue;
     }
     const role = rec.message?.role;
-    if (role !== "user" && role !== "assistant") continue;
     const parts: string[] = [];
     const content = rec.message?.content;
     if (typeof content === "string") parts.push(content);
@@ -238,6 +246,21 @@ function render(lines: string[]): string {
       }
     }
     const text = parts.join(" ").trim();
+    // A tool result is its own message in the transcript. Leaving it out made `open` show
+    // the call and not the answer, so a compacted round could point back to nothing.
+    if (role === "toolResult") {
+      const name = typeof rec.message?.toolName === "string" ? rec.message.toolName : "工具";
+      const failed = rec.message?.isError === true ? " 出错" : "";
+      const kept =
+        text === ""
+          ? "（没有输出）"
+          : text.length <= OUTPUT
+            ? text
+            : `${text.slice(0, OUTPUT)}…（截断，原 ${text.length} 字）`;
+      out.push(`  [${name}${failed}] ${kept}`);
+      continue;
+    }
+    if (role !== "user" && role !== "assistant") continue;
     if (text !== "") out.push(`${role === "user" ? "←" : "→"} ${text}`);
   }
   return out.join("\n");
