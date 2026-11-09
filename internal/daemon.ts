@@ -53,7 +53,7 @@ const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
 // A policy file is edited by hand, so one that does not parse is a normal event. The first
 // waits are short because a person who just saved the fix wants it picked up, not waited
 // out; the last is a minute because after that nobody is watching.
-const POLICY_RETRY_MS = [1_000, 2_000, 5_000, 15_000, 60_000];
+export const POLICY_RETRY_MS = [1_000, 2_000, 5_000, 15_000, 60_000];
 
 export interface DaemonOptions {
   root: string;
@@ -270,7 +270,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         if (!(err instanceof ExpectedError)) throw err;
         complain(err);
         if (dry || o.once) throw err;
-        const waitMs = POLICY_RETRY_MS[Math.min(attempt, POLICY_RETRY_MS.length) - 1] ?? 60_000;
+        // Math.min keeps this index inside the table; the assertion only answers
+        // noUncheckedIndexedAccess, there is no runtime fallback to have.
+        const waitMs = POLICY_RETRY_MS[Math.min(attempt, POLICY_RETRY_MS.length) - 1]!;
         await sleep(waitMs);
       }
     }
