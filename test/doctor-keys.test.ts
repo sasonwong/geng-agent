@@ -42,6 +42,21 @@ test("keyFiles: 工作台的 scratch 不算，workspace 的其余部分照扫", 
   rmSync(root, { recursive: true, force: true });
 });
 
+test("scanLogBodies: 工作台的 scratch 不算，workspace 的其余部分照扫", () => {
+  // 和 keyFiles 那条一个根因：这条检查是"凭据没写进 data"，不是"测试残留不算数"。
+  // `workspace/tmp` 里被杀轮次留下的夹具 token 跟 fixture .env 是一回事，报它只会教人别读 warn。
+  const root = tree((r) => {
+    mkdirSync(join(r, "workspace", "tmp", "geng-test-abc"), { recursive: true });
+    writeFileSync(join(r, "workspace", "tmp", "geng-test-abc", "setup.log"), "ghp_" + "c".repeat(36));
+    mkdirSync(join(r, "workspace", "geng-agent"), { recursive: true });
+    writeFileSync(join(r, "workspace", "geng-agent", "install.log"), "ghp_" + "d".repeat(36));
+  });
+  const hits = scanLogBodies(root).hits;
+  assert.equal(hits.length, 1, hits.join(" | "));
+  assert.match(hits[0] ?? "", /workspace\/geng-agent\/install\.log: /);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("scanLogBodies: token 粘在日志里也能认出来（这条以前说「干净」）", () => {
   const root = tree((r) => {
     mkdirSync(join(r, "usage"), { recursive: true });
