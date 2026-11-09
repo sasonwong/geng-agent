@@ -56,15 +56,13 @@ git push origin dev:main
 merge 或 squash**：那两种都会在 `main` 上造出一个"发布提交"，`main` 和 `dev` 的内容从此只能
 靠比对才知道是否一致。
 
-这条推送走 owner 在 `main` ruleset 里已有的 bypass（`bypass_mode: pull_request`），它放行的正是
-"必须走 PR"那一条，**不碰 `non_fast_forward`**：没有 PR 的快进能推，改写历史不能。确实需要改写
-一次（把 `main` 挪到另一条线上）时，临时把那个 bypass 改成 `always`，推完立刻改回
-`pull_request`，不要让它在 `always` 上多待一秒。**不要**把它留成常驻 `always`：那会连以后每一次
-force push 一起放行，而重写 `main` 的代价是整个历史不可撤销。
+这条推送走 owner 在 `main` ruleset 里的 bypass（`bypass_mode: always`）。owner 可以直接快进；
+其他账号和机器人仍然受 PR 和 required status checks 约束。`always` 也放行 force push 和删除，
+所以“main 只追加”从规则约束变成了 owner 的约定：发布只用快进，仍然不要改写 `main` 的历史。
 
 两条推论：
 
-- **重写 `dev` 只能在它被快进进 `main` 之前。** `main` 只接受追加，所以进了 `main` 的提交不可
+- **重写 `dev` 只能在它被快进进 `main` 之前。** `main` 按约定只追加，所以进了 `main` 的提交不可
   重写：发现泄漏要在发版前处理。发版之后再发现，只能靠新提交清理，并在报告里说明旧值仍在历史里。
 - **标签跟着快进点走**：`v0.0.N` 打在 `main` 的快进点上；`dev` 线上的里程碑用带后缀的预发布号，
   同一层从 1 往上加：`a1`、`a2`…（alpha）、`b1`…（beta）、`rc1`…（release candidate），没有后缀
@@ -146,7 +144,7 @@ argv、解析和落盘的状态，所以 CI 上不需要这些东西。
   `check` 和 review 对他是软的；有写权限的协作者是 `pull_request` bypass——走 PR 合，`check` 必须绿，
   那 1 个 approval 还得有人给（GitHub 不允许自己批自己的 PR）。机器人不在 bypass 里，所以它的合并
   请求会被 `405 At least 1 approving review is required` 挡掉：机器人开 PR、人合，这是规则，不是
-  流程疏忽。`main` 不接受直接推送。
+  流程疏忽。`main` 只有 owner 能直接推送；其他身份仍然要走 PR。
 - **部署**：仓库主人在宿主机上执行（`deploy/update.sh`，或重启 unit）。容器里的实例能改代码，
   但改不动正在跑它的那台机器——否则它就等于能改监管自己的程序。
 - **规则挡的是分支，不是权限**：推 `main` 会以 `repository rule violations` 被拒，那不是 token
