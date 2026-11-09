@@ -670,6 +670,9 @@ systemctl --user daemon-reload && systemctl --user enable --now geng@bob
 deploy/update.sh      # git pull --ff-only + 重装 unit + 重建镜像 + 重启已启用的 unit
 ```
 
+它只 ff **当前分支**，不会替你切分支。要部署 `main` 的版本，先 `git switch main`；留在 `dev`
+就部署 `dev`。分支不对，升级脚本不会替你纠正，跑起来的也就不是你以为的那一版。
+
 脚本按顺序走，任何一步失败就停，不会打印「更新完成」：
 
 1. 工作区必须干净、HEAD 必须在分支上，否则 `git pull --ff-only` 可能留下一个既不是新提交
