@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { buildPacket, reasonAfterInbox, type PacketInput } from "../internal/packet.ts";
+import { lastJournalLine } from "../internal/recall.ts";
 import { makePaths } from "../internal/paths.ts";
 import { writeText } from "../internal/fs.ts";
 import { tmpdir } from "node:os";
@@ -182,6 +183,16 @@ test("the last thing it wrote is on the page, not behind a tool call", () => {
   );
   // no journal is not a line: "the last thing you wrote" over nothing would be a lie
   assert.doesNotMatch(buildPacket(input({ lastJournal: null })), /日记里写的/);
+});
+
+test("a journal line that was cut says so, like the last thing it said", () => {
+  const { paths, input } = fixture();
+  writeText(join(paths.journal, "J20260302-1.md"), "长".repeat(300) + "\n");
+  const page = buildPacket(input({ lastJournal: lastJournalLine(paths) }));
+  // firstLine() cuts at 160 for a listing header; reusing it here made a cut line read
+  // as if it ended there. The page owns the marker, the helper owns the whole line.
+  assert.match(page, new RegExp(`「${"长".repeat(160)}…\\(截断\\)」`));
+  assert.doesNotMatch(page, new RegExp("长{161}"));
 });
 
 test("an empty open-loops directory is stated plainly", () => {

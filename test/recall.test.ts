@@ -239,6 +239,11 @@ test("the page quotes the newest live journal line, not the name that sorts last
   utimesSync(discarded, at("2026-03-02T10:00:00Z"), at("2026-03-02T10:00:00Z"));
   utimesSync(stray, at("2026-03-02T11:00:00Z"), at("2026-03-02T11:00:00Z"));
   assert.equal(lastJournalLine(p), "钟表上更新的那条");
+  // the helper keeps the whole line; the page cuts it and marks the cut
+  const long = join(p.journal, "J20260302-3.md");
+  writeFileSync(long, "长".repeat(300) + "\n");
+  utimesSync(long, at("2026-03-02T09:30:00Z"), at("2026-03-02T09:30:00Z"));
+  assert.equal(lastJournalLine(p), "长".repeat(300));
   assert.equal(lastJournalLine(fixture()), null);
 });
 
