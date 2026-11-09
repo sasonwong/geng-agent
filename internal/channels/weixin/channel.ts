@@ -470,6 +470,12 @@ async function send(ctx: SendContext): Promise<SendResult> {
   return { ack: true, sent, error: null };
 }
 
+/** The typing ticket is a separate RPC. Its failure is not an auth failure, and a
+ * missing "typing…" bubble is never worth failing a send over. */
+function typingUnavailable(err: unknown): boolean {
+  return err instanceof WeixinError && (err.ret === -2 || err.ret === -4);
+}
+
 async function typing(ctx: TypingContext): Promise<void> {
   const cfg = ctx.cfg as WeixinConfig;
   if (cfg.token.trim() === "" || cfg.userId === undefined) return;
@@ -478,13 +484,22 @@ async function typing(ctx: TypingContext): Promise<void> {
   let ticket = state.typingTicket;
   const fetched = Date.parse(state.typingAt ?? "");
   if (ticket === undefined || !Number.isFinite(fetched) || Date.now() - fetched > TYPING_TICKET_MS) {
-    ticket = await getConfig(baseUrlOf(cfg), cfg.token, cfg.userId, state.contextToken);
+    try {
+      ticket = await getConfig(baseUrlOf(cfg), cfg.token, cfg.userId, state.contextToken);
+    } catch (err) {
+      if (typingUnavailable(err)) return;
+      throw err;
+    }
     if (ticket === "") return;
     state.typingTicket = ticket;
     state.typingAt = new Date().toISOString();
     saveState(ctx.root, ctx.instance, state);
   }
-  await sendTyping(baseUrlOf(cfg), cfg.token, cfg.userId, ticket, 1);
+  try {
+    await sendTyping(baseUrlOf(cfg), cfg.token, cfg.userId, ticket, 1);
+  } catch (err) {
+    if (!typingUnavailable(err)) throw err;
+  }
 }
 
 function doctor(root: string, instance: string): ChannelCheck[] {
@@ -586,13 +601,16 @@ export const weixinChannel: Channel = {
     const c = cfg as WeixinConfig;
     if (c.token.trim() === "") throw new Error("没有 token");
     if (c.userId === undefined) throw new Error("没有 userId：先扫码登录");
+    let typing = "";
     try {
       await getConfig(baseUrlOf(c), c.token, c.userId, undefined);
     } catch (err) {
-      // -2 here is "no context token yet", not a bad credential; the token was accepted.
-      if (!(err instanceof WeixinError && err.ret === -2)) throw err;
+      // -2 is "no context token yet"; -4 is the typing RPC failing. Both mean the
+      // credential was accepted; neither is a reason to call the token bad.
+      if (!typingUnavailable(err)) throw err;
+      typing = "（typing 不可用）";
     }
-    return `${c.botId ?? "bot"} 主人=${c.name ?? "主人"}${c.baseUrl === undefined ? "" : `  ${c.baseUrl}`}`;
+    return `${c.botId ?? "bot"} 主人=${c.name ?? "主人"}${c.baseUrl === undefined ? "" : `  ${c.baseUrl}`}${typing}`;
   },
   doctor,
   async login(ctx): Promise<void> {

@@ -488,6 +488,28 @@ test("a re-scan of an already bound bot bumps savedAt, so a reload restarts the 
   assert.equal(typeof readState(root).alice?.expiredAt, "string");
 });
 
+test("a typing-ticket RPC failure is not a bad credential", async (t) => {
+  const root = tempRoot();
+  let reply: Record<string, unknown> = { ret: -4, errmsg: "GetTypingTicket rpc failed" };
+  const server = await fakeServer(() => ({ body: reply }));
+  t.after(async () => {
+    await server.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeState(root, { alice: state() });
+  const cfg = config(server.url);
+  const chat = chatIdFor(cfg.userId as string);
+
+  // A missing typing bubble must not make the gateway think it cannot send.
+  await weixinChannel.typing?.({ root, instance: "alice", cfg, chat });
+  const detail = await weixinChannel.check?.(cfg);
+  assert.match(detail as string, /typing 不可用/);
+
+  // A real expired session is still a failure.
+  reply = { ret: -14, errmsg: "session timeout" };
+  await assert.rejects(() => weixinChannel.check?.(cfg) as Promise<string>, /-14/);
+});
+
 test("doctor is silent when unconfigured, and names a duplicate token and an expired session", (t) => {
   const root = tempRoot();
   t.after(() => rmSync(root, { recursive: true, force: true }));
