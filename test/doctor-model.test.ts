@@ -117,3 +117,21 @@ test("an invalid reasoning effort is a failure with its own words", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a hop's reasoning effort is shown, not just in the file", () => {
+  const { root } = fixture();
+  try {
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([
+        "opencode-go/beam-free",
+        { provider: "opencode", model: "big-pickle", reasoningEffort: "low" },
+      ]),
+    );
+    const found = check(root);
+    assert.equal(found?.ok, true, String(found?.detail));
+    assert.match(String(found?.detail), /big-pickle（reasoningEffort=low）/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
