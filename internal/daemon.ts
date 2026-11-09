@@ -8,7 +8,7 @@ import { makePaths, requiredDirs, type Paths } from "./paths.ts";
 import { pendingMail } from "./mail.ts";
 import { loadPolicy, type Policy } from "./policy.ts";
 import { chainFrom } from "./proxy.ts";
-import { ExpectedError } from "./errors.ts";
+import { ExpectedError, SchemaVersionError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict } from "./schema.ts";
 import { filesUsage, forgetFiles, forgetNames, parseForget, pruneFiles } from "./files.ts";
 import {
@@ -256,6 +256,21 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // A preview and a one-off round report the error themselves, once, through the caller;
     // only a daemon holding on for a fix is worth saying it here and paging a person.
     if (o.once) return;
+    // A policy from a newer version is not a file somebody is halfway through editing: it
+    // parsed, and this code must not run it. Waiting is still the right shape — lowering
+    // `schema` is a one-line edit that should land without a restart — but the line has to
+    // name the two ways out instead of calling a readable file unreadable.
+    if (err instanceof SchemaVersionError) {
+      log(err.message);
+      if (!dry) {
+        writeOps(
+          ops,
+          `daemon@${paths.instance}`,
+          `${err.message} 升级代码，或者把 schema 降回去；改好会自动读进来。`,
+        );
+      }
+      return;
+    }
     log(`policy.json 读不出来：${err.message}`);
     if (!dry) {
       writeOps(ops, `daemon@${paths.instance}`, `policy.json 读不出来，停在原地等你修：${err.message}`);

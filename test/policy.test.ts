@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultPolicy, loadPolicy, policyDrift, templateValue } from "../internal/policy.ts";
+import { POLICY_SCHEMA, defaultPolicy, loadPolicy, policyDrift, templateValue } from "../internal/policy.ts";
+import { ExpectedError, SchemaVersionError } from "../internal/errors.ts";
 
 
 test("a policy copy is compared with the template key by key", () => {
@@ -114,4 +115,18 @@ test("proxyAllowCidrs 里一段垃圾地址被挡住，而不是永远匹配不�
     JSON.stringify({ ...base, container: { ...container, proxyAllowCidrs: ["0.0.0.0/0", "!127.0.0.0/8"] } }),
   );
   assert.deepEqual(loadPolicy(file).container.proxyAllowCidrs, ["0.0.0.0/0", "!127.0.0.0/8"]);
+});
+
+test("a policy from a newer version is a version mismatch, not an unreadable file", () => {
+  // The daemon waits out a file that does not parse, because a half-saved policy becomes
+  // valid on its own. A schema from the future never does: the operator has to upgrade the
+  // code or bring the file back. Same read, different answer — so the error has to carry
+  // which one it is, or every caller tells the operator the wrong thing to do.
+  const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
+  const base = defaultPolicy() as unknown as Record<string, unknown>;
+  writeFileSync(file, JSON.stringify({ ...base, schema: POLICY_SCHEMA + 1 }));
+  assert.throws(() => loadPolicy(file), SchemaVersionError);
+  assert.throws(() => loadPolicy(file), /更新版本/);
+  // Still an ExpectedError: the CLI prints one line, not a stack trace.
+  assert.throws(() => loadPolicy(file), ExpectedError);
 });

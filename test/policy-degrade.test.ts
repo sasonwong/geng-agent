@@ -74,3 +74,47 @@ test("a broken policy keeps the daemon alive, says each complaint once, and keep
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a policy from a newer version is named as one, and the daemon still waits for the fix", async () => {
+  // Different case, different line. "读不出来" is false here — the file parsed, and the code
+  // is what is too old. Saying "等你修" without naming the two ways out sends the operator
+  // looking for a JSON typo that does not exist.
+  const root = mkdtempSync(join(tmpdir(), "geng-policy-"));
+  const instance = "probe";
+  const policy = join(root, "data", instance, "policy.json");
+  mkdirSync(join(root, "data", instance), { recursive: true });
+  writeFileSync(policy, JSON.stringify({ schema: 999 }));
+
+  const child = spawn(process.execPath, [CLI, "daemon", "--instance", instance, "--root", root], {
+    stdio: "ignore",
+  });
+  const said = (): string[] => opsLines(root).filter((line) => line.includes("schema"));
+  try {
+    assert.ok(await until(() => said().length >= 1, 10_000), "版本冲突要说话，不能一声不吭地等着");
+    assert.equal(
+      child.exitCode,
+      null,
+      "版本冲突也不退出：退出会被 systemd 每十秒拉起一次，而且每次都会再 pager 一次",
+    );
+
+    const [line] = said();
+    assert.ok(line?.includes("更新版本"), "要说出这是更新版本写的");
+    assert.ok(!line?.includes("读不出来"), "它读得出来，只是不能跑：不要把它说成读不出来");
+    assert.ok(line?.includes("降回去"), "要给出那两条出路之一，而不是一句含糊的等你修");
+
+    // A different number is a different complaint, so a second line proves the file is still
+    // being read while the daemon waits — and it still does not start a round.
+    writeFileSync(policy, JSON.stringify({ schema: 1000 }));
+    assert.ok(await until(() => said().length >= 2, 20_000), "文件改过之后要再读一次，不是就此等着");
+    const lines = said();
+    assert.equal(new Set(lines).size, lines.length, `同一句话只该说一次，实际 ${lines.length} 行`);
+  } finally {
+    child.kill();
+    await new Promise<void>((done) => {
+      if (child.exitCode !== null) return done();
+      child.once("exit", () => done());
+      setTimeout(done, 3_000);
+    });
+    rmSync(root, { recursive: true, force: true });
+  }
+});

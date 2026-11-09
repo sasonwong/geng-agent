@@ -1,4 +1,4 @@
-import { ExpectedError } from "./errors.ts";
+import { ExpectedError, SchemaVersionError } from "./errors.ts";
 import { readText } from "./fs.ts";
 import { chainFrom, validCidr } from "./proxy.ts";
 
@@ -154,7 +154,9 @@ export function loadPolicy(file: string): Policy {
   const d = defaultPolicy();
   const schema = typeof p.schema === "number" ? p.schema : 0;
   if (schema > POLICY_SCHEMA) {
-    throw new ExpectedError(
+    // A subtype, not a bare ExpectedError: callers wait out a file being edited, and this
+    // one is not that — it parsed. See errors.ts.
+    throw new SchemaVersionError(
       `policy: ${file} 是更新版本写的（schema ${schema} > ${POLICY_SCHEMA}）：不要用旧代码跑它。`,
     );
   }
