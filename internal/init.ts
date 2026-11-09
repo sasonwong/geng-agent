@@ -7,7 +7,9 @@ import { chainFromSpec, MODEL_KEY_VARS } from "./model.ts";
 import { readEnvFile, writeEnvValue } from "./secret.ts";
 
 // Everything in this file is `--env-file` into the container, so nothing secret goes here.
-// It holds only what the container is allowed to see: the two GitHub App ids.
+// It holds only what the container is allowed to see: the two GitHub App ids, and the git
+// identity it commits under (see `docs/install.md` § 5.4 — the email's number is the bot's
+// user id, not the app id; the app id there would push fine and leave the commit unowned).
 const SECRETS_TEMPLATE = `# geng: things the container is allowed to see.
 # Injected with \`docker run --env-file\` — never mounted, never in data/, never in backups.
 # The model key does NOT belong here: it goes in secrets/<instance>.model.env, which the container
