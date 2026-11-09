@@ -117,3 +117,26 @@ test("an invalid reasoning effort is a failure with its own words", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a hop's reasoning effort is shown, not just in the file", () => {
+  const { root } = fixture();
+  try {
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([
+        "opencode-go/beam-free",
+        { provider: "opencode", model: "big-pickle", reasoningEffort: "low" },
+      ]),
+    );
+    const found = check(root);
+    assert.equal(found?.ok, true, String(found?.detail));
+    // The whole line, not a substring: a hop that sets no effort has to print exactly as it
+    // did before, and only an exact assertion notices when that format drifts.
+    assert.equal(
+      String(found?.detail),
+      "2 跳：opencode-go/beam-free → opencode/big-pickle（reasoningEffort=low）",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
