@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Paths } from "./paths.ts";
 import { readEnvFile } from "./secret.ts";
@@ -49,4 +49,116 @@ export function readModelKey(p: Paths): { name: string; key: string } | null {
     if (key !== "") return { name, key };
   }
   return null;
+}
+
+/** One provider's key by name, for a chain entry that names a different vendor. */
+export function readNamedModelKey(p: Paths, name: string): string | null {
+  const file = modelKeyFile(p);
+  if (!existsSync(file)) return null;
+  const key = (readEnvFile(file)[name] ?? "").trim();
+  return key === "" ? null : key;
+}
+
+/**
+ * Where a provider lives, and which key it wants.
+ *
+ * This is the one fact the old layout could not hold: `GENG_MODEL_UPSTREAM` is a single
+ * address, so a fallback that crossed to another vendor had nowhere to say where that
+ * vendor is. It stays a fallback for instances that were born before this file existed —
+ * file over environment, the same order `search.ts` uses.
+ *
+ * The container never sees this file: it is not mounted, and knowing an address is not
+ * the same as being able to use it, but there is no reason to tell it either.
+ */
+export interface ModelProvider {
+  url: string;
+  /** The variable holding this provider's key; absent means "whichever this instance has". */
+  key?: string;
+}
+
+export interface ModelChainEntry {
+  provider: string;
+  model: string;
+}
+
+const PROVIDER_ID = /^[a-z0-9][a-z0-9._-]*$/i;
+
+function httpUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().replace(/\/+$/, "");
+  return /^https?:\/\/[^\s/?#]+/.test(trimmed) ? trimmed : null;
+}
+
+export function readProviders(p: Paths): { table: Record<string, ModelProvider>; error: string | null } {
+  const file = p.providers;
+  if (!existsSync(file)) return { table: {}, error: null };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    return { table: {}, error: `${file} 不是 JSON：${(err as Error).message}` };
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    return { table: {}, error: `${file} 要一个对象：provider 名 → 地址` };
+  }
+  const table: Record<string, ModelProvider> = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    const at = typeof value === "string" ? value : (value as { url?: unknown } | null)?.url;
+    const url = httpUrl(at);
+    if (url === null) return { table, error: `${file} 里 ${id} 的地址要是 http(s) URL` };
+    const key = typeof value === "object" && value !== null ? (value as { key?: unknown }).key : undefined;
+    if (key !== undefined && (typeof key !== "string" || !MODEL_KEY_VARS.includes(key))) {
+      return { table, error: `${file} 里 ${id} 的 key 要是 ${MODEL_KEY_VARS.join(" / ")} 之一，拿到 ${JSON.stringify(key)}` };
+    }
+    table[id] = key === undefined ? { url } : { url, key };
+  }
+  return { table, error: null };
+}
+
+function chainEntry(item: unknown): ModelChainEntry | string {
+  if (typeof item !== "string") return `要写成 "provider/model" 的字符串，拿到 ${JSON.stringify(item)}`;
+  const at = item.indexOf("/");
+  if (at <= 0) return `要写成 "provider/model"，例如 "opencode-go/beam-free"`;
+  const provider = item.slice(0, at).trim();
+  const model = item.slice(at + 1).trim();
+  if (!PROVIDER_ID.test(provider)) return `provider 名不对：${provider}`;
+  if (model === "") return `缺模型名：${item}`;
+  return { provider, model };
+}
+
+/** `a/b,c/d` as the CLI takes it: one flag, one list, the first one is the primary. */
+export function chainFromSpec(spec: string): ModelChainEntry[] {
+  const items = spec.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  if (items.length === 0) throw new Error("--chain 不能是空的");
+  const out: ModelChainEntry[] = [];
+  for (const item of items) {
+    const entry = chainEntry(item);
+    if (typeof entry === "string") throw new Error(`--chain 里 ${item}：${entry}`);
+    out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * The chain file as written. A file that does not parse is reported, not obeyed: the
+ * caller decides whether that means 503 or "carry on without fallback", and the doctor is
+ * what keeps it from being silent.
+ */
+export function readChain(p: Paths): { chain: ModelChainEntry[]; error: string | null } {
+  const file = p.modelChain;
+  if (!existsSync(file)) return { chain: [], error: null };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8"));
+  } catch (err) {
+    return { chain: [], error: `${file} 不是 JSON：${(err as Error).message}` };
+  }
+  if (!Array.isArray(raw)) return { chain: [], error: `${file} 要一个数组，第一条是主力模型` };
+  const chain: ModelChainEntry[] = [];
+  for (const item of raw) {
+    const entry = chainEntry(item);
+    if (typeof entry === "string") return { chain, error: `${file}：${entry}` };
+    chain.push(entry);
+  }
+  return { chain, error: null };
 }

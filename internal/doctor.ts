@@ -12,7 +12,7 @@ import { mailWiringProblem, readEnvFile } from "./secret.ts";
 import { readSearchEnv, searchQuota } from "./search.ts";
 import { chainFrom } from "./proxy.ts";
 import { makeJwt, readGhApp } from "./ghapp.ts";
-import { MODEL_KEY_VARS, modelKeyFile, modelUpstream, readModelKey } from "./model.ts";
+import { MODEL_KEY_VARS, modelKeyFile, modelUpstream, readChain, readModelKey, readProviders } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { socketPath } from "./book.ts";
 import { makePaths } from "./paths.ts";
@@ -232,17 +232,51 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   // Both halves are needed now that the daemon is the data plane: without an upstream the
   // proxy answers 503 and every model request fails with what looks like a network error.
   const upstream = modelUpstream(p);
+  const providers = readProviders(p);
+  const chain = readChain(p);
+  const head = chain.chain[0];
+  // The address comes from the provider table when it knows this provider, and from the
+  // old single-upstream variable otherwise: file over environment, one order, said out loud.
+  const named = head?.provider ?? settings.defaultProvider;
+  const fromTable = named === undefined ? undefined : providers.table[named];
+  const address = fromTable?.url ?? upstream;
   checks.push({
     name: "模型密钥",
-    ok: key !== null && namedInEnv.length === 0 && upstream !== null,
+    ok: key !== null && namedInEnv.length === 0 && address !== null,
     detail:
       key === null
         ? `没有 ${modelKeyFile(p)}：第一轮就会没有模型可用`
         : namedInEnv.length > 0
           ? `${namedInEnv.join("、")} 写在 ${p.secrets} 里——那个文件会进容器，挪到 secrets/<实例>.model.env`
-          : upstream === null
-            ? "没有 GENG_MODEL_UPSTREAM：代理不知道往哪转发，每次请求都 503"
-            : `${key.name} → ${upstream}（都在宿主上，容器只是问）`,
+          : address === null
+            ? "没有 GENG_MODEL_UPSTREAM，deploy/providers.json 里也没有这个 provider：代理不知道往哪转发，每次请求都 503"
+            : `${key.name} → ${address}（${fromTable ? `deploy/providers.json 的 ${named}` : "GENG_MODEL_UPSTREAM"}，都在宿主上，容器只是问）`,
+  });
+
+  // Without this, "no fallback" and "a fallback that is never reached" look identical from
+  // the daemon's side: nothing happens either way. And the chain's first entry has to be the
+  // model the settings name, or the session records one model while another answers.
+  const chainDrift =
+    head !== undefined && (head.provider !== settings.defaultProvider || head.model !== settings.defaultModel);
+  const unknown = [...new Set(chain.chain.map((e) => e.provider))].filter((id) => providers.table[id] === undefined);
+  const chainOk = chain.error === null && providers.error === null && head !== undefined && !chainDrift && unknown.length === 0;
+  checks.push({
+    name: "模型回退",
+    ok: chainOk,
+    warnOnly: head === undefined && chain.error === null && providers.error === null,
+    detail: chainOk
+      ? `${chain.chain.length} 跳：${chain.chain.map((e) => `${e.provider}/${e.model}`).join(" → ")}`
+      : [
+          chain.error ?? "",
+          providers.error ?? "",
+          head === undefined ? `没有 ${p.modelChain}：模型报错就停下，没有回退` : "",
+          chainDrift && head !== undefined
+            ? `链的第一条是 ${head.provider}/${head.model}，settings 是 ${settings.defaultProvider}/${settings.defaultModel}——会话记的模型和真正回答的模型会对不上`
+            : "",
+          unknown.length > 0 ? `deploy/providers.json 里没有 ${unknown.join("、")}` : "",
+        ]
+          .filter((x) => x !== "")
+          .join("；"),
   });
 
   // Three states, because "not configured" and "configured but wrong" look identical from

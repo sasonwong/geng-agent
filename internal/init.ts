@@ -3,7 +3,7 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from "n
 import { dirname, join } from "node:path";
 import { makePaths, requiredDirs } from "./paths.ts";
 import { readJson } from "./fs.ts";
-import { MODEL_KEY_VARS } from "./model.ts";
+import { chainFromSpec, MODEL_KEY_VARS } from "./model.ts";
 import { readEnvFile, writeEnvValue } from "./secret.ts";
 
 // Everything in this file is `--env-file` into the container, so nothing secret goes here.
@@ -39,6 +39,8 @@ export interface InitOptions {
   image?: string;
   timeoutMin?: number;
   model?: string;
+  /** `provider/model,provider/model,…`: the whole chain, first entry is the primary. */
+  chain?: string;
   upstream?: string;
   /** Taken from the environment: nobody should have to open a file to paste a key. */
   modelKey?: string;
@@ -73,7 +75,22 @@ export function initInstance(root: string, instance: string, opts: InitOptions =
     }
     writeFileSync(p.policy, `${JSON.stringify(policy, null, 2)}\n`);
   }
-  if (existsSync(settingsFile) && opts.model !== undefined) {
+  // The chain is its own file, written whether or not a settings template was there to
+  // copy: a root without `deploy/` must not silently drop half of what was asked for.
+  if (opts.chain !== undefined) {
+    const chain = chainFromSpec(opts.chain);
+    mkdirSync(dirname(p.modelChain), { recursive: true });
+    const lines = chain.map((e) => `${e.provider}/${e.model}`);
+    writeFileSync(p.modelChain, `${JSON.stringify(lines, null, 2)}\n`, { mode: 0o600 });
+    // A chain names the provider too, and its first entry *is* the primary: two files that
+    // could disagree would leave the session recording one model while another answered.
+    const head = chain[0];
+    if (head !== undefined && existsSync(settingsFile)) {
+      const settings = readJson<Record<string, unknown>>(settingsFile, {});
+      const next = { ...settings, defaultProvider: head.provider, defaultModel: head.model };
+      writeFileSync(settingsFile, `${JSON.stringify(next, null, 2)}\n`);
+    }
+  } else if (existsSync(settingsFile) && opts.model !== undefined) {
     const settings = readJson<Record<string, unknown>>(settingsFile, {});
     writeFileSync(settingsFile, `${JSON.stringify({ ...settings, defaultModel: opts.model }, null, 2)}\n`);
   }

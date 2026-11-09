@@ -138,7 +138,7 @@ SHA-256。`packages` 那一层装扩展包用的 npm 包钉在同一个 `PI_VERS
 
 ```bash
 node cmd/geng/index.ts init alice \
-  --model deepseek-v4.1-flash \
+  --chain opencode-go/deepseek-v4.1-flash,opencode-go/beam-free \
   --upstream https://opencode.ai/inference/go/v1
 ```
 
@@ -150,12 +150,13 @@ node cmd/geng/index.ts init alice \
 
 | 参数 | 写进哪 | 默认 |
 |---|---|---|
+| `--chain a/b,c/d` | `secrets/<inst>.model.json`；第一条同时写进 settings 的 `defaultProvider`/`defaultModel` | 不写：没有回退 |
 | `--model <id>` | `data/<inst>/pi/settings.json` 的 `defaultModel` | 模板里的那个 |
 | `--upstream <url>` | `secrets/<inst>.model.env` 的 `GENG_MODEL_UPSTREAM` | opencode 的 `/go/v1` |
 | `--image <tag>` | `data/<inst>/policy.json` 的 `container.image` | `geng-agent:latest` |
 | `--timeout-min <n>` | `data/<inst>/policy.json` 的 `cycle.timeoutSec` | 30 |
 
-模型 key 不用手改文件：环境里有它就直接写进去。
+`--model` 和 `--chain` 都能定主力，所以只能给一个。模型 key 不用手改文件：环境里有它就直接写进去。
 
 ```bash
 OPENCODE_API_KEY=sk-... node cmd/geng/index.ts init alice --model …
@@ -184,11 +185,36 @@ OPENCODE_API_KEY=...          # 变量名跟着 provider 换（OPENAI_API_KEY / 
 GENG_MODEL_UPSTREAM=https://opencode.ai/inference/go/v1
 ```
 
-`GENG_MODEL_UPSTREAM` 是**转发的目的地**：pi 现在只知道 `http://127.0.0.1:11434/model`（容器里的
-`socat`），真实地址只有宿主知道。它要跟**模型所属的 API 家族**一致——同一家 provider 的模型可以
-分属不同的 API（opencode-go 的 deepseek 系是 `openai-completions`，路径以 `/go/v1` 结尾；
-claude 系是 `anthropic-messages`，只到 `/go`）。换模型跨了家族时，这一行要跟着改，
-否则上游回 404 而 pi 只会说请求失败。
+`deploy/providers.json`（共享，进 git）——每个 provider 的真实地址，链里只写名字：
+
+```json
+{
+  "opencode":    "https://opencode.ai/inference/openai/v1",
+  "opencode-go": "https://opencode.ai/inference/go/openai/v1"
+}
+```
+
+值写成对象时可以单独指定 key 的变量名（只写名字，凭据仍在那份 `.model.env` 里）：
+`{ "url": "https://api.deepseek.com/v1", "key": "DEEPSEEK_API_KEY" }`。
+
+`secrets/<实例>.model.json`（600，可选）——模型链，**第一条就是主力**：
+
+```json
+["opencode-go/beam-free", "opencode/big-pickle", "opencode-go/deepseek-v4.1-flash"]
+```
+
+它只在请求的模型名等于第一条时生效（别人的模型原样直通，不替它挑）；一条失败就换下一条，判据是
+`status >= 400`、连不上、或 60 秒没有响应头；body 里的 `model` 换成那一条的，其余字节不动；流已经
+开始之后不再换；全都不行时返回**第一条**的状态和 body。`daemon.log` 里的 `fb=N` 是这一轮被第 N 跳
+救回来的次数（会话里记的仍是 pi 以为的那个模型名）。
+
+**每条都要跟主条目同一个 API 家族**：body 不翻译，openai ↔ anthropic 之间不做。所以表里一个名字
+只服务一族——要跨族，就另起一个表项名（比如 `opencode-go-anthropic` 指向
+`https://opencode.ai/inference/go/anthropic`），把它当另一个 provider 写进链。
+
+`GENG_MODEL_UPSTREAM` 现在是**回退**：`deploy/providers.json` 认得链的第一条（没有链时是 settings
+的 `defaultProvider`）就以表为准，表里没有才读它。新实例不必写这一行，老实例不改也照常跑——
+`doctor` 的「模型密钥」会说清当前读的是哪一个。
 
 `deploy/models.json` 把 provider 的地址指向容器里的 `http://127.0.0.1:11434/model`，`apiKey` 只是一个
 占位符（`"local"`）：pi 发出去的请求里没有任何真凭据，daemon 在转发时补上 `Authorization`。所以密钥
@@ -209,14 +235,18 @@ echo '<值>' | node cmd/geng/index.ts secrets set alice SOME_NAME
 名字写错的表现是每个请求都 503，而 pi 只说请求失败——看起来像网络坏了。验证的方式是拿它去打
 一次真端点看状态码（401 = 能连上但没认出来，200 = 对了），不要靠打印它、看长度、看前缀。
 
-`doctor` 的「模型密钥」会在两件事上说话：文件不存在（第一轮就没有模型可用）、
-或者 `OPENCODE_API_KEY` 之类还留在 `alice.env` 里（那个文件会进容器）。
+`doctor` 的「模型密钥」会在三件事上说话：文件不存在（第一轮就没有模型可用）、
+`OPENCODE_API_KEY` 之类还留在 `alice.env` 里（那个文件会进容器）、以及**最后到底用了哪个地址**
+（`deploy/providers.json` 还是 `GENG_MODEL_UPSTREAM`）。「模型回退」那一项管链：第一条是不是
+settings 里那个模型、每条 provider 在不在表里、没有链时只提醒不报错。
 
 ### 全部凭据一览
 
 | 文件 | 谁写的 | 谁读它 | 缺了会怎样 |
 |---|---|---|---|
 | `secrets/<实例>.model.env` | `init`（key 从环境读，或你填） | daemon，转发模型请求时补上 | 每个请求都 503「没有模型密钥」，pi 只说请求失败 |
+| `deploy/providers.json` | 项目（进 git） | daemon / `doctor` | 链里出现的 provider 全都解析不到地址（503），只有 `GENG_MODEL_UPSTREAM` 那一条路还活着 |
+| `secrets/<实例>.model.json` | 你（或 `init --chain`） | daemon / `doctor` | 没有回退：模型报错就停下，其他照常 |
 | `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 只该放代价有上限的值；模型密钥写在这儿会进容器，`doctor` 会说 |
 | `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search`（这个文件只要 `DEEPSEEK_API_KEY`、socket 路径、每日限额） |
 | `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
@@ -675,7 +705,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt  bu
 | `book/identity.md` | `/state/identity.md` | 唯一一个它直接写的文件 |
 | `workspace/` | `/work` | 干活的地方，可写 |
 | `pi/settings.json` | `~/.pi/agent/settings.json` | 只读：它不能换模型 |
-| `deploy/models.json` | `~/.pi/agent/models.json` | 只读：provider 指向容器里的 socat |
+| `deploy/models.json` | `~/.pi/agent/models.json` | 只读：provider 指向容器里的 socat（`opencode` 与 `opencode-go` 两条都指过去） |
 | `sessions/` | `~/.pi/agent/sessions` | pi 写它自己的会话 |
 | `image/extensions/` | `/opt/geng/extensions` | 只读：工具不可变 |
 | `run/` | `/run/geng` | 只读：book socket（模型、代理、记忆都在这条路上） |

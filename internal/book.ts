@@ -68,6 +68,8 @@ export interface BookOptions {
    * only way it shows up.
    */
   onModelRequest?: () => void;
+  /** How many of those requests were answered by a fallback rather than the primary route. */
+  onModelFallback?: (attempts: number) => void;
   /** Called once per proxied connection: the only evidence that it went somewhere. */
   onNetwork?: (event: { target: string; ok: boolean; why?: string }) => void;
   /** How the daemon itself reaches the network: null for direct. */
@@ -526,7 +528,11 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       });
       req.on("end", () => {
         if (refused) return;
-        proxyModel(o.paths, req, res, Buffer.concat(chunks)).catch(guard);
+        proxyModel(o.paths, req, res, Buffer.concat(chunks))
+          .then((fallbacks) => {
+            if (fallbacks > 0) o.onModelFallback?.(fallbacks);
+          })
+          .catch(guard);
       });
       req.on("error", guard);
       return;

@@ -1,6 +1,10 @@
 {
   "$schema": "https://pi.dev/schemas/models.schema.json",
   "providers": {
+    "opencode": {
+      "baseUrl": "http://127.0.0.1:11434/model",
+      "apiKey": "local"
+    },
     "opencode-go": {
       "baseUrl": "http://127.0.0.1:11434/model",
       "apiKey": "local"

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initInstance } from "../internal/init.ts";
@@ -89,4 +89,27 @@ test("without flags the template's values survive, and the key file is still cre
   assert.equal(policy.cycle.timeoutSec, 1800);
   assert.equal(readModelKey(p), null, "空模板不该算配好了");
   assert.equal(modelUpstream(p), "https://opencode.ai/inference/go/v1");
+});
+
+test("--chain writes the list, and its first entry becomes the primary", () => {
+  // The chain's first entry *is* the primary, so two flags that could disagree is worse
+  // than one: settings and the chain have to name the same model, or the session records
+  // one while another answers.
+  const r = root();
+  const p = makePaths(r, "alice");
+  initInstance(r, "alice", { chain: "opencode/big-pickle,opencode-go/beam-free" });
+  assert.deepEqual(JSON.parse(readFileSync(p.modelChain, "utf8")), [
+    "opencode/big-pickle",
+    "opencode-go/beam-free",
+  ]);
+  const settings = JSON.parse(readFileSync(join(p.piDir, "settings.json"), "utf8"));
+  assert.equal(settings.defaultProvider, "opencode");
+  assert.equal(settings.defaultModel, "big-pickle");
+});
+
+test("a chain entry that is not provider/model is refused before anything is written", () => {
+  const r = root();
+  const p = makePaths(r, "alice");
+  assert.throws(() => initInstance(r, "alice", { chain: "big-pickle" }), /provider\/model/);
+  assert.equal(existsSync(p.modelChain), false);
 });

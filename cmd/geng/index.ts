@@ -22,9 +22,10 @@ const REPO_ROOT = resolve(import.meta.dirname, "../..");
 
 const USAGE = `geng <command> [options]
 
-  init <instance> [--image t] [--timeout-min n] [--model id] [--upstream url]
+  init <instance> [--image t] [--timeout-min n] [--model id] [--chain a/b,c/d] [--upstream url]
                                      建目录、落 policy、生成 secrets 模板；四个参数是这个实例的
-                                     决定，模型 key 从环境变量读（不写在命令行上）
+                                     决定，模型 key 从环境变量读（不写在命令行上）；
+                                     --chain 的第一条就是主力，写进 settings 与回退链
   daemon --instance <instance>       一直跑（调试用 geng-dev，见 AGENTS.md）
   status [<instance>|--all]          一屏看状态
   doctor <instance> [--fix] [--probe] [--restore-test]
@@ -72,6 +73,7 @@ const SUB_FLAG_VALUED = new Set([
   "--image",
   "--timeout-min",
   "--model",
+  "--chain",
   "--upstream",
 ]);
 const SUB_FLAG_BOOL = new Set(["--token-stdin", "--rotate"]);
@@ -154,12 +156,17 @@ function initArgs(rest: string[]): { instance: string | null; opts: InitOptions 
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i] as string;
     const v = rest[i + 1];
-    if (a === "--image" || a === "--timeout-min" || a === "--model" || a === "--upstream") {
+    if (a === "--image" || a === "--timeout-min" || a === "--model" || a === "--chain" || a === "--upstream") {
       if (v === undefined) throw new Error(`${a} 需要一个值`);
       i++;
       if (a === "--image") opts.image = text(a, v);
       else if (a === "--model") opts.model = text(a, v);
-      else if (a === "--upstream") {
+      else if (a === "--chain") {
+        opts.chain = text(a, v);
+        // The chain's first entry *is* the primary, so `--model` beside it would be a
+        // second answer to the same question. Refuse instead of silently preferring one.
+        if (opts.model !== undefined) throw new Error("--model 和 --chain 都能定主力，只能给一个");
+      } else if (a === "--upstream") {
         opts.upstream = text(a, v);
         if (!/^https?:\/\//.test(opts.upstream)) throw new Error(`--upstream 要是 http(s) 地址，拿到 ${v}`);
       } else {
@@ -204,7 +211,7 @@ async function main(): Promise<number> {
       }
       const { instance, opts } = parsed;
       if (!instance) {
-        console.error("用法：geng init <instance> [--image <tag>] [--timeout-min <n>] [--model <id>] [--upstream <url>]");
+        console.error("用法：geng init <instance> [--image <tag>] [--timeout-min <n>] [--model <id>] [--chain a/b,c/d] [--upstream <url>]");
         return 2;
       }
       // A key in the environment is a key the operator does not have to paste into a file.

@@ -58,6 +58,12 @@ export interface Paths {
   extensions: string;
   /** Per-instance pi config, mounted read-only over the container's agent dir. */
   piDir: string;
+  /** Where each provider actually lives. Shared by every instance, and never mounted: the
+   * container knows only the proxy in front of it. */
+  providers: string;
+  /** This instance's model chain: an ordered list of `provider/model`, first one is the
+   * primary. Host-only, like the key file beside it. */
+  modelChain: string;
 }
 
 export function makePaths(root: string, instance: string): Paths {
@@ -115,6 +121,8 @@ export function makePaths(root: string, instance: string): Paths {
     systemMd: join(r, "deploy", "SYSTEM.md"),
     extensions: join(r, "image", "extensions"),
     piDir: join(data, "pi"),
+    providers: join(r, "deploy", "providers.json"),
+    modelChain: join(r, "secrets", `${instance}.model.json`),
   };
 }
 

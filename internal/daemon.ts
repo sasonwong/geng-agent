@@ -178,6 +178,8 @@ function logLine(
   inj: { total: number; unread: number },
   /** Model requests: one per call is normal, more means something else used the socket. */
   modelRequests: number,
+  /** Of those requests, how many were served by a fallback route instead of the primary. */
+  modelFallbacks: number,
   /** Outbound connections through the proxy: the count of places it went. */
   netCalls: number,
   interventions: string[],
@@ -207,6 +209,9 @@ function logLine(
   // `llm=`, not `key=`: the number is model requests, and `key` next to `net=` reads
   // like a credential or a lookup key rather than a count.
   if (modelRequests > 0) parts.push(`llm=${modelRequests}`);
+  // Only when it happened: the model in the session is the one pi *asked* for, so without
+  // this line "why was this round so bad" has no answer after the fact.
+  if (modelFallbacks > 0) parts.push(`fb=${modelFallbacks}`);
   if (netCalls > 0) parts.push(`net=${netCalls}`);
   if (interventions.length > 0) parts.push(`fix=${interventions.join(",")}`);
   if (inj.total > 0) {
@@ -332,6 +337,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   // Model requests in this round. The endpoint lives as long as the daemon, so the counter
   // is reset when a round starts and read when it logs.
   let modelRequests = 0;
+  let modelFallbacks = 0;
   let netCalls = 0;
   if (!o.dry) {
     try {
@@ -356,6 +362,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         },
         onModelRequest: () => {
           modelRequests += 1;
+        },
+        onModelFallback: (attempts) => {
+          modelFallbacks += attempts;
         },
       });
     } catch (err) {
@@ -437,6 +446,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     let meta = readMeta(paths);
     const waking = (meta.wakings ?? 0) + 1;
     modelRequests = 0;
+    modelFallbacks = 0;
     netCalls = 0;
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
@@ -707,6 +717,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       inbox.length,
       inj,
       modelRequests,
+      modelFallbacks,
       netCalls,
       interventions,
       backup,
