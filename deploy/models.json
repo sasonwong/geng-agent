@@ -7,7 +7,19 @@
     },
     "opencode-go": {
       "baseUrl": "http://127.0.0.1:11434/model",
-      "apiKey": "local"
+      "apiKey": "local",
+      "models": [
+        {
+          "id": "crouton-alpha-free",
+          "name": "Crouton Alpha Free",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 1048576,
+          "maxTokens": 270000,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
     }
   }
 }
