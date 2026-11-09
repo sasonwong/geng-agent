@@ -352,7 +352,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
             `；daemon 自己${chain === null ? "直连" : `走 ${chain.kind} ${chain.host}:${chain.port}`}`,
       warnOnly: true,
     });
-    // The three ranges an operator should never open by accident, each with its own reason.
+    // The five ranges an operator should never open by accident, each with its own reason.
     const dangerous: [string, string][] = [
       ["127.0.0.0/8", "容器能摸宿主上所有 loopback 服务"],
       ["169.254.0.0/16", "云元数据：那条路通向凭据"],
@@ -614,14 +614,16 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
 /** Directories that never hold config of ours and are huge: walking them only costs time. */
 const SKIP_DIRS = new Set(["seen", "node_modules", ".git"]);
 
+// The agent's scratch, skipped wholesale by both scans below. A killed round leaves whatever
+// it was writing here — often a complete data tree with `secrets/*.env` fixtures — and a scan
+// that reports that on every run teaches people to ignore the warning. The rest of the
+// workspace is still scanned: a token written out as a file there is a real leak. `backup.ts`
+// excludes the same path as a glob, so if the scratch moves, both move.
+const SCRATCH_DIR = join("workspace", "tmp");
+
 /** Key-shaped *file names* under data/. A token pasted into a log has another shape: see scanLogBodies. */
 export function keyFiles(dir: string): string[] {
-  // `workspace/tmp` is the agent's scratch, and a round that gets killed leaves its test
-  // roots there — complete data trees with `secrets/*.env` fixtures in them. Scanning it
-  // reported credentials in the book on every run, which is the shape of a check that
-  // teaches people to ignore it. The rest of the workspace is still scanned: a token
-  // written out as a file there is a real leak, and the socket is one way to get one.
-  const scratch = join(dir, "workspace", "tmp");
+  const scratch = join(dir, SCRATCH_DIR);
   const hits: string[] = [];
   const walk = (d: string) => {
     let entries;
@@ -689,6 +691,7 @@ export interface LogScan {
 }
 
 export function scanLogBodies(dir: string): LogScan {
+  const scratch = join(dir, SCRATCH_DIR);
   const hits: string[] = [];
   const truncated: string[] = [];
   const walk = (d: string) => {
@@ -701,7 +704,7 @@ export function scanLogBodies(dir: string): LogScan {
     for (const e of entries) {
       const full = join(d, e.name);
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(full);
+        if (!SKIP_DIRS.has(e.name) && full !== scratch) walk(full);
         continue;
       }
       // `appendLine` rotates to `<file>.1`, and a name that stops ending in `.log` would
@@ -762,7 +765,7 @@ export const PROBE = [
     // when no connection was made, which is what "no route" actually looks like.
     'printf "META_CODE=%s\\n" "$(no_proxy=* curl -s -m 3 -o /dev/null -w \"%{http_code}\" http://169.254.169.254/ 2>/dev/null)"',
     // the real attack path is the host on our own gateway, not a fixed docker0 address
-    // `\\$3`, not `\\$3` once: the JS string has to hand the shell a literal `\$3`, or the
+    // `\\$3`, not `$3` once: the JS string has to hand the shell a literal `\$3`, or the
     // shell expands `$3` (empty) inside the double quotes and awk prints the whole line.
     'GW=$(ip route 2>/dev/null | awk "/^default/{print \\$3; exit}"); if [ -n "$GW" ] && curl -s -m 3 -o /dev/null "http://$GW:2375/version" 2>/dev/null; then echo DOCKER_REACHABLE; else echo DOCKER_BLOCKED; fi',
     "true",
