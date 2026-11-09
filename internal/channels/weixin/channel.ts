@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { failedAttempt, HANDLE_ATTEMPTS } from "../core.ts";
+import { splitText as splitAt } from "../../text.ts";
 import type {
   Channel,
   ChannelCheck,
@@ -195,37 +196,11 @@ function toInbound(msg: WeixinMessage, cfg: WeixinConfig, allowed: boolean): Inb
 }
 
 /**
- * Split one `say` element into bubbles of at most 2000 characters.
- *
- * The limit is a client-compatibility number, not a published server constant; the
- * boundary preference is the community convention (paragraph, line, space, hard cut).
- * Code points, not UTF-16 units: cutting an emoji in half makes an invalid string.
+ * The channel's own limit. The gateway expands queued items to this size before it
+ * calls `send`; this wrapper is still the fallback for a direct caller.
  */
 export function splitText(text: string, limit = TEXT_LIMIT): string[] {
-  const max = Math.max(1, Math.floor(limit));
-  const chars = Array.from(text);
-  if (chars.length <= max) return chars.length === 0 ? [] : [text];
-  const out: string[] = [];
-  let start = 0;
-  while (start < chars.length) {
-    if (chars.length - start <= max) {
-      out.push(chars.slice(start).join(""));
-      break;
-    }
-    const head = chars.slice(start, start + max).join("");
-    const floor = Math.floor(max / 2);
-    const paragraph = head.lastIndexOf("\n\n");
-    const line = head.lastIndexOf("\n");
-    const space = head.lastIndexOf(" ");
-    let cut = head.length;
-    if (paragraph >= floor) cut = paragraph + 2;
-    else if (line >= floor) cut = line + 1;
-    else if (space >= floor) cut = space + 1;
-    const part = head.slice(0, cut);
-    out.push(part);
-    start += Array.from(part).length;
-  }
-  return out;
+  return splitAt(text, limit);
 }
 
 /**
@@ -444,8 +419,8 @@ async function send(ctx: SendContext): Promise<SendResult> {
           // one; retrying the same token in two seconds cannot.
           return hold(ctx, "prepare", "sendmessage 说上下文还没准备好（ret=-2）", sent);
         }
-        // shortcut: a failed chunk of a >2000-character element resends the chunks before
-        // it on the next attempt, at most 5 times. Split at queue time if that ever shows.
+        // shortcut: a direct caller, or an item written before the gateway split, can still
+        // hand a >limit element; queued items reach this function as single bubbles.
         return { ack: false, sent, error: err as Error };
       }
       // Count each bubble as it leaves: the platform's quota is a black box, and a crash
@@ -568,6 +543,7 @@ function doctor(root: string, instance: string): ChannelCheck[] {
 
 export const weixinChannel: Channel = {
   id: "weixin",
+  textLimit: TEXT_LIMIT,
   load(root: string): LoadResult {
     const file = readWeixin(root);
     return { configs: file.configs, problems: file.problems };

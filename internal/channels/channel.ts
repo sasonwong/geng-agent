@@ -13,6 +13,8 @@ import type { Quote, Quoted } from "../quote.ts";
  */
 export interface Channel {
   id: string;
+  /** Max code points in one text bubble; the gateway splits queued items at this. */
+  textLimit?: number;
   /** Per-instance credentials, as the channel's own file spells them. */
   load(root: string): LoadResult;
   /** A reload must survive a half-written file: a missing token keeps the old one. */
