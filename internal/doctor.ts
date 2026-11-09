@@ -188,10 +188,12 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
             .join("；"),
   });
 
-  const settings = readJson<{ defaultProvider?: string; defaultModel?: string; packages?: unknown }>(
-    join(p.piDir, "settings.json"),
-    {},
-  );
+  const settings = readJson<{
+    defaultProvider?: string;
+    defaultModel?: string;
+    defaultThinkingLevel?: string;
+    packages?: unknown;
+  }>(join(p.piDir, "settings.json"), {});
   checks.push({
     name: "容器 settings",
     ok: typeof settings.defaultProvider === "string" && typeof settings.defaultModel === "string",
@@ -285,6 +287,22 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
           .filter((x) => x !== "")
           .join("；"),
   });
+
+  // The session records the level settings names; an effort on the chain's first entry only
+  // changes what is sent. When the two differ, the transcript says one level and the request
+  // carried another — the same shape as `chainDrift` above, and likewise not a failure: the
+  // round still runs, so this is a warning rather than something that blocks.
+  const headEffort = head?.reasoningEffort;
+  if (headEffort !== undefined && headEffort !== settings.defaultThinkingLevel) {
+    checks.push({
+      name: "思考档位",
+      ok: false,
+      warnOnly: true,
+      detail: `链的第一条写了 reasoningEffort=${headEffort}，settings 的 defaultThinkingLevel 是 ${
+        settings.defaultThinkingLevel ?? "（没写）"
+      }——会话记的档和真正发出去的档会对不上；要两边一致，第一条就别写`,
+    });
+  }
 
   // Three states, because "not configured" and "configured but wrong" look identical from
   // the container: git just says the remote asked for a password.

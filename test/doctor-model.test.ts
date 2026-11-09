@@ -140,3 +140,51 @@ test("a hop's reasoning effort is shown, not just in the file", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// The session records the level settings names; an effort on the chain's first entry changes
+// only what is sent. Divergence is a warning, because the round still runs — it just runs at a
+// level the transcript does not name.
+function thinking(root: string): ReturnType<typeof checkInstance>[number] | undefined {
+  return checkInstance(root, "alice", false).find((c) => c.name === "思考档位");
+}
+
+test("an effort on the first hop that the settings disagree with is a warning", () => {
+  const { root, p } = fixture();
+  try {
+    writeFileSync(
+      join(p.piDir, "settings.json"),
+      JSON.stringify({ defaultProvider: "opencode-go", defaultModel: "beam-free", defaultThinkingLevel: "low" }),
+    );
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([
+        { provider: "opencode-go", model: "beam-free", reasoningEffort: "high" },
+        "opencode/big-pickle",
+      ]),
+    );
+    const found = thinking(root);
+    assert.equal(found?.ok, false);
+    assert.equal(found?.warnOnly, true, "档不一致只该是提醒：这一轮照样跑得完");
+    assert.match(String(found?.detail), /reasoningEffort=high/);
+    assert.match(String(found?.detail), /defaultThinkingLevel 是 low/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an effort on the first hop that matches the settings' level says nothing", () => {
+  const { root, p } = fixture();
+  try {
+    writeFileSync(
+      join(p.piDir, "settings.json"),
+      JSON.stringify({ defaultProvider: "opencode-go", defaultModel: "beam-free", defaultThinkingLevel: "high" }),
+    );
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([{ provider: "opencode-go", model: "beam-free", reasoningEffort: "high" }]),
+    );
+    assert.equal(thinking(root), undefined, "两边都是 high，没有可对不上的地方");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
