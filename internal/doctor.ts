@@ -188,10 +188,12 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
             .join("；"),
   });
 
-  const settings = readJson<{ defaultProvider?: string; defaultModel?: string; packages?: unknown }>(
-    join(p.piDir, "settings.json"),
-    {},
-  );
+  const settings = readJson<{
+    defaultProvider?: string;
+    defaultModel?: string;
+    defaultThinkingLevel?: string;
+    packages?: unknown;
+  }>(join(p.piDir, "settings.json"), {});
   checks.push({
     name: "容器 settings",
     ok: typeof settings.defaultProvider === "string" && typeof settings.defaultModel === "string",
@@ -285,6 +287,27 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
           .filter((x) => x !== "")
           .join("；"),
   });
+
+  // The session records the level settings names; an effort on the chain's first entry only
+  // changes what is sent. The two disagree unless they happen to be the same level, and that
+  // is the same shape as `chainDrift` above — likewise not a failure: the round still runs,
+  // so this is a warning rather than something that blocks.
+  const headEffort = head?.reasoningEffort;
+  const recordedEffort = settings.defaultThinkingLevel;
+  if (headEffort !== undefined && headEffort !== recordedEffort) {
+    checks.push({
+      name: "思考档位",
+      ok: false,
+      warnOnly: true,
+      // Without a setting there is nothing to compare against: pi starts at `medium` and the
+      // level goes into the transcript from there, so the same word on both sides can be the
+      // same level or not — this line cannot tell, and must not claim it is a mismatch.
+      detail:
+        recordedEffort === undefined
+          ? `链的第一条写了 reasoningEffort=${headEffort}，settings 里没有 defaultThinkingLevel（pi 启动时用 medium）——两边是不是同一个档，这里判断不了`
+          : `链的第一条写了 reasoningEffort=${headEffort}，settings 的 defaultThinkingLevel 是 ${recordedEffort}——这一跳只改请求的档，会话记的档不跟着变；要两边一致，第一条就别写`,
+    });
+  }
 
   // Three states, because "not configured" and "configured but wrong" look identical from
   // the container: git just says the remote asked for a password.

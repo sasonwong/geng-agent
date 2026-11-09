@@ -140,3 +140,93 @@ test("a hop's reasoning effort is shown, not just in the file", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// The session records the level settings names; an effort on the chain's first entry changes
+// only what is sent. Divergence is a warning, because the round still runs — it just runs at a
+// level the transcript does not name.
+function thinking(root: string): ReturnType<typeof checkInstance>[number] | undefined {
+  return checkInstance(root, "alice", false).find((c) => c.name === "思考档位");
+}
+
+test("an effort on the first hop that the settings disagree with is a warning", () => {
+  const { root, p } = fixture();
+  try {
+    writeFileSync(
+      join(p.piDir, "settings.json"),
+      JSON.stringify({ defaultProvider: "opencode-go", defaultModel: "beam-free", defaultThinkingLevel: "low" }),
+    );
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([
+        { provider: "opencode-go", model: "beam-free", reasoningEffort: "high" },
+        "opencode/big-pickle",
+      ]),
+    );
+    const found = thinking(root);
+    assert.equal(found?.ok, false);
+    assert.equal(found?.warnOnly, true, "档不一致只该是提醒：这一轮照样跑得完");
+    assert.match(String(found?.detail), /reasoningEffort=high/);
+    assert.match(String(found?.detail), /defaultThinkingLevel 是 low/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an effort on the first hop that matches the settings' level says nothing", () => {
+  const { root, p } = fixture();
+  try {
+    writeFileSync(
+      join(p.piDir, "settings.json"),
+      JSON.stringify({ defaultProvider: "opencode-go", defaultModel: "beam-free", defaultThinkingLevel: "high" }),
+    );
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([{ provider: "opencode-go", model: "beam-free", reasoningEffort: "high" }]),
+    );
+    assert.equal(thinking(root), undefined, "两边都是 high，没有可对不上的地方");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a first entry that sets no effort says nothing, even with a level in the settings", () => {
+  const { root, p } = fixture();
+  try {
+    // The shipped settings.json carries `"defaultThinkingLevel": "low"`, so this is the
+    // common shape: the setting exists, no hop overrides it, and there is nothing to warn
+    // about. Without the `headEffort !== undefined` guard this line starts reporting
+    // `reasoningEffort=undefined`.
+    writeFileSync(
+      join(p.piDir, "settings.json"),
+      JSON.stringify({ defaultProvider: "opencode-go", defaultModel: "beam-free", defaultThinkingLevel: "low" }),
+    );
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify(["opencode-go/beam-free", "opencode/big-pickle"]),
+    );
+    assert.equal(thinking(root), undefined);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("without a level in the settings the line says it cannot tell, not that they differ", () => {
+  const { root } = fixture();
+  try {
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([{ provider: "opencode-go", model: "beam-free", reasoningEffort: "medium" }]),
+    );
+    const found = thinking(root);
+    assert.equal(found?.ok, false);
+    assert.equal(found?.warnOnly, true);
+    assert.match(String(found?.detail), /没有 defaultThinkingLevel/);
+    assert.equal(
+      /不跟着变/.test(String(found?.detail)),
+      false,
+      "这一支什么都没比过（pi 的默认是 medium），不能断言两边一定不同",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
