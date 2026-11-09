@@ -215,6 +215,8 @@ GENG_MODEL_UPSTREAM=https://opencode.ai/inference/go/v1
 字符串和对象可以混用。对象多一个可选的 `reasoningEffort`：它按字面写进请求的 `reasoning_effort`，
 取值 `minimal` / `low` / `medium` / `high` / `xhigh` / `max`；不写就沿用这一轮 pi 为主力选的档。
 值不经过 fallback 模型的档位表——daemon 不认识 pi 的目录，所以这里写的是**线上值**，不是 pi 的档名。
+这里只挡拼写，挡不住上游：某家网关不认这一档会回 400，而 400 在这个 proxy 里是「换下一跳」的信号，
+所以写错一个档看起来像上游故障——`fb=N` 涨了先回来看这张表。
 `off` 不在这里：要关思考就改主力的 `defaultThinkingLevel`。给第一条写这项会覆盖 pi 发出来的档，
 而会话里记的仍是 settings 的档——要两边一致，第一条就别写。
 
