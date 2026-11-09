@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { Paths } from "./paths.ts";
-import { readChain, readModelKey, modelUpstream, readNamedModelKey, readProviders } from "./model.ts";
+import { readChain, readModelKey, modelUpstream, readNamedModelKey, readProviders, type ModelChainEntry } from "./model.ts";
 
 /**
  * The model proxy: the container talks to the daemon, the daemon talks to the provider.
@@ -78,6 +78,8 @@ interface Attempt {
   url: string;
   /** What to put in the body's `model`; null means "leave the body exactly as it came". */
   model: string | null;
+  /** What to put in the body's `reasoning_effort`; null leaves the client's choice alone. */
+  reasoningEffort: string | null;
   key: string;
 }
 
@@ -95,11 +97,12 @@ function requestModel(body: Buffer): string | null {
   }
 }
 
-/** `model` is top-level in all three families the gateway speaks; nothing else is touched. */
-function rewriteModel(body: Buffer, model: string): Buffer {
+/** `model` and an entry's `reasoning_effort` are top-level; nothing else is touched. */
+function rewriteModel(body: Buffer, model: string, reasoningEffort: string | null): Buffer {
   try {
     const parsed = JSON.parse(body.toString("utf8")) as Record<string, unknown>;
     parsed.model = model;
+    if (reasoningEffort !== null) parsed.reasoning_effort = reasoningEffort;
     return Buffer.from(JSON.stringify(parsed));
   } catch {
     return body;
@@ -108,7 +111,7 @@ function rewriteModel(body: Buffer, model: string): Buffer {
 
 function attemptFor(
   p: Paths,
-  entry: { provider: string; model: string },
+  entry: ModelChainEntry,
   table: Record<string, { url: string; key?: string }>,
   ownKey: { name: string; key: string } | null,
   suffix: string,
@@ -118,7 +121,13 @@ function attemptFor(
   if (provider === undefined) return `deploy/providers.json 里没有 ${entry.provider}`;
   const key = provider.key === undefined ? (ownKey?.key ?? null) : readNamedModelKey(p, provider.key);
   if (key === null) return `secrets/${p.instance}.model.env 里没有 ${provider.key ?? "模型密钥"}`;
-  return { provider: entry.provider, url: provider.url + suffix, model: rewrite ? entry.model : null, key };
+  return {
+    provider: entry.provider,
+    url: provider.url + suffix,
+    model: rewrite ? entry.model : null,
+    reasoningEffort: rewrite ? (entry.reasoningEffort ?? null) : null,
+    key,
+  };
 }
 
 /**
@@ -145,7 +154,7 @@ function routingPlan(p: Paths, suffix: string, body: Buffer): Plan {
     if (ownKey === null) {
       return { error: "没有模型密钥：写 secrets/<实例>.model.env 的 OPENCODE_API_KEY" };
     }
-    return { attempts: [{ provider: "?", url: legacy + suffix, model: null, key: ownKey.key }] };
+    return { attempts: [{ provider: "?", url: legacy + suffix, model: null, reasoningEffort: null, key: ownKey.key }] };
   }
 
   const { table, error } = readProviders(p);
@@ -240,7 +249,7 @@ export async function proxyModel(
   for (const [index, attempt] of plan.attempts.entries()) {
     current = new AbortController();
     const headers = modelHeaders(req.headers, attempt.key);
-    const payload = attempt.model === null || !sendBody ? body : rewriteModel(body, attempt.model);
+    const payload = attempt.model === null || !sendBody ? body : rewriteModel(body, attempt.model, attempt.reasoningEffort);
     let response: Response;
     try {
       response = await withHeaderTimeout(

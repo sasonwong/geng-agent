@@ -79,9 +79,14 @@ export interface ModelProvider {
 export interface ModelChainEntry {
   provider: string;
   model: string;
+  /** Sent as the request's `reasoning_effort`; absent leaves what pi already chose. */
+  reasoningEffort?: string;
 }
 
 const PROVIDER_ID = /^[a-z0-9][a-z0-9._-]*$/i;
+/** The wire values `reasoning_effort` takes. `off` is not one: pi drops the field instead. */
+const EFFORT_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
+const CHAIN_KEYS = ["provider", "model", "reasoningEffort"];
 
 function httpUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -115,15 +120,35 @@ export function readProviders(p: Paths): { table: Record<string, ModelProvider>;
   return { table, error: null };
 }
 
-function chainEntry(item: unknown): ModelChainEntry | string {
-  if (typeof item !== "string") return `要写成 "provider/model" 的字符串，拿到 ${JSON.stringify(item)}`;
-  const at = item.indexOf("/");
-  if (at <= 0) return `要写成 "provider/model"，例如 "opencode-go/beam-free"`;
-  const provider = item.slice(0, at).trim();
-  const model = item.slice(at + 1).trim();
+function chainParts(provider: string, model: string, shown: string): ModelChainEntry | string {
+  if (provider === "") return `要写成 "provider/model"，例如 "opencode-go/beam-free"`;
   if (!PROVIDER_ID.test(provider)) return `provider 名不对：${provider}`;
-  if (model === "") return `缺模型名：${item}`;
+  if (model === "") return `缺模型名：${shown}`;
   return { provider, model };
+}
+
+function chainEntry(item: unknown): ModelChainEntry | string {
+  if (typeof item === "string") {
+    const at = item.indexOf("/");
+    if (at < 0) return `要写成 "provider/model"，例如 "opencode-go/beam-free"`;
+    return chainParts(item.slice(0, at).trim(), item.slice(at + 1).trim(), item);
+  }
+  if (item === null || typeof item !== "object" || Array.isArray(item)) {
+    return `要写成 "provider/model" 或 { "provider", "model" } 对象，拿到 ${JSON.stringify(item)}`;
+  }
+  const fields = item as Record<string, unknown>;
+  const unknown = Object.keys(fields).filter((key) => !CHAIN_KEYS.includes(key));
+  if (unknown.length > 0) return `不认识的键 ${unknown.join("、")}，只认 ${CHAIN_KEYS.join(" / ")}`;
+  const provider = typeof fields.provider === "string" ? fields.provider.trim() : "";
+  const model = typeof fields.model === "string" ? fields.model.trim() : "";
+  const entry = chainParts(provider, model, `${provider}/${model}`);
+  if (typeof entry === "string") return entry;
+  const effort = fields.reasoningEffort;
+  if (effort === undefined) return entry;
+  if (typeof effort !== "string" || !EFFORT_LEVELS.includes(effort)) {
+    return `reasoningEffort 要 ${EFFORT_LEVELS.join(" / ")} 之一（off 不在这里：要关思考就改主力的 defaultThinkingLevel），拿到 ${JSON.stringify(effort)}`;
+  }
+  return { ...entry, reasoningEffort: effort };
 }
 
 /** `a/b,c/d` as the CLI takes it: one flag, one list, the first one is the primary. */

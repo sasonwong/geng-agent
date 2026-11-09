@@ -200,13 +200,25 @@ GENG_MODEL_UPSTREAM=https://opencode.ai/inference/go/v1
 `secrets/<实例>.model.json`（600，可选）——模型链，**第一条就是主力**：
 
 ```json
-["opencode-go/beam-free", "opencode/big-pickle", "opencode-go/deepseek-v4.1-flash"]
+[
+  "opencode-go/beam-free",
+  { "provider": "opencode", "model": "big-pickle", "reasoningEffort": "low" },
+  "opencode-go/deepseek-v4.1-flash"
+]
 ```
 
 它只在请求的模型名等于第一条时生效（别人的模型原样直通，不替它挑）；一条失败就换下一条，判据是
-`status >= 400`、连不上、或 60 秒没有响应头；body 里的 `model` 换成那一条的，其余字节不动；流已经
-开始之后不再换；全都不行时返回**第一条**的状态和 body。`daemon.log` 里的 `fb=N` 是这一轮被第 N 跳
-救回来的次数（会话里记的仍是 pi 以为的那个模型名）。
+`status >= 400`、连不上、或 60 秒没有响应头；body 里的 `model`（以及那一条写了的 `reasoning_effort`）
+换成那一条的，其余字节不动；流已经开始之后不再换；全都不行时返回**第一条**的状态和 body。
+`daemon.log` 里的 `fb=N` 是这一轮被第 N 跳救回来的次数（会话里记的仍是 pi 以为的那个模型名）。
+
+字符串和对象可以混用。对象多一个可选的 `reasoningEffort`：它按字面写进请求的 `reasoning_effort`，
+取值 `minimal` / `low` / `medium` / `high` / `xhigh` / `max`；不写就沿用这一轮 pi 为主力选的档。
+值不经过 fallback 模型的档位表——daemon 不认识 pi 的目录，所以这里写的是**线上值**，不是 pi 的档名。
+这里只挡拼写，挡不住上游：某家网关不认这一档会回 400，而 400 在这个 proxy 里是「换下一跳」的信号，
+所以写错一个档看起来像上游故障——`fb=N` 涨了先回来看这张表。
+`off` 不在这里：要关思考就改主力的 `defaultThinkingLevel`。给第一条写这项会覆盖 pi 发出来的档，
+而会话里记的仍是 settings 的档——要两边一致，第一条就别写。
 
 **每条都要跟主条目同一个 API 家族**：body 不翻译，openai ↔ anthropic 之间不做。所以表里一个名字
 只服务一族——要跨族，就另起一个表项名（比如 `opencode-go-anthropic` 指向

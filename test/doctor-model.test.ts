@@ -99,3 +99,21 @@ test("a provider the table does not know is a failure", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("an invalid reasoning effort is a failure with its own words", () => {
+  const { root } = fixture();
+  try {
+    writeFileSync(
+      join(root, "secrets", "alice.model.json"),
+      JSON.stringify([
+        "opencode-go/beam-free",
+        { provider: "opencode", model: "big-pickle", reasoningEffort: "off" },
+      ]),
+    );
+    const found = check(root);
+    assert.equal(found?.ok, false);
+    assert.match(String(found?.detail), /reasoningEffort 要/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
