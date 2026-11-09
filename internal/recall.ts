@@ -186,7 +186,10 @@ function peopleItems(p: Paths): Item[] {
       // the id is what `say` quotes with: a transcript without it can only answer the
       // newest line, and the model would have to invent the number it puts in `replyTo`
       const ref = typeof said.id === "string" && said.id !== "" ? ` #${said.id}` : "";
-      lines.push(`${typeof said.at === "string" ? said.at.slice(11, 16) : "??:??"} ${who}${ref} ${said.text}`);
+      // The date is not decoration: a transcript spans days, and a bare `13:07` reads as
+      // today. `recall` used to show only the time, so an old line looked like a new one.
+      const at = typeof said.at === "string" && said.at !== "" ? stamp(said.at) : "????-??-?? ??:??";
+      lines.push(`${at} ${who}${ref} ${said.text}`);
     }
     const last = lines[lines.length - 1] ?? "（没说过话）";
     return [
@@ -350,17 +353,23 @@ export function collectAll(p: Paths, sources: Source[]): Item[] {
     .sort((a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0));
 }
 
-/** The first lines that mention it, with the id they belong to. */
+/**
+ * The newest lines that mention it, with the id they belong to. Scanning from the end
+ * is the point: an old match at the top of a transcript is not what "did anyone say
+ * this" means, and taking the first three made a months-old question look current.
+ */
 function hits(item: Item, query: string): string[] {
   const needle = query.toLowerCase();
   const found: string[] = [];
-  for (const line of item.body.split("\n")) {
+  const lines = item.body.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i] as string;
     if (line.toLowerCase().includes(needle)) {
       found.push(line.trim().slice(0, LINE));
       if (found.length >= 3) break;
     }
   }
-  return found;
+  return found.reverse();
 }
 
 function stamp(at: string): string {
