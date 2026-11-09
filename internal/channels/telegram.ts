@@ -299,6 +299,7 @@ async function typing(ctx: TypingContext): Promise<void> {
 
 export const telegramChannel: Channel = {
   id: "telegram",
+  textLimit: 4_000,
   load(root: string): LoadResult {
     return { configs: readBots(root), problems: [] };
   },

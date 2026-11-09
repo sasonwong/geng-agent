@@ -18,6 +18,7 @@ import {
   type WeixinState,
 } from "../internal/channels/weixin/state.ts";
 import { splitText, weixinChannel } from "../internal/channels/weixin/channel.ts";
+import { expandOutboxItem } from "../internal/gateway.ts";
 import { systemFacts } from "../internal/packet.ts";
 import { loginWeixin } from "../internal/channels/weixin/login.ts";
 import type { Inbound, SendContext } from "../internal/channels/channel.ts";
@@ -392,6 +393,61 @@ test("a closed window, a full budget, or a missing context holds the whole item 
   outcome = await weixinChannel.send(sendContext(roots[3] as string, config(server.url), ["刚好一条"]));
   assert.equal(outcome.ack, true);
   assert.equal(server.seen.length, 1);
+});
+
+test("a failure after the first split bubble retries only the rest", async (t) => {
+  const root = tempRoot();
+  const first = "a".repeat(2_000);
+  const second = "b".repeat(2_000);
+  const third = "c".repeat(500);
+  const cfg = config("http://127.0.0.1:1");
+  const expanded = expandOutboxItem(
+    {
+      file: join(root, "outbox", "one.json"),
+      chat: chatIdFor(cfg.userId as string),
+      messages: [`${first}${second}${third}`],
+    },
+    2_000,
+  );
+  let failed = false;
+  const server = await fakeServer((req) => {
+    const msg = req.body.msg as { item_list?: { text_item?: { text?: string } }[] } | undefined;
+    const text = msg?.item_list?.[0]?.text_item?.text ?? "";
+    if (!failed && text.startsWith("b")) {
+      failed = true;
+      return { body: { ret: -1, errmsg: "boom" } };
+    }
+    return { body: {} };
+  });
+  t.after(async () => {
+    await server.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+  writeState(root, { alice: state() });
+  const live = { ...cfg, baseUrl: server.url };
+
+  const firstTry: string[] = [];
+  const outcome = await weixinChannel.send(
+    sendContext(root, live, expanded.messages, (part) => firstTry.push(part.text)),
+  );
+  assert.equal(outcome.sent, 1);
+  assert.deepEqual(firstTry, [first]);
+  assert.equal(readState(root).alice?.sentSinceInbound, 1);
+
+  // The gateway trims the elements `sent` covered; the retry starts at the failed bubble.
+  const secondTry: string[] = [];
+  const retried = await weixinChannel.send(
+    sendContext(root, live, expanded.messages.slice(outcome.sent), (part) => secondTry.push(part.text)),
+  );
+  assert.equal(retried.ack, true);
+  assert.deepEqual(secondTry, [second, third]);
+
+  const texts = server.seen.map((call) => {
+    const msg = call.body.msg as { item_list?: { text_item?: { text?: string } }[] } | undefined;
+    return msg?.item_list?.[0]?.text_item?.text ?? "";
+  });
+  // The first bubble went out once; the failed one went out once failed and once retried.
+  assert.deepEqual(texts, [first, second, second, third]);
 });
 
 test("ret=-2 holds, ret=-14 marks the session expired and stops", async (t) => {

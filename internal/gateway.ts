@@ -15,7 +15,7 @@ import {
   writeOps,
   type OutboxItem,
 } from "./mute.ts";
-import { readJson } from "./fs.ts";
+import { readJson, writeJson } from "./fs.ts";
 import { CHANNEL_BY_ID, CHANNELS } from "./channels/index.ts";
 import {
   failedAttempt,
@@ -26,6 +26,7 @@ import {
   type InboundHost,
 } from "./channels/core.ts";
 import type { Channel, Chats, Place, SendResult } from "./channels/channel.ts";
+import { splitText } from "./text.ts";
 
 export {
   alreadyStored,
@@ -66,6 +67,20 @@ export function knownPlaces(root: string, key: string): Place[] {
     canFile: c.canFile ?? true,
     canQuote: c.canQuote ?? true,
   }));
+}
+
+/**
+ * One queued element can be longer than one bubble. The gateway expands it before the
+ * channel sees it, so a mid-send failure leaves the earlier bubbles in the file as
+ * already-sent elements: the retry starts at the failed one instead of saying the
+ * opening bubbles again. The channel's own split stays as a fallback for direct calls.
+ */
+export function expandOutboxItem(item: OutboxItem, limit: number): OutboxItem {
+  const messages = item.messages.flatMap((text) => splitText(text, limit));
+  if (messages.length === item.messages.length && messages.every((text, i) => text === item.messages[i])) {
+    return item;
+  }
+  return { ...item, messages };
 }
 
 /**
@@ -194,6 +209,13 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     if (!p) {
       writeOps(ops, "gateway", `收到发给未知实例 ${key} 的消息，已忽略。`);
       return { ack: true, sent: 0, error: null };
+    }
+    const prepared = expandOutboxItem(item, channel.textLimit ?? 4_000);
+    if (prepared !== item) {
+      // The queue is also the retry record: write the bubbles back before the first one
+      // leaves, or a later failure asks the channel to say the opening bubbles again.
+      writeJson(item.file, prepared);
+      item = prepared;
     }
     const chat = item.chat ?? channel.defaultChat?.(cfg, mine) ?? mine?.home;
     if (chat === undefined) {

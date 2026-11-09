@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { failedAttempt, knownPlaces, noteChat, readChats, route, sendPlan, targetChat } from "../internal/gateway.ts";
+import { expandOutboxItem, failedAttempt, knownPlaces, noteChat, readChats, route, sendPlan, targetChat } from "../internal/gateway.ts";
 import { ackOutbox, isMuted, readMutes, readOutbox, trimOutbox } from "../internal/mute.ts";
 import { writeJson } from "../internal/fs.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -218,6 +218,17 @@ test("the upload plan refuses what it cannot send, and keeps the order", () => {
       ["file", "/files/F1-x.bin", "x.bin"],
     ],
   );
+});
+
+test("a long queued element becomes single bubbles before the channel sees it", () => {
+  const item = { file: "/tmp/item.json", messages: ["a".repeat(4_500), "短"], chat: 123 };
+  const out = expandOutboxItem(item, 2_000);
+  assert.notEqual(out, item);
+  assert.deepEqual(out.messages.map((m) => Array.from(m).length), [2_000, 2_000, 500, 1]);
+  assert.equal(out.file, item.file);
+  assert.equal(out.chat, 123);
+  // Expanding an already expanded item is a no-op: the sweep runs every two seconds.
+  assert.equal(expandOutboxItem(out, 2_000), out);
 });
 
 test("a retry resends the files that did not go out, not the ones that did", () => {
