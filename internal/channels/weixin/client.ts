@@ -94,6 +94,10 @@ const CTX = "context_token";
  * makes a redelivered message look new; the reviver keeps the literal exactly as the
  * server wrote it. Only id-shaped numbers are touched: `seq`, timestamps and flags stay
  * numbers, because the rest of the file wants them that way.
+ *
+ * This uses V8's JSON source access (the reviver's third argument), which is not part of
+ * the JSON standard. Node 22.21+ provides it; a runtime without it would silently round
+ * again. Dedupe would stay deterministic, but the id would no longer be lossless.
  */
 function parseBody(text: string): Record<string, unknown> {
   if (text.trim() === "") return {};
