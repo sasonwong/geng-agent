@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { createInterface } from "node:readline/promises";
 import { join, resolve } from "node:path";
 import { runDaemon } from "../../internal/daemon.ts";
 import { ExpectedError } from "../../internal/errors.ts";
@@ -8,7 +9,7 @@ import { initInstance } from "../../internal/init.ts";
 import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
 import { runGateway } from "../../internal/gateway.ts";
-import { getMe } from "../../internal/telegram.ts";
+import { CHANNELS } from "../../internal/channels/index.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
 import { describeConfig, loadMailConfig, readMailEnv } from "../../internal/mail.ts";
 import { addBot, describeBot, editAllow, readBots } from "../../internal/bots.ts";
@@ -34,10 +35,13 @@ const USAGE = `geng <command> [options]
   backup <instance> [--list]         立刻拍一张快照 / 列已有快照
   restore <instance> [<id>] --yes    恢复到 backup/<instance>.restore-<时间>/（默认最近一张；
                                      没有 --yes 不动手；不直接覆盖 data/，自己拷回去）
-  gateway [--check]                  跑消息搬运（需要 secrets/bots.json）；--check 只验 token
+  gateway [--check]                  跑消息搬运（需要至少一个渠道配置）；--check 只验凭据
   bots add <inst> [--token-stdin] [--listen all|mentions] [--allow 1,2] [--chat N]
                                      往 secrets/bots.json 里加一个 bot（token 从 stdin 读）
   bots allow <inst> add|rm <ids>     改白名单（逗号分隔）；只有 add 过的人才叫得醒它
+  channels list                      列出各渠道已配置的实例（不打印凭据）
+  channels login <channel> <inst> [--name 名字] [--base-url URL]
+                                     扫码登录一个没有粘贴式 token 的渠道（微信）
   secrets init <inst> [--rotate]     生成 mail token（搜索的 token 已经取消：socket 就是授权）
   secrets set <inst> <NAME>          从 stdin 读一个值写进该去的地方（600）：模型 key 落
                                      secrets/<inst>.model.env，其余落 secrets/<inst>.env
@@ -75,6 +79,8 @@ const SUB_FLAG_VALUED = new Set([
   "--model",
   "--chain",
   "--upstream",
+  "--name",
+  "--base-url",
 ]);
 const SUB_FLAG_BOOL = new Set(["--token-stdin", "--rotate"]);
 
@@ -416,6 +422,87 @@ async function main(): Promise<number> {
       return 2;
     }
 
+    case "channels": {
+      const sub = args.rest[0] ?? "";
+      if (sub === "list") {
+        let any = false;
+        for (const channel of CHANNELS) {
+          const loaded = channel.load(args.root);
+          for (const problem of loaded.problems) console.error(`FAIL ${channel.id}: ${problem}`);
+          for (const [key, cfg] of Object.entries(loaded.configs)) {
+            any = true;
+            console.log(`${channel.id}/${key.padEnd(10)} ${channel.describe?.(key, cfg, undefined) ?? "已配置"}`);
+          }
+        }
+        if (!any) console.log("没有配置任何渠道。");
+        return 0;
+      }
+      if (sub === "login") {
+        const channelId = args.rest[1] ?? "";
+        const instance = args.rest[2] ?? "";
+        const channel = CHANNELS.find((c) => c.id === channelId);
+        if (!channel || channel.login === undefined) {
+          console.error("用法：geng channels login <channel> <instance> [--name 名字] [--base-url URL]");
+          return 2;
+        }
+        if (instance === "") {
+          console.error("缺实例名：geng channels login weixin <instance>");
+          return 2;
+        }
+        let paths;
+        try {
+          paths = makePaths(args.root, instance);
+        } catch (err) {
+          console.error((err as Error).message);
+          return 2;
+        }
+        if (!existsSync(paths.data)) {
+          console.error(`data/${instance}/ 不存在：先跑 geng init ${instance}`);
+          return 2;
+        }
+        const flag = (name: string): string | null => {
+          const at = args.rest.indexOf(`--${name}`);
+          return at === -1 ? null : (args.rest[at + 1] ?? null);
+        };
+        const name = flag("name");
+        const baseUrl = flag("base-url");
+        if (baseUrl !== null && !/^https?:\/\//.test(baseUrl)) {
+          console.error(`--base-url 要是 http(s) 地址，拿到 ${baseUrl}`);
+          return 2;
+        }
+        const ac = new AbortController();
+        const rl = createInterface({ input: process.stdin, output: process.stdout });
+        const interrupt = (): void => {
+          ac.abort();
+          rl.close();
+        };
+        process.once("SIGINT", interrupt);
+        try {
+          await channel.login({
+            root: args.root,
+            instance,
+            ...(name === null ? {} : { name }),
+            ...(baseUrl === null ? {} : { baseUrl }),
+            log: (line) => console.log(line),
+            ask: async (question) => (await rl.question(question)).trim(),
+            signal: ac.signal,
+          });
+        } catch (err) {
+          if (ac.signal.aborted) {
+            console.error("已取消");
+            return 1;
+          }
+          throw err;
+        } finally {
+          process.off("SIGINT", interrupt);
+          rl.close();
+        }
+        return 0;
+      }
+      console.error("用法：geng channels list | geng channels login <channel> <instance> [--name 名字] [--base-url URL]");
+      return 2;
+    }
+
     case "secrets": {
       const sub = args.rest[0] ?? "";
       // same trap as `bots`: a bare `geng secrets init` used to write secrets/init.env
@@ -474,17 +561,26 @@ async function main(): Promise<number> {
 
     case "gateway": {
       if (args.check) {
-        const bots = readBots(args.root);
-        const names = Object.keys(bots);
+        const loaded = CHANNELS.map((channel) => ({ channel, ...channel.load(args.root) }));
         const mailCfg = loadMailConfig(args.root);
         const mailEnv = readMailEnv(args.root);
-        if (names.length === 0 && mailCfg === null) {
-          console.error(
-            `没有 bot 也没有信箱：先写 ${join(args.root, "secrets", "bots.json")} 或 secrets/mail.json`,
-          );
-          return 2;
-        }
         let bad = 0;
+        // Print a parse problem before deciding "there is no channel": a malformed
+        // weixin.json has exactly zero configs, and "no channel" would hide the reason.
+        for (const { channel, problems } of loaded) {
+          for (const problem of problems) {
+            console.error(`FAIL ${channel.id}: ${problem}`);
+            bad++;
+          }
+        }
+        if (!loaded.some((x) => Object.keys(x.configs).length > 0) && mailCfg === null) {
+          if (bad === 0) {
+            console.error(
+              `没有渠道也没有信箱：先写 ${join(args.root, "secrets", "bots.json")}、secrets/weixin.json 或 secrets/mail.json`,
+            );
+          }
+          return bad > 0 ? 1 : 2;
+        }
         if (mailCfg !== null) {
           // a mailbox with no token accepts nothing, and it fails silently from outside
           if (mailEnv === null) {
@@ -496,20 +592,15 @@ async function main(): Promise<number> {
             }
           }
         }
-        for (const name of names) {
-          const token = bots[name]?.token ?? "";
-          if (token === "") {
-            console.error(`FAIL ${name}: 没有 token`);
-            bad++;
-            continue;
-          }
-          try {
-            const me = await getMe(token);
-            const chat = bots[name]?.chat;
-            console.log(`ok   ${name.padEnd(10)} @${me.username}${chat ? `  chat=${chat}` : "  chat=未设（它给 bot 发第一条消息后自动记住）"}`);
-          } catch (err) {
-            console.error(`FAIL ${name}: ${(err as Error).message}`);
-            bad++;
+        for (const { channel, configs } of loaded) {
+          for (const [key, cfg] of Object.entries(configs)) {
+            try {
+              const detail = channel.check === undefined ? "已配置" : await channel.check(cfg);
+              console.log(`ok   ${channel.id}/${key.padEnd(10)} ${detail}`);
+            } catch (err) {
+              console.error(`FAIL ${channel.id}/${key}: ${(err as Error).message}`);
+              bad++;
+            }
           }
         }
         return bad === 0 ? 0 : 1;

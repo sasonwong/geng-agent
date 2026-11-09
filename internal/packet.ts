@@ -218,7 +218,7 @@ function whoLine(inbox: InboxMsg[]): string {
 
 /** The rare-changing half of the picture: where it may speak, and its own knobs. */
 export function systemFacts(
-  places: { id: number; label: string; home: boolean; kind?: "private" | "group" }[],
+  places: { id: number; label: string; home: boolean; kind?: "private" | "group"; channel?: string }[],
   policyLine: string,
   capMinutes: number,
 ): string {
@@ -232,6 +232,11 @@ export function systemFacts(
       .map((p) => `${p.label}（${p.id}${p.home ? "，默认" : ""}）`)
       .join("、");
     out.push(`能说话的地方：${list}。${places.length > 1 ? "say 要指明 to。" : ""}`);
+    if (places.some((p) => p.channel === "weixin")) {
+      // Not a policy the gateway can enforce from here: the platform's window is the
+      // frame. Stating it on the page is the only way the agent can choose to wait.
+      out.push("微信只能回：主人说话后 24 小时内、最多约 10 条；他不先说，就发不出去。");
+    }
   }
   out.push(`可以调的运行参数：${policyLine}。`);
   // The wall, not a knob: it is the operator's frame, so it is stated as a fact. A model

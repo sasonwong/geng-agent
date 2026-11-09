@@ -262,10 +262,11 @@ settings 里那个模型、每条 provider 在不在表里、没有链时只提�
 | `secrets/<实例>.model.json` | 你（或 `init --chain`） | daemon / `doctor` | 没有回退：模型报错就停下，其他照常 |
 | `secrets/<inst>.env` | 你（`init` 只放空模板） | 每一轮的 `docker run --env-file` | 只该放代价有上限的值；模型密钥写在这儿会进容器，`doctor` 会说 |
 | `secrets/search.env` | 你 | `geng search` | 端点起不来；容器里**根本没有** `web_search`（这个文件只要 `DEEPSEEK_API_KEY`、socket 路径、每日限额） |
-| `secrets/bots.json` | 你 | `geng gateway` | 没 bot = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
+| `secrets/bots.json` | 你 | `geng gateway` | 没 bot 也没微信 = gateway 不启动；有 bot 但 `allow` 漏人 = 那人说话它不醒，**不报错** |
+| `secrets/weixin.json` | `channels login weixin` | `geng gateway` | 没配 = 没有微信；token 空、没有 userId 或会话过期 = `gateway --check` / doctor 报出来，微信不会自己重登 |
 | `secrets/mail.json` + `mail.env` | 你 | 收信端点 | 信不进 `data/<inst>/mail/`；纸上那行也不会出现 |
 | `secrets/rustic.env` | `init` 生成 | `geng backup` | 备份跳过（不算失败）；**丢了它，已有快照永远打不开** |
-| `secrets/gh-app.pem` + `<inst>.env` 里的两个 id | 你 | daemon 换 installation token | `git push` 要求密码；**别的都不受影响**（见 5.3） |
+| `secrets/gh-app.pem` + `<inst>.env` 里的两个 id | 你 | daemon 换 installation token | `git push` 要求密码；**别的都不受影响**（见 5.4） |
 | `secrets/cnb.env` | 你 | daemon，`/cnb/token` 与 `git` 的 helper 都从这儿取 | 那台机器上的 cnb 读写 401；别的都不受影响（它没有 App，只有一个长期 token，所以比 GitHub 那条更容易被抄错） |
 
 抄错率最高的是这两类：
@@ -346,25 +347,29 @@ timedout=no ctx=0.68% cache=19328/25283 inbox=0 llm=4 net=1 backup=ok(...)`。`f
 
 ### 改配置不用重启
 
-四份配置，各有各的读法；`restart` 只在换代码、换 `.env` 时才是必须的：
+五份配置，各有各的读法；`restart` 只在换代码、换 `.env` 时才是必须的：
 
 | 文件 | 谁读 | 什么时候重读 |
 |---|---|---|
 | `secrets/bots.json` | gateway | `systemctl --user reload geng-gateway` |
+| `secrets/weixin.json` | gateway | 同上 |
 | `secrets/mail.json` | gateway | 同上 |
 | `data/<inst>/policy.json` | daemon + book 端点 | **每一轮开头**（daemon），**每个请求**（代理名单、最短间隔、能说话的名单）；都不用重启 |
 | `secrets/search.env` | search | **每一次请求**，什么也不用做；`bind` 除外，它只在 listen 时读 |
 
-`reload` 不是重启：长轮询不断，只有 **token 变了的 bot** 才会重新登录（一个 token 只许一个
-消费者，旧的不先停新的会被 409）；新加的 bot 起、删掉的停，只改 `allow` 的话一个 poller 都不动。
-`bots.json` / `mail.json` 变空或读不出来都当成手滑，继续用旧的，日志里写一行。启动时没有信箱、
-后来才写一个 `mail.json`，那要重启——监听器不是每轮都能起。
+`reload` 不是重启：长轮询不断，只有 **fingerprint 变了的条目**（token / baseUrl / 主人 id）
+才会停掉旧 poller 再起新的（一个 token 只许一个消费者，旧的不先停新的会被顶掉）；新加的起、
+删掉的停，只改 Telegram 的 `allow` 的话一个 poller 都不动。
+
+`bots.json` / `weixin.json` / `mail.json` 变空或读不出来都当成手滑，继续用旧的，日志里写一行。
+微信的会话过期（`-14`）不会自己重登：poller 停在原地并写一行，重新扫码后再 reload。
+启动时没有信箱、后来才写一个 `mail.json`，那要重启——监听器不是每轮都能起。
 
 验证：`node cmd/geng/index.ts bots allow alice rm <某个 id>` 之后
 
 ```bash
 systemctl --user reload geng-gateway
-journalctl --user -u geng-gateway -n 5    # 应有「重载 alice：… allow=4 人」
+journalctl --user -u geng-gateway -n 5    # 应有「重载 telegram/alice：… allow=4 人」
 ```
 
 出现 `Stopping`/`Started` 这一对就说明 HUP 变成了重启（handler 没装上）——只有「重载」行才是真
@@ -430,7 +435,7 @@ node cmd/geng/index.ts gateway --check    # 只验 token，不进轮询
 systemctl --user enable --now geng-gateway
 ```
 
-验证：`geng gateway --check` 每个 bot 打印 `ok @username`；启动行打印 `allow=N 人`（`0 人` 和
+验证：`geng gateway --check` 每个 bot 打印 `ok   telegram/alice … @username`；启动行打印 `allow=N 人`（`0 人` 和
 `不限` 要能一眼看出来）；然后给 bot 发一句话，看 `data/alice/inbox/` 出现文件、`people/` 出现一行。
 
 最后一项只能拿**另一个 bot** 验：人说的话在 privacy 还生效时也会到，自己的账号测不出来。让群里
@@ -451,10 +456,60 @@ ls data/<inst>/inbox/low/     # 空 = 第 2 步还有开关没开（privacy 或 
 （`/cmd@<它的 username>` 和带 user id 的成员点名也算）：裸的 `/work`、`/inbox` 只是正文的一部分，
 几个实例共用一个群时谁也不叫醒。
 
-### 5.2 搜索
+### 5.2 微信（ClawBot，只做回复通道）
+
+一个实例一个微信号；**Telegram 仍是 home，微信只回答**。协议没有"开一个对话"的接口：每条入站
+消息带一个 `context_token`，出站必须原样回传；主人不说话，它就只能等。一期只收文字：图片、
+文件、视频在纸上留一个带说明的占位；语音有微信转写时按文字读，没有转写就留「没有转写」。
+
+**第一次绑定**（在宿主上跑；token 不进容器）：
+
+```bash
+node cmd/geng/index.ts channels login weixin alice --name 主人
+```
+
+二维码约 2 分钟过期，过期会自动换一张；手机微信扫码并确认。手机要求配对码时，命令会在终端问
+一次。成功写 `secrets/weixin.json`（600，原子替换），里面是 `token` / `baseUrl` / `botId` /
+`userId`；`userId` 是唯一可以跟它说话的人。
+
+**一个微信只能绑一个 ClawBot**：重复扫码会把前一个顶掉；一个 `bot_token` 也只能有一个消费者，
+不要在两个 gateway 里用同一个 token。登录只带本实例自己的旧 token，不会带别的实例的。
+
+宿主需要代理才能到微信时，登录这条命令也要 `NODE_USE_ENV_PROXY=1` 并设好 `HTTPS_PROXY`；
+`secrets/gateway.env` 只进网关服务，不会自动进你的 shell。
+
+```bash
+node cmd/geng/index.ts gateway --check   # 会调一次 getconfig，不消耗消息
+systemctl --user reload geng-gateway     # 网关在跑：换上新 token
+journalctl --user -u geng-gateway -n 5   # 应有「重载：weixin 1 个（起 1 停 1）」和「weixin/alice 上线」
+```
+
+让主人给这个微信 bot 发一句话；`data/_gateway/chats.json` 会出现一个 `-8…` 开头的 chat（合成
+id，避开 Telegram 的 id 段），`geng status alice` 的「说话到」会显示「微信 私聊 主人」。
+之后 `say` 可以 `to` 这个 id；文件/引用会被 `/say` 在排队前拒绝，不会等到投递时才丢。
+
+**窗口和条数**：主人最后一次说话之后 24 小时内，大约能发 10 条气泡；窗口关了或不够，整条消息
+留在 outbox 里等主人下一条，不半发、也不算失败重试。这个数字是平台的黑盒，不是协议保证。
+`ret=0` 也只说明服务端收下了；平台有账号级的下行静默丢，所以 ack 不是"主人看到了"的证据。
+
+**会话过期**：`ret=-14` 时 poller 不退出、也不自动重登，只写一行 ops 并停在原地；重新
+`channels login weixin <inst>` 后 reload。`geng doctor <inst>` 的「微信会话」会报过期，
+「微信凭据」「微信重复绑定」查 token 空、userId 空、两个实例同 token / 同主人。
+
+**排查**：
+
+```bash
+node cmd/geng/index.ts channels list       # 列出已配置的渠道，不打印 token
+node cmd/geng/index.ts gateway --check     # 期望：ok   weixin/alice … bot@im.bot 主人=主人
+ls -l secrets/weixin.json                  # -rw-------
+```
+
+如果 `gateway --check` 报 `FAIL weixin: … 不是合法 JSON`，是文件坏了，不是 token 坏了。
+
+### 5.3 搜索
 
 搜索的 key 不在容器里。宿主上跑一个只认搜索的端点，**它不需要 token**：socket 就是授权
-（`secrets init` 生成的是邮件那一个，见 §5.4）。端点需要的东西手写：
+（`secrets init` 生成的是邮件那一个，见 §5.5）。端点需要的东西手写：
 
 ```bash
 # secrets/search.env   chmod 600
@@ -493,7 +548,7 @@ socket 不存在时，daemon 干脆不挂它（docker 会把缺失的宿主路�
 
 限额在宿主这边执行，容器改不了；用完时工具返回的是人话「今天的搜索用完了」，不是错误码。
 
-### 5.3 GitHub App（让它能推代码）
+### 5.4 GitHub App（让它能推代码）
 
 审计发现原来的做法是把一个**永不过期**的 PAT 放进 `secrets/<inst>.env`，而那个文件是
 `--env-file` 注入的——容器里 `env` 就能读到它，已经有一轮真的读过了。改成 App：
@@ -521,7 +576,7 @@ git -C /work/geng remote -v                        # 在容器里：git pull 不
 三态是分开的：没配 = `warn`（别的都正常）、配了但私钥签不动 = `FAIL`、签得动 = `ok`。
 签不动是这里最常见的坏法（PEM 被编辑器重排过），而它之前的症状是 git 安静地说要密码。
 
-### 5.4 邮件
+### 5.5 邮件
 
 给它一个真地址：Cloudflare Email Routing 收信 → 一个 Email Worker 解 MIME → POST 回宿主。
 
@@ -555,7 +610,7 @@ tunnel 上加一个指向 `http://127.0.0.1:8788` 的 hostname（端点只绑 IP
 验证：给那个地址发一封，`ls data/alice/mail/` 多一个文件，下一张纸上出现那一行。
 白名单外的人**在落盘之前**就被丢掉，日志一行 `mail ← guest …（没送）`。
 
-### 5.5 备份
+### 5.6 备份
 
 一次清醒一张快照，用 [rustic](https://rustic.cli.rs/)。`geng init` 已经生成了
 `secrets/rustic.env`（`RUSTIC_PASSWORD`）——**丢了它，快照就永远打不开了**。
@@ -695,12 +750,14 @@ data/<instance>/
   run/          socket 目录，整目录挂成容器里的 /run/geng
   daemon.log    一行一轮；轮转了就有 daemon.log.1
   net.log       一行一次出网；last-stderr.log 是某轮 stderr 的尾巴，有才写
-data/_gateway/  gateway 自己的 chats.json / offsets.json（全机器一份，不是某个实例的）
+data/_gateway/  gateway 自己的 chats.json / offsets.json / weixin.json（全机器一份，不是某个实例的；
+                weixin.json 里的 context_token 和窗口是会话状态，不进容器）
 data/_ops/      ops bot 的 outbox 和搜索额度；它的对话记录在 data/ops/people/
 secrets/<instance>.env   GitHub App 的两个 id；--env-file 注入，永不挂载（模型 key 不在这个文件里）
 secrets/<instance>.model.env  模型 key 与上游地址，只有宿主读；容器问，读不到
 secrets/bots.json        每个实例一个 bot（token 就是路由键）
 secrets/search.env       搜索的上游 key、绑定地址、每日限额（socket 就是授权，没有第二个 token）
+secrets/weixin.json      微信 ClawBot 的 token / bot / owner（gateway 读，永不进容器）
 secrets/mail.json/.env   信箱的地址映射和收信 token
 secrets/rustic.env       备份口令——丢了快照就没了
 deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt  build.sh  update.sh
@@ -711,7 +768,7 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt  bu
 
 挂载是逐条论证过的，不是攒出来的：**六条无条件，两条看 socket 在不在**。正常一轮两个 socket
 都由宿主端先起好，所以纸面上是八条；搜索的 socket 不在就不挂，容器里也就没有 `web_search`
-（见 §5.2）。
+（见 §5.3）。
 
 | 宿主 | 容器 | 为什么 |
 |---|---|---|

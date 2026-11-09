@@ -15,6 +15,7 @@ import { makeJwt, readGhApp } from "./ghapp.ts";
 import { MODEL_KEY_VARS, modelKeyFile, modelUpstream, readChain, readModelKey, readProviders } from "./model.ts";
 import { buildCommand, listSessionFiles } from "./command.ts";
 import { socketPath } from "./book.ts";
+import { CHANNELS } from "./channels/index.ts";
 import { makePaths } from "./paths.ts";
 import { loadPolicy, policyDrift, templateValue, type Policy } from "./policy.ts";
 import { repairTail } from "./session.ts";
@@ -460,6 +461,19 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       warnOnly: true,
       detail: others.slice(0, 3).join("；"),
     });
+  }
+  // A channel owns its own checks, so adding one does not mean editing this file's
+  // Telegram-specific block. `undefined` is "this channel has nothing extra to say".
+  for (const channel of CHANNELS) {
+    if (channel.doctor === undefined) continue;
+    for (const check of channel.doctor(root, instance)) {
+      checks.push({
+        name: check.name,
+        ok: check.ok,
+        ...(check.warnOnly === undefined ? {} : { warnOnly: check.warnOnly }),
+        detail: check.detail,
+      });
+    }
   }
 
   const sessions = listSessionFiles(p.sessionDir);

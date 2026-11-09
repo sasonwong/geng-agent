@@ -8,6 +8,7 @@ import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
 import { handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
 import { keyCanMute, writeOps } from "./mute.ts";
+import type { Place } from "./channels/channel.ts";
 import { parseReplyTo } from "./quote.ts";
 import { openText, recallText } from "./recall.ts";
 import { NEGOTIABLE } from "./proposal.ts";
@@ -62,7 +63,7 @@ export interface BookOptions {
   /** `policy.cycle.minWakeMinutes`, so an alarm can be told what it really became. */
   minWakeMs?: Live<number>;
   /** Which chats it may speak into or listen to; the daemon already knows, the container does not. */
-  places?: Live<number[]>;
+  places?: Live<(number | Place)[]>;
   /** Hosts the outbound proxy may reach. Absent means no proxy, which is what tests want. */
   proxy?: Live<ProxyRule>;
   /**
@@ -81,7 +82,7 @@ export interface BookOptions {
 
 export interface HandlerOptions {
   minWakeMs?: Live<number>;
-  places?: Live<number[]>;
+  places?: Live<(number | Place)[]>;
 }
 
 interface Reply {
@@ -115,6 +116,19 @@ function array(body: unknown, key: string): unknown[] | null {
   return Array.isArray(value) ? value : null;
 }
 
+/**
+ * A caller that only knows ids (an older test, a small tool) still means Telegram: that is
+ * the only channel whose places were numbers. Everything the daemon passes is already a
+ * Place, and carries the capabilities the book needs to refuse a file before queueing it.
+ */
+function placesOf(raw: (number | Place)[]): Place[] {
+  return raw.map((p) =>
+    typeof p === "number"
+      ? { id: p, label: "", home: false, kind: "private", channel: "telegram", canFile: true, canQuote: true }
+      : p,
+  );
+}
+
 function flatKeys(obj: unknown, prefix = ""): string[] {
   if (obj === null || typeof obj !== "object" || Array.isArray(obj)) return [];
   return Object.entries(obj as Record<string, unknown>).flatMap(([k, v]) =>
@@ -142,7 +156,7 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
   return async (req: IncomingMessage, body: string): Promise<Reply> => {
     // per request, not per factory: see Live above
     const minWakeMs = at(o.minWakeMs ?? 0);
-    const places = at(o.places ?? []);
+    const places = placesOf(at(o.places ?? []));
     const route = req.url ?? "";
     let params: unknown = {};
     if (body.trim() !== "") {
@@ -289,11 +303,11 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       }
       // no places configured is not "no chat may be heard": an instance without a bot
       // yet would otherwise refuse a listening window it has no reason to refuse.
-      const strangers = places.length === 0 ? [] : chats.filter((c) => c !== "*" && !places.includes(c));
+      const strangers = places.length === 0 ? [] : chats.filter((c) => c !== "*" && !places.some((p) => p.id === c));
       if (strangers.length > 0) {
         return {
           status: 400,
-          body: { error: `这些 chat 不在你能说话的地方里：${strangers.join("、")}。能听的是 ${places.join("、") || "（没有）"} 或 *` },
+          body: { error: `这些 chat 不在你能说话的地方里：${strangers.join("、")}。能听的是 ${places.map((p) => p.id).join("、") || "（没有）"} 或 *` },
         };
       }
       if (chats.length === 0) {
@@ -388,19 +402,41 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         }
       }
       // A quote names the conversation it belongs to, so it can stand in for `to`; with
-      // neither, there is no default when there is more than one place — the fallback is
-      // a guess about who it is talking to, and it has been wrong before.
+      // neither, the only place can stand in for both. Two places is a guess about who it
+      // is talking to, and that guess has been wrong before.
       chat ??= replyTo?.chat;
-      if (chat === undefined && places.length > 1) {
-        return {
-          status: 400,
-          body: { error: `能说话的地方有 ${places.length} 处，要写 to：${places.join("、")}` },
-        };
+      let place: Place | undefined;
+      if (places.length > 0) {
+        if (chat !== undefined) {
+          place = places.find((p) => p.id === chat);
+          if (place === undefined) {
+            return { status: 400, body: { error: `那个地方不在你能说话的地方里：${chat}。能发的是 ${places.map((p) => p.id).join("、")}` } };
+          }
+        } else if (places.length === 1) {
+          const only = places[0];
+          if (only !== undefined) {
+            place = only;
+            chat = only.id;
+          }
+        } else {
+          return {
+            status: 400,
+            body: { error: `能说话的地方有 ${places.length} 处，要写 to：${places.map((p) => p.id).join("、")}` },
+          };
+        }
       }
-      if (chat !== undefined && places.length > 0 && !places.includes(chat)) {
-        return { status: 400, body: { error: `那个地方不在你能说话的地方里：${chat}。能发的是 ${places.join("、")}` } };
+      if (replyTo !== undefined && chat !== undefined && replyTo.chat !== chat) {
+        return { status: 400, body: { error: "引用的消息不在这个会话里；去掉 to 或换一条 replyTo。" } };
       }
       const files = list(params, "files") ?? [];
+      // The channel's capability is checked before the file is resolved: a path it cannot
+      // carry must say so, not turn into a 404 about a file it never asked for.
+      if (place !== undefined && files.length > 0 && !place.canFile) {
+        return { status: 400, body: { error: `这个通道不能发文件：${place.label}。去掉 files 再发。` } };
+      }
+      if (place !== undefined && replyTo !== undefined && !place.canQuote) {
+        return { status: 400, body: { error: `这个通道不能引用回复：${place.label}。去掉 replyTo 再发。` } };
+      }
       // `F12` is an original the host already has; `/work/...` is something it made.
       // Two shapes, one field: the outbox keeps them apart so the gateway never has to
       // guess whether a string is a container path or a path on the host.
@@ -429,11 +465,12 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
       writeJson(join(paths.outbox, `${id}.json`), {
         messages,
         ...(chat === undefined ? {} : { chat }),
+        ...(place === undefined ? {} : { channel: place.channel }),
         ...(made.length === 0 ? {} : { files: made }),
         ...(originals.length === 0 ? {} : { attachments: originals }),
         ...(replyTo === undefined ? {} : { replyTo }),
       });
-      return { status: 200, body: { id, count: messages.length, at: nowIso } };
+      return { status: 200, body: { id, count: messages.length, at: nowIso, ...(place === undefined ? {} : { channel: place.channel, place: place.label }) } };
     }
 
     return { status: 404, body: { error: `没有这个动作：${route}` } };

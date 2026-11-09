@@ -85,3 +85,25 @@ test("a well-formed whitelist and home still land in bots.json", async () => {
   assert.deepEqual(bots.alice?.allow, [123, 456]);
   assert.equal(bots.alice?.chat, -1001234);
 });
+
+test("channels list names the instance without printing its token", async () => {
+  const r = root();
+  const { saveWeixin } = await import("../internal/channels/weixin/state.ts");
+  saveWeixin(r, "alice", { token: "fake-token", userId: "owner@im.wechat", botId: "bot@im.bot" });
+  const out = await run(["channels", "list", "--root", r]);
+  assert.equal(out.code, 0, out.out);
+  assert.match(out.out, /weixin\/alice/);
+  assert.match(out.out, /bot@im\.bot/);
+  assert.doesNotMatch(out.out, /ilinkbot_secret_value/);
+});
+
+test("a malformed weixin.json is the reason check fails, not 'no channel'", async () => {
+  const r = root();
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  mkdirSync(join(r, "secrets"), { recursive: true });
+  writeFileSync(join(r, "secrets", "weixin.json"), "{");
+  const out = await run(["gateway", "--check", "--root", r]);
+  assert.equal(out.code, 1, out.out);
+  assert.match(out.out, /FAIL weixin: .*不是合法 JSON/);
+  assert.doesNotMatch(out.out, /没有渠道也没有信箱/);
+});
