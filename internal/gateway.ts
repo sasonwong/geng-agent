@@ -496,13 +496,14 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
             // made a two-second blip lose words for good.
             const { n, giveUp } = failedAttempt(sendFailures, item.file);
             if (!giveUp) continue;
-            // A mid-element failure returns sent = 0 (channel.ts:456-458), so the retry says
-            // the whole element again: the bubbles before the failure arrive more than once.
-            // The item is never "not delivered", only unfinished.
+            // A queued element was already split into single bubbles (expandOutboxItem above),
+            // so each retry trims what went out and resumes at the failed bubble: the file left
+            // in outbox/sent/ is the rest, not the whole message. Never "not delivered", only
+            // unfinished.
             writeOps(
               ops,
               "gateway",
-              `发给 ${key} 失败 ${n} 次，放弃了：${outcome.error.message}。那条消息没送完：重试是整条重发，前几个气泡可能已经到过几遍，整条还在 outbox/sent/ 里。`,
+              `发给 ${key} 失败 ${n} 次，放弃了：${outcome.error.message}。那条消息没送完：已经发出去的气泡不会再发一遍，剩下的还在 outbox/sent/ 里。`,
             );
             ackOutbox(dir, item.file);
             sendFailures.delete(item.file);
