@@ -96,8 +96,8 @@
 
 它自己一个文件，因为一次 `git clone` 就是十几行；轮次行里仍然只有 `net=N` 这个数。
 
-明文 `http://` 也走代理（客户端在请求行里写完整 URL），用的是同两把钥匙。
-**配了链式代理时不代理明文 HTTP**——会直接回 502 并说明原因，而不是假装成功。
+只代理 https：客户端用 `CONNECT`，明文 `http://` 的绝对地址请求会直接回 405，并说明要用
+https（`CONNECT`）——不转发，也不假装成功。
 
 ```bash
 node cmd/geng/index.ts doctor --instance alice --probe   # 「只有代理能出去」：直连必须失败、代理必须通

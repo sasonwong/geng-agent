@@ -6,7 +6,7 @@ import { ATTENTION_MAX_MS } from "./attention.ts";
 import { allocate, fileById } from "./ids.ts";
 import { installationToken, readGhApp } from "./ghapp.ts";
 import { proxyModel } from "./modelproxy.ts";
-import { forwardPlain, handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
+import { handleConnect, type Chain, type ProxyRule } from "./proxy.ts";
 import { keyCanMute, writeOps } from "./mute.ts";
 import { parseReplyTo } from "./quote.ts";
 import { openText, recallText } from "./recall.ts";
@@ -537,32 +537,14 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       req.on("error", guard);
       return;
     }
-    // A proxy client names the whole URL in the request line. Without this the request
-    // would fall through to the JSON routes and come back 405, which reads as "the proxy is
-    // broken" in the middle of a container that has no other way out.
+    // A proxy client names the whole URL in the request line. Only https leaves this daemon,
+    // and it arrives as CONNECT; an absolute `http://` request is refused with a reason here
+    // instead of falling through to the JSON routes, whose 405 reads as "the proxy is
+    // broken" in a container that has no other way out.
     if (/^http:\/\//i.test(url)) {
-      const chunks: Buffer[] = [];
-      let size = 0;
-      let refused = false;
-      req.on("data", (c: Buffer) => {
-        if (refused) return;
-        size += c.length;
-        if (size > MAX_MODEL_BODY) {
-          refused = true;
-          chunks.length = 0;
-          reply(413, { error: "请求体太大" });
-          req.resume();
-          return;
-        }
-        chunks.push(c);
-      });
-      req.on("end", () => {
-        if (refused) return;
-        forwardPlain(req, res, Buffer.concat(chunks), rule(), chain(), (ok, why) =>
-          o.onNetwork?.({ target: url, ok, why }),
-        ).catch(guard);
-      });
-      req.on("error", guard);
+      o.onNetwork?.({ target: url, ok: false, why: "明文 HTTP 不走代理：请用 https" });
+      reply(405, { error: "明文 HTTP 不走代理：请用 https（CONNECT）" });
+      req.resume();
       return;
     }
     // Plain text, not JSON, because the reader is `git`, not an agent: a credential helper
