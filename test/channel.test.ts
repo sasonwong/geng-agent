@@ -9,6 +9,7 @@ import { fileById } from "../internal/ids.ts";
 import { readSaid } from "../internal/people.ts";
 import { handleInbound, readChats, type InboundHost } from "../internal/channels/core.ts";
 import type { Chats, Inbound, RemoteAttachment } from "../internal/channels/channel.ts";
+import { outboxChannel } from "../internal/gateway.ts";
 
 function fixture(): {
   root: string;
@@ -56,6 +57,19 @@ function message(over: Partial<Inbound> = {}): Inbound {
 function inboxFiles(dir: string): string[] {
   return readdirSync(dir).filter((f) => f.endsWith(".json"));
 }
+
+test("an old outbox item with no channel follows the chat it names", () => {
+  const mine: Chats = {
+    known: {
+      "-8123456789012345": { kind: "private", channel: "weixin" },
+      "12345": { kind: "private" },
+    },
+  };
+  assert.equal(outboxChannel({ chat: -8123456789012345 }, mine), "weixin");
+  assert.equal(outboxChannel({ chat: -8123456789012345, channel: "telegram" }, mine), "telegram");
+  assert.equal(outboxChannel({ chat: 12345 }, mine), "telegram");
+  assert.equal(outboxChannel({}, mine), "telegram");
+});
 
 test("a normalized message lands in the inbox and the transcript, whichever channel carried it", async () => {
   const f = fixture();

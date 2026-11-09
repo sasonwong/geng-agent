@@ -25,7 +25,7 @@ import {
   sendPlan,
   type InboundHost,
 } from "./channels/core.ts";
-import type { Channel, Place, SendResult } from "./channels/channel.ts";
+import type { Channel, Chats, Place, SendResult } from "./channels/channel.ts";
 
 export {
   alreadyStored,
@@ -100,6 +100,18 @@ export function assertProxySupport(
   );
 }
 
+/**
+ * An outbox item written by a daemon from before `channel` existed carries only a chat.
+ * If that chat is already known to belong to a channel, that is where the words go.
+ * Defaulting it to Telegram sent the first WeChat reply to a synthetic id Telegram has
+ * never heard of. Unknown chats keep the old default.
+ */
+export function outboxChannel(item: Pick<OutboxItem, "channel" | "chat">, mine: Chats | undefined): string {
+  if (item.channel !== undefined) return item.channel;
+  if (item.chat === undefined) return "telegram";
+  return mine?.known?.[String(item.chat)]?.channel ?? "telegram";
+}
+
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   assertProxySupport();
@@ -169,7 +181,8 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
   };
 
   const sendItem = async (key: string, item: OutboxItem): Promise<SendResult> => {
-    const channelId = item.channel ?? "telegram";
+    const mine = chats[key];
+    const channelId = outboxChannel(item, mine);
     const channel = CHANNEL_BY_ID[channelId];
     if (!channel) {
       writeOps(ops, "gateway", `${key} 要发到未知通道 ${channelId}，没发。`);
@@ -182,7 +195,6 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       writeOps(ops, "gateway", `收到发给未知实例 ${key} 的消息，已忽略。`);
       return { ack: true, sent: 0, error: null };
     }
-    const mine = chats[key];
     const chat = item.chat ?? channel.defaultChat?.(cfg, mine) ?? mine?.home;
     if (chat === undefined) {
       // Not a failure to retry: the sweep hands this back every two seconds and nothing

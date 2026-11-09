@@ -48,7 +48,7 @@ export function keyCanMute(key: string): boolean {
 }
 
 export interface OutboxItem {
-  /** Which channel sends it. Absent is telegram: the only one that wrote before this field. */
+  /** Which channel sends it. Absent: the gateway infers it from a known chat, else telegram. */
   channel?: string;
   /** Which chat it meant to speak into; absent means the channel's default. */
   chat?: number;
