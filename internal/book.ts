@@ -39,6 +39,9 @@ export const BOOK_SOCKET_IN_CONTAINER = "/run/geng/book.sock";
 const MAX_BODY = 32 * 1024;
 // A model request is a conversation plus tool schemas; a few megabytes is generous.
 const MAX_MODEL_BODY = 32 * 1024 * 1024;
+// One string for the net.log line and the answer: two copies of it disagree the day one is
+// reworded, and the reader that gets the terse one is the one debugging.
+const PLAIN_HTTP_REFUSED = "明文 HTTP 不走代理：请用 https（CONNECT）";
 
 /**
  * A value for a test, a function for the daemon.
@@ -540,10 +543,12 @@ export function startBookServer(o: BookOptions): Promise<Server> {
     // A proxy client names the whole URL in the request line. Only https leaves this daemon,
     // and it arrives as CONNECT; an absolute `http://` request is refused with a reason here
     // instead of falling through to the JSON routes, whose 405 reads as "the proxy is
-    // broken" in a container that has no other way out.
+    // broken" in a container that has no other way out. 501, not 405: the two answers have
+    // to differ by status code and not only by body, or a caller that does not read bodies
+    // reads this refusal as the same misroute. (405 would also owe an `Allow` header.)
     if (/^http:\/\//i.test(url)) {
-      o.onNetwork?.({ target: url, ok: false, why: "明文 HTTP 不走代理：请用 https" });
-      reply(405, { error: "明文 HTTP 不走代理：请用 https（CONNECT）" });
+      o.onNetwork?.({ target: url, ok: false, why: PLAIN_HTTP_REFUSED });
+      reply(501, { error: PLAIN_HTTP_REFUSED });
       req.resume();
       return;
     }

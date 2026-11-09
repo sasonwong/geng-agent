@@ -96,8 +96,9 @@
 
 它自己一个文件，因为一次 `git clone` 就是十几行；轮次行里仍然只有 `net=N` 这个数。
 
-只代理 https：客户端用 `CONNECT`，明文 `http://` 的绝对地址请求会直接回 405，并说明要用
-https（`CONNECT`）——不转发，也不假装成功。
+只代理 https：客户端用 `CONNECT`，明文 `http://` 的绝对地址请求会直接回 501，并说明要用
+https（`CONNECT`）——不转发，也不假装成功。501 而不是 405：这个 501 说的是「这条路我不实现」，
+而 JSON 路由对非 POST 也回 405，两个码一样的话，正文没被读的那次会当成「代理坏了」。
 
 ```bash
 node cmd/geng/index.ts doctor --instance alice --probe   # 「只有代理能出去」：直连必须失败、代理必须通
