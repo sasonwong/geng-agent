@@ -222,9 +222,9 @@ test("without a level in the settings the line says it cannot tell, not that the
     assert.equal(found?.warnOnly, true);
     assert.match(String(found?.detail), /没有 defaultThinkingLevel/);
     assert.equal(
-      /会对不上/.test(String(found?.detail)),
+      /不跟着变/.test(String(found?.detail)),
       false,
-      "pi 的默认是 medium，这一支什么都没比过，不能说会对不上",
+      "这一支什么都没比过（pi 的默认是 medium），不能断言两边一定不同",
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

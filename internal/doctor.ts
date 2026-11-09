@@ -289,9 +289,9 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   });
 
   // The session records the level settings names; an effort on the chain's first entry only
-  // changes what is sent. When the two differ, the transcript says one level and the request
-  // carried another — the same shape as `chainDrift` above, and likewise not a failure: the
-  // round still runs, so this is a warning rather than something that blocks.
+  // changes what is sent. The two disagree unless they happen to be the same level, and that
+  // is the same shape as `chainDrift` above — likewise not a failure: the round still runs,
+  // so this is a warning rather than something that blocks.
   const headEffort = head?.reasoningEffort;
   const recordedEffort = settings.defaultThinkingLevel;
   if (headEffort !== undefined && headEffort !== recordedEffort) {
@@ -305,7 +305,7 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
       detail:
         recordedEffort === undefined
           ? `链的第一条写了 reasoningEffort=${headEffort}，settings 里没有 defaultThinkingLevel（pi 启动时用 medium）——两边是不是同一个档，这里判断不了`
-          : `链的第一条写了 reasoningEffort=${headEffort}，settings 的 defaultThinkingLevel 是 ${recordedEffort}——会话记的档和真正发出去的档会对不上；要两边一致，第一条就别写`,
+          : `链的第一条写了 reasoningEffort=${headEffort}，settings 的 defaultThinkingLevel 是 ${recordedEffort}——这一跳只改请求的档，会话记的档不跟着变；要两边一致，第一条就别写`,
     });
   }
 
