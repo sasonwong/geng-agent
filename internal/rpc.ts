@@ -119,8 +119,6 @@ export class RepeatWatcher {
   }
 }
 
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
 let activeKill: (() => void) | null = null;
 
 /**
@@ -247,6 +245,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   });
 
   let killed = false;
+  let closed = false;
   const kill = async () => {
     if (killed) return;
     killed = true;
@@ -260,10 +259,26 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     void kill();
   };
 
+  /**
+   * A cap, not a floor: when the child is already gone the container went with it, and
+   * sitting out the rest of the grace only delayed `docker kill` and the next round's
+   * `--name`. The timer is cleared when close wins, so no handle outlives the round —
+   * an armed one pinned every process that tripped the wall for the full 8s.
+   */
+  const graceUntilClose = (ms: number): Promise<void> =>
+    new Promise<void>((done) => {
+      if (closed) return done();
+      const giveUp = setTimeout(done, ms);
+      child.once("close", () => {
+        clearTimeout(giveUp);
+        done();
+      });
+    });
+
   const timer = setTimeout(async () => {
     timedOut = true;
     fire({ type: "abort" });
-    await sleep(8_000);
+    await graceUntilClose(8_000);
     await kill();
     resolveSettled();
   }, o.timeoutMs);
@@ -282,6 +297,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
     resolveSettled();
   });
   child.on("close", () => {
+    closed = true;
     // A child killed on purpose did start: the round was stuck in an action when the
     // wall came, not missing its first line. Reading that close as "it never started"
     // made every hard timeout report `start-failed` — and `meta/cut.json`, written only
@@ -345,7 +361,7 @@ export async function runWaking(o: RpcOptions): Promise<RpcResult> {
   }
   if (!timedOut) {
     // give pi a moment to exit on its own, then insist
-    await Promise.race([new Promise<void>((r) => child.on("close", () => r())), sleep(3_000)]);
+    await graceUntilClose(3_000);
     await kill();
   }
 

@@ -39,9 +39,15 @@ test("a live pid that is not ours really does hold the lock", async () => {
     child.kill();
     // wait for the child so no orphan is left behind on Windows
     await new Promise<void>((resolve) => {
-      if (child.exitCode !== null) return resolve();
-      child.once("exit", () => resolve());
-      setTimeout(resolve, 3_000);
+      // the fallback is cleared, or an armed 3s timer outlives the child and holds the
+      // runner open long after the assertions are done
+      const giveUp = setTimeout(resolve, 3_000);
+      const done = (): void => {
+        clearTimeout(giveUp);
+        resolve();
+      };
+      if (child.exitCode !== null) return done();
+      child.once("exit", done);
     });
     rmSync(dir, { recursive: true, force: true });
   }

@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -24,6 +25,19 @@ function opsLines(root: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** Waits for the daemon to go, and disarms the fallback: an armed 3s timer outlives it. */
+function exited(child: ChildProcess): Promise<void> {
+  return new Promise<void>((done) => {
+    const giveUp = setTimeout(done, 3_000);
+    const finish = (): void => {
+      clearTimeout(giveUp);
+      done();
+    };
+    if (child.exitCode !== null) return finish();
+    child.once("exit", finish);
+  });
 }
 
 // Polls instead of sleeping a fixed time: the retry schedule belongs to the daemon, and a
@@ -66,11 +80,7 @@ test("a broken policy keeps the daemon alive, says each complaint once, and keep
     assert.ok(lines.every((line) => line.includes("等你修")), "每一行都要说清楚它在等人，而不是已经放弃");
   } finally {
     child.kill();
-    await new Promise<void>((done) => {
-      if (child.exitCode !== null) return done();
-      child.once("exit", () => done());
-      setTimeout(done, 3_000);
-    });
+    await exited(child);
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -110,11 +120,7 @@ test("a policy from a newer version is named as one, and the daemon still waits 
     assert.equal(new Set(lines).size, lines.length, `同一句话只该说一次，实际 ${lines.length} 行`);
   } finally {
     child.kill();
-    await new Promise<void>((done) => {
-      if (child.exitCode !== null) return done();
-      child.once("exit", () => done());
-      setTimeout(done, 3_000);
-    });
+    await exited(child);
     rmSync(root, { recursive: true, force: true });
   }
 });
