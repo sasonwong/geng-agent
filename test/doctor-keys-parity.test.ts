@@ -32,8 +32,14 @@ const COVERED: Record<string, { samples: string[]; label: string }> = {
   "AWS AK": { samples: ["AKIA" + "Q".repeat(16)], label: "AWS access key" },
   "sk- 密钥": { samples: ["sk-" + "a".repeat(24)], label: "sk- 形状的 key" },
   "GitHub 令牌": {
-    // 门的一条规则管两种形状，doctor 那边拆成两条：两种都要证。
-    samples: ["ghp_" + "b".repeat(36), "github_pat_" + "c".repeat(24)],
+    // 门的一条规则管三种形状，doctor 那边拆成两条：三种都要证。
+    samples: [
+      "ghp_" + "b".repeat(36),
+      "github_pat_" + "c".repeat(24),
+      // 无状态格式 `ghs_<app id>_<jwt>`，约 520 字符。app id 后面紧跟一个下划线，
+      // 而 `gh[pousr]_[A-Za-z0-9]{36,}` 要求的是一串连续字母数字，正好断在那里。
+      ["ghs", "12345", ["eyJhbGciOiJSUzI1NiJ9", "Z".repeat(200), "S".repeat(280)].join(".")].join("_"),
+    ],
     label: "GitHub token",
   },
   "Slack 令牌": { samples: ["xoxb-" + "1".repeat(12)], label: "Slack token" },
@@ -67,7 +73,8 @@ function labelsIn(logText: string): string[] {
   const root = mkdtempSync(join(tmpdir(), "geng-parity-"));
   try {
     writeFileSync(join(root, "daemon.log"), logText + "\n");
-    return scanLogBodies(root).hits.map((h) => h.split(": ")[1] ?? "");
+    // 同一种形状出现两次时 doctor 写「GitHub token ×2」：这里只问是哪些标签，不问次数
+    return scanLogBodies(root).hits.map((h) => (h.split(": ")[1] ?? "").replace(/ ×\d+$/, ""));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
