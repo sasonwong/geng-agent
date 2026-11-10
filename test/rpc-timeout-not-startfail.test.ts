@@ -39,7 +39,10 @@ test("a round killed at the wall is a timeout, not a round that never started", 
 // The 8s after an abort is a cap, not a floor. Waiting it out anyway kept `agent-<instance>`
 // taken long after the round was reported over, so whatever starts next races the name — and
 // every test that tripped the wall held an armed timer for the full grace, 8s of suite time.
-test("a timed-out round hands the container name back before it reports the round over", async () => {
+// The cap is the only observable: `kill` is awaited before the round is reported over either
+// way, so asserting on the log alone passes against the old code too. This child is gone
+// 50ms after the abort; anything near the grace means the wait became a floor again.
+test("a timed-out round does not sit out the abort grace once the child is gone", async () => {
   const root = mkdtempSync(join(tmpdir(), "geng-kill-"));
   const bin = join(root, "bin");
   mkdirSync(bin);
@@ -50,6 +53,7 @@ test("a timed-out round hands the container name back before it reports the roun
   const oldPath = process.env.PATH;
   process.env.PATH = `${bin}${delimiter}${oldPath ?? ""}`;
   const killed = (): boolean => existsSync(log) && readFileSync(log, "utf8").includes("kill agent-probe");
+  const started = Date.now();
   try {
     const r = await runWaking({
       command: { cmd: process.execPath, args: ["-e", HUNG_CHILD], env: {}, cwd: "/tmp" },
@@ -59,6 +63,8 @@ test("a timed-out round hands the container name back before it reports the roun
       repeatThreshold: 3,
     });
     assert.equal(r.timedOut, true);
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 5_000, `宽限期该在 child 退出时结束，实际等了 ${elapsed}ms（早先固定 8s）`);
     const deadline = Date.now() + 3_000;
     while (!killed() && Date.now() < deadline) {
       await new Promise<void>((resolve) => setTimeout(resolve, 20));
