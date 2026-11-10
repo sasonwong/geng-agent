@@ -100,15 +100,21 @@ export function waitingOn(data: string): { who: string; at: string }[] {
   return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
-/** Everybody whose conversation moved since `sinceMs` — however many that turns out to be. */
-export function activeSince(data: string, sinceMs: number): { chat: number; who: string }[] {
+/**
+ * Everybody whose conversation moved since `sinceMs` — however many that turns out to be.
+ *
+ * `said` separates the two directions: a message that only arrived is somebody else's act,
+ * and a count that treats it as ours is exactly how a round where it said nothing gets
+ * recorded as if it had spoken.
+ */
+export function activeSince(data: string, sinceMs: number): { chat: number; who: string; said: boolean }[] {
   let chats: string[];
   try {
     chats = readdirSync(peopleDir(data)).filter((f) => f.endsWith(".jsonl"));
   } catch {
     return [];
   }
-  const out: { chat: number; who: string }[] = [];
+  const out: { chat: number; who: string; said: boolean }[] = [];
   for (const f of chats) {
     const chat = Number(f.replace(/\.jsonl$/, ""));
     if (Number.isNaN(chat)) continue;
@@ -120,7 +126,8 @@ export function activeSince(data: string, sinceMs: number): { chat: number; who:
       last.filter((l) => l.dir === "in").pop()?.from ??
       last[last.length - 1]?.from ??
       `chat ${chat}`;
-    out.push({ chat, who });
+    const said = last.some((l) => l.dir === "out" && Date.parse(l.at) >= sinceMs);
+    out.push({ chat, who, said });
   }
   return out;
 }

@@ -8,6 +8,7 @@ import { runDoctorWithProbe } from "../../internal/doctor.ts";
 import { initInstance } from "../../internal/init.ts";
 import { makePaths } from "../../internal/paths.ts";
 import { listInstances, printStatus, statusLine } from "../../internal/status.ts";
+import { formatLedgerDigest, parseSince, readLedger } from "../../internal/ledger.ts";
 import { runGateway } from "../../internal/gateway.ts";
 import { CHANNELS } from "../../internal/channels/index.ts";
 import { readSearchEnv, startSearchServer } from "../../internal/search.ts";
@@ -29,6 +30,8 @@ const USAGE = `geng <command> [options]
                                      --chain 的第一条就是主力，写进 settings 与回退链
   daemon --instance <instance>       一直跑（调试用 geng-dev，见 AGENTS.md）
   status [<instance>|--all]          一屏看状态
+  ledger <instance> [--since 24h] [--json] [--tail n]
+                                     它做过什么：一轮一行的事实账本（只记行为，钱看 status）
   doctor <instance> [--fix] [--probe] [--restore-test]
                                      把不变量变成检查（--probe 起个容器真验挂载与出口，
                                      --restore-test 把最近一张快照恢复到临时目录再读回来）
@@ -81,8 +84,11 @@ const SUB_FLAG_VALUED = new Set([
   "--upstream",
   "--name",
   "--base-url",
+  // ledger: a window and how many lines to hand back
+  "--since",
+  "--tail",
 ]);
-const SUB_FLAG_BOOL = new Set(["--token-stdin", "--rotate"]);
+const SUB_FLAG_BOOL = new Set(["--token-stdin", "--rotate", "--json"]);
 
 function parse(argv: string[]): Args {
   const first = argv[0] ?? "";
@@ -266,6 +272,56 @@ async function main(): Promise<number> {
         return 0;
       }
       await printStatus(args.root, args.instance);
+      return 0;
+    }
+
+    case "ledger": {
+      // A window and how many lines to hand back are the only two things a reader decides;
+      // everything else (what a waking was, how long it took) is the daemon's to write.
+      if (!args.instance) {
+        console.error("用法：geng ledger <instance> [--since 24h] [--json] [--tail n]");
+        return 2;
+      }
+      const at = (name: string): string | null => {
+        const i = args.rest.indexOf(`--${name}`);
+        return i === -1 ? null : (args.rest[i + 1] ?? null);
+      };
+      const p = makePaths(args.root, args.instance);
+      const window = at("since") ?? "24h";
+      // `ALL` parses (the parser lowercases) but the label is built from the raw text:
+      // one place decides what the window is called, or the two spellings disagree.
+      const label = window.trim().toLowerCase() === "all" ? "全部" : `最近 ${window}`;
+      let sinceMs: number | undefined;
+      try {
+        sinceMs = parseSince(window, Date.now());
+      } catch (err) {
+        console.error((err as Error).message);
+        return 2;
+      }
+      const tailText = at("tail");
+      let limit: number | undefined;
+      if (tailText !== null) {
+        limit = Number(tailText);
+        // Same refusal as `bots add --allow`: `Number()` never throws, and NaN would
+        // silently read as "no limit" instead of telling the person their typo.
+        if (!Number.isSafeInteger(limit) || limit < 1) {
+          console.error(`--tail 必须是一个正整数（收到 ${tailText}）`);
+          return 2;
+        }
+      }
+      const records = readLedger(p, { sinceMs, limit });
+      if (args.rest.includes("--json")) {
+        for (const rec of records) console.log(JSON.stringify(rec));
+        return 0;
+      }
+      if (records.length === 0) {
+        console.log(`${args.instance}  账本：${label}没有记录。`);
+        console.log("  每跑完一轮写一条；daemon 在跑的话，下一轮醒来之后就有了。");
+        return 0;
+      }
+      for (const line of formatLedgerDigest(args.instance, records, label)) {
+        console.log(line);
+      }
       return 0;
     }
 

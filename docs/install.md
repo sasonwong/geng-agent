@@ -737,6 +737,7 @@ git fetch origin && git reset --hard origin/main
 | 搜不到东西 | `doctor` 的「搜索接线」+ 纸上有「今天还能搜 N 次」吗 | 没配是 warn；配了但 socket 不在是 FAIL——那一行都没有就说明扩展没注册 |
 | unit active，`daemon.log` 不涨，`data/_ops/outbox` 里有一条 `policy.json 读不出来` 或 `policy.json 是更新版本写的` | `cat data/<inst>/policy.json` | 它停在原地等修：两种都不退出（退出会被 systemd 每十秒拉起来一次，而那条路什么都不写），最多一分钟重试一次，改好就接着跑。同一个错只说一次。两者要做的不是同一件事：`读不出来` 修的是 JSON/字段，`是更新版本写的` 是文件的 `schema` 比代码新——升级代码，或者把 `schema` 降回去 |
 | 备份说 ok 但 `--list` 是空的 | `geng backup <inst> --list` | rustic 版本不同，成功信息在 stderr、JSON 形状也不同。看落下来的快照，不看成功那行。读不出来时它以 1 退出并说原因，不会报成 0 张 |
+| 想知道它这一周自己干了什么 | `geng ledger <inst> --since 7d` | 每跑完一轮写一条；`--json` 是已知字段的裸 JSON，可以喂给别的工具。纸和容器里都没有这本账的汇总——它看不见，所以这个数不会被它优化 |
 | 某个 bot 突然不回消息，unit 还 active | `journalctl --user -u geng-gateway`（找「轮询断了」）、`ls data/_ops/outbox` | 401（token 被吊销）/ 409（有 webhook，或同一个 token 有第二个消费者）不会自愈：gateway 杀掉那个 poller，没有别的 bot 就退出、十秒后重试，还有别的 bot 就**要 `reload` 一次才回来**。429 / 5xx / 断网会原地重试。409 先 `deleteWebhook` |
 
 深入一层的顺序固定：`geng doctor <inst>` → `journalctl --user -u geng@<inst>` →
@@ -767,6 +768,7 @@ data/<instance>/
   meta/         计数、stateSchema、快照版本，以及一两份跨轮的注记（cut / escalation）
   run/          socket 目录，整目录挂成容器里的 /run/geng
   daemon.log    一行一轮；轮转了就有 daemon.log.1
+  ledger.jsonl  一行一轮它做过什么（只记行为，不记钱；钱看 daemon.log 和 status）
   net.log       一行一次出网；last-stderr.log 是某轮 stderr 的尾巴，有才写
 data/_gateway/  gateway 自己的 chats.json / offsets.json / weixin.json（全机器一份，不是某个实例的；
                 weixin.json 里的 context_token 和窗口是会话状态，不进容器）
@@ -801,8 +803,8 @@ deploy/    SYSTEM.md  settings.json  models.json  policy.json  checksums.txt  bu
 
 书本身**不挂**：`book/` 里的东西、`inbox/`、`people/`、`mail/` 全都在容器外面，
 读走 `recall`/`open`，写走 `journal`/`discard`/`loop_*`/`wait`/`mute`/`listen`/`forget`/`propose`/`say`，
-两条路都是 unix socket 到 daemon，所以账本数得清每一次。`daemon.log`、`meta/`、`usage/`、
-`secrets/`、`policy.json` 都不在里面。
+两条路都是 unix socket 到 daemon，所以账本数得清每一次。`daemon.log`、`ledger.jsonl`、`meta/`、
+`usage/`、`secrets/`、`policy.json` 都不在里面。
 
 ---
 
@@ -818,6 +820,8 @@ node cmd/geng/index.ts doctor alice        # 全 ok 或只剩 warn
 node cmd/geng/index.ts doctor alice --probe   # 直连必须断开、代理必须通、容器里看不见 policy.json
 #   （--probe 要有 daemon 在跑：代理是它答的，没有它只能测到"直连断了"）
 node cmd/geng/index.ts status --all        # 上次=… 下次=…
+node cmd/geng/index.ts ledger alice --since 1d   # 它做过什么：跑完一轮一行
+test -s data/alice/ledger.jsonl             # 上面 0 轮时这里就该是空的：能失败，才算验收
 tail -3 data/alice/daemon.log              # 有行就是跑过
 node cmd/geng/index.ts backup alice --list # 有快照
 node cmd/geng/index.ts doctor alice --restore-test

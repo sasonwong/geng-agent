@@ -31,6 +31,10 @@ export interface Paths {
   /** What it asked to have forgotten; the daemon applies this before the next waking. */
   filesForget: string;
   daemonLog: string;
+  /** One finished waking per line, as acts rather than money: what it did, and whether a
+   * person asked for it. Append-only, and the only file that keeps every round — `meta/`
+   * keeps one and `daemon.log` keeps a human line nobody can query. */
+  ledger: string;
   /** Outside the book on purpose: the rules it lives under are not something it reads
    * or writes. The negotiable values reach it through the wake page instead. */
   policy: string;
@@ -101,6 +105,7 @@ export function makePaths(root: string, instance: string): Paths {
     filesDir,
     filesForget,
     daemonLog: join(data, "daemon.log"),
+    ledger: join(data, "ledger.jsonl"),
     policy: join(data, "policy.json"),
     identity: join(book, "identity.md"),
     openLoops: join(book, "open-loops"),
