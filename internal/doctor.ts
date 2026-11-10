@@ -712,7 +712,9 @@ export function keyFiles(dir: string): string[] {
  */
 const SECRET_SHAPES: Array<[RegExp, string]> = [
   [/-----BEGIN [A-Z ]*PRIVATE KEY-----/, "私钥"],
-  [/\bgh[pousr]_[A-Za-z0-9]{36,}/, "GitHub token"],
+  // 无状态安装令牌是 `ghs_<app id>_<jwt>`，前缀后第一段就有下划线和点：
+  // 只认字母数字的正则会把它整条漏掉。
+  [/\bgh[pousr]_[A-Za-z0-9._-]{36,}/, "GitHub token"],
   [/\bgithub_pat_[A-Za-z0-9_]{20,}/, "GitHub token"],
   [/\bsk-[A-Za-z0-9_-]{20,}/, "sk- 形状的 key"],
   [/\bxox[baprs]-[A-Za-z0-9-]{10,}/, "Slack token"],

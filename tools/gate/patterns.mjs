@@ -37,7 +37,8 @@ export const RULES = [
   { name: "私钥块", sev: "critical", src: String.raw`-----BEGIN [A-Z ]*PRIVATE KEY-----` },
   { name: "AWS AK", sev: "critical", src: String.raw`\bAKIA[0-9A-Z]{16}\b` },
   { name: "sk- 密钥", sev: "critical", src: String.raw`\bsk-(?:ant-|proj-)?[A-Za-z0-9_\-]{20,}` },
-  { name: "GitHub 令牌", sev: "critical", src: String.raw`\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b` },
+  // 无状态安装令牌是 `ghs_<app id>_<jwt>`：前缀后第一段就有下划线和点。
+  { name: "GitHub 令牌", sev: "critical", src: String.raw`\b(?:gh[pousr]_[A-Za-z0-9._-]{20,}|github_pat_[A-Za-z0-9_]{20,})\b` },
   { name: "Google AK", sev: "critical", src: String.raw`\bAIza[0-9A-Za-z_\-]{35}\b` },
   { name: "Slack 令牌", sev: "critical", src: String.raw`\bxox[baprs]-[A-Za-z0-9\-]{10,}` },
   { name: "机器人 Token", sev: "critical", src: String.raw`\b\d{8,10}:[A-Za-z0-9_\-]{30,}\b` },
