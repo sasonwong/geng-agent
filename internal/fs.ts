@@ -10,9 +10,19 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
+/**
+ * Read UTF-8, and say so when the bytes are not UTF-8.
+ *
+ * `readFileSync(file, "utf8")` turns every bad byte into U+FFFD without a word: a file
+ * that was written in another encoding, or cut mid-character, comes back looking like
+ * text with a few odd characters in it. `fatal: true` makes that the same `null` a
+ * missing file gives — different problems, but both mean "these bytes are not the text
+ * you asked for", and every caller already handles `null`.
+ * `ignoreBOM` keeps the string byte-for-byte what `readFileSync(..., "utf8")` returned.
+ */
 export function readText(file: string): string | null {
   try {
-    return readFileSync(file, "utf8");
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(readFileSync(file));
   } catch {
     return null;
   }
