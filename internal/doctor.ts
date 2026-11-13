@@ -197,7 +197,13 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     policy = loadPolicy(p.policy);
     checks.push({ name: "policy 解析", ok: true, detail: `镜像 ${policy.container.image}` });
   } catch (err) {
-    checks.push({ name: "policy 解析", ok: false, detail: (err as Error).message });
+    // The same half a person needs whether they read this table or the ops line: the daemon
+    // does not exit on this, it re-reads, and fixing the file is the whole repair.
+    checks.push({
+      name: "policy 解析",
+      ok: false,
+      detail: `${(err as Error).message}——daemon 不会退出，会一直重读到读得出来；改好就不用重启`,
+    });
     return checks;
   }
 
