@@ -273,7 +273,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
     log(`policy.json 读不出来：${err.message}`);
     if (!dry) {
-      writeOps(ops, `daemon@${paths.instance}`, `policy.json 读不出来，停在原地等你修：${err.message}`);
+      writeOps(ops, `daemon@${paths.instance}`, `policy.json 读不出来，停在原地等你修（改好会自动再读，不用重启）：${err.message}`);
     }
   };
   const loadOrWait = async (): Promise<Policy> => {

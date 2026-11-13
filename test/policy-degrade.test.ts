@@ -78,6 +78,10 @@ test("a broken policy keeps the daemon alive, says each complaint once, and keep
     const lines = said();
     assert.equal(new Set(lines).size, lines.length, `同一句话只该说一次，实际 ${lines.length} 行`);
     assert.ok(lines.every((line) => line.includes("等你修")), "每一行都要说清楚它在等人，而不是已经放弃");
+    assert.ok(
+      lines.every((line) => line.includes("不用重启")),
+      "手滑的那个人要知道改好就自己继续，不用去重启服务",
+    );
   } finally {
     child.kill();
     await exited(child);
