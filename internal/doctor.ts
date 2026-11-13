@@ -555,10 +555,13 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   // An empty file and no file are the same thing to the agent: the mount is created
   // empty so docker has something to bind, so "在" has to mean "has something in it".
   const identity = (readText(p.identity) ?? "").trim() !== "";
+  // Same split as the wake packet: "not written yet" and "there with bad bytes" are two
+  // different problems, and only one of them is answered by writing the file.
+  const identityPresent = existsSync(p.identity);
   checks.push({
     name: "identity.md",
     ok: identity,
-    detail: identity ? "在" : "还没写过（第一次出生之后才有意义）",
+    detail: identity ? "在" : identityPresent ? "在，但字节不是 UTF-8" : "还没写过（第一次出生之后才有意义）",
     warnOnly: true,
   });
 
