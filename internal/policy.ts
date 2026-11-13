@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { ExpectedError, SchemaVersionError } from "./errors.ts";
 import { readText } from "./fs.ts";
 import { chainFrom, validCidr } from "./proxy.ts";
@@ -138,11 +139,16 @@ function str(v: unknown, path: string): string {
 
 /**
  * Missing file -> defaults (init writes it). Present but malformed -> throw,
- * because a silent fallback would change behaviour behind your back.
+ * because a silent fallback would change behaviour behind your back. Bytes that are not
+ * UTF-8 are the second case, not the first: `readText` says null to both, and a default
+ * here would quietly drop proxyChain, proxyAllowCidrs, the timezone and the wake minutes.
  */
 export function loadPolicy(file: string): Policy {
   const text = readText(file);
-  if (text === null) return defaultPolicy();
+  if (text === null) {
+    if (!existsSync(file)) return defaultPolicy();
+    throw new ExpectedError(`policy: ${file} 在，但字节不是 UTF-8：读不出你写的那份策略`);
+  }
 
   let raw: unknown;
   try {
