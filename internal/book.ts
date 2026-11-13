@@ -140,9 +140,15 @@ function flatKeys(obj: unknown, prefix = ""): string[] {
 
 /** Append to a file it may not have written yet, keeping whatever is already there. */
 function appendText(file: string, addition: string): void {
-  const before = readText(file) ?? "";
-  const glue = before === "" || before.endsWith("\n") ? "" : "\n";
-  writeText(file, `${before}${glue}${addition}\n`);
+  const before = readText(file);
+  // `readText` says null for a file that is not there and for one whose bytes are not
+  // UTF-8. Writing the addition as a fresh file would erase the second kind: a note on a
+  // journal entry is not worth losing the entry it is about.
+  if (before === null && existsSync(file)) {
+    throw new Error(`${file} 的字节不是 UTF-8：不追加，也不覆盖`);
+  }
+  const glue = before === null || before === "" || before.endsWith("\n") ? "" : "\n";
+  writeText(file, `${before ?? ""}${glue}${addition}\n`);
 }
 
 function parseWhen(when: string): number | null {

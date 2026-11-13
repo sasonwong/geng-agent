@@ -584,6 +584,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       searchLeft: searchQuota(paths.root)?.left ?? null,
       waiting: waitingOn(paths.data),
       identity: readText(paths.identity),
+      identityPresent: existsSync(paths.identity),
     });
 
     if (dry) {

@@ -607,3 +607,15 @@ test("a body that stops arriving is an error, and leaves no file half written", 
     await new Promise<void>((r) => server.close(() => r()));
   }
 });
+
+test("a note is not written over bytes the book cannot read", async () => {
+  const f = fixture();
+  const opened = await f.call("/loop/open", { text: "等一个回信" });
+  const id = (opened.body as { id: string }).id as string;
+  const file = join(f.paths.openLoops, `${id}.md`);
+  // not UTF-8: readText gives null, and a fresh write would be the whole file gone
+  const bad = Buffer.from([0x41, 0xff, 0x42]);
+  writeFileSync(file, bad);
+  await assert.rejects(() => f.call("/loop/close", { id, note: "回信来了" }), /不是 UTF-8/);
+  assert.deepEqual(readFileSync(file), bad, "原来的字节要还在");
+});
