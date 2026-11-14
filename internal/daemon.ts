@@ -398,6 +398,12 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     } catch (err) {
       log(`book 端点起不来：${(err as Error).message}（这一轮照常，写记忆会报错）`);
     }
+    // A one-off round hands control back to its caller instead of exiting, and it closes the
+    // listener at the end of the loop body. `geng-dev once` exits through `process.exit`, so
+    // it never noticed; a caller that holds the promise (a test) hangs after a round that
+    // throws before that line. Unref'd, the listener still answers for the round, but it no
+    // longer decides when the caller's process ends.
+    if (o.once) book?.unref();
   }
 
   // A preview computes the same note without touching the disk: `dry` must not eat what
