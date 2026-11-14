@@ -65,6 +65,31 @@ export interface LedgerRecord {
   touched: number;
 }
 
+/**
+ * What a round queued: `/say` calls, and the people they named, counted where the round
+ * writes them (see `said`).
+ *
+ * `take()` is what empties it. The socket that calls `note` outlives the round, so a
+ * counter that is read without being consumed would put one round's words into the next
+ * round's line — and there is no separate reset to forget, because reading is the reset.
+ */
+export function roundSpeech(nameOf: (chat: number) => string) {
+  let calls = 0;
+  const named = new Set<string>();
+  return {
+    note: (chat: number): void => {
+      calls += 1;
+      named.add(nameOf(chat));
+    },
+    take: (): { said: number; saidTo: string[] } => {
+      const out = { said: calls, saidTo: [...named] };
+      calls = 0;
+      named.clear();
+      return out;
+    },
+  };
+}
+
 const REASONS: ReadonlySet<string> = new Set(["timer", "knock", "nudge"]);
 
 function numOrNull(v: unknown): number | null {

@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, renameSync, rmSync } from "node:fs";
+import type { Server } from "node:http";
 import { join } from "node:path";
 import { buildCommand, listSessionFiles, sweepOrphans } from "./command.ts";
 import { markSeen, peekInbox, quarantine } from "./inbox.ts";
@@ -21,7 +22,7 @@ import {
   type WaitSpec,
 } from "./schedule.ts";
 import { modelFailures, repairTail } from "./session.ts";
-import { appendLedger, LEDGER_SCHEMA } from "./ledger.ts";
+import { appendLedger, LEDGER_SCHEMA, roundSpeech } from "./ledger.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./fs.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
@@ -361,13 +362,13 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   let modelRequests = 0;
   let modelFallbacks = 0;
   let netCalls = 0;
-  // What this round said: the `/say` calls it queued, and who they named. Reset when the
-  // round starts, like the counters above, because the socket outlives the round.
-  let sayCalls = 0;
-  const spokeTo = new Set<string>();
+  // What this round said: the `/say` calls it queued, and who they named. The socket that
+  // reports them outlives the round, so reading them is what empties them (`take`).
+  const speech = roundSpeech((chat) => whoOf(paths.data, chat));
+  let book: Server | null = null;
   if (!o.dry) {
     try {
-      await startBookServer({
+      book = await startBookServer({
         paths,
         log,
         // Getters, not values: `policy` is reloaded every cycle and `chats.json` changes
@@ -392,10 +393,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         onModelFallback: (attempts) => {
           modelFallbacks += attempts;
         },
-        onSay: (place) => {
-          sayCalls += 1;
-          spokeTo.add(whoOf(paths.data, place.id));
-        },
+        onSay: (place) => speech.note(place.id),
       });
     } catch (err) {
       log(`book 端点起不来：${(err as Error).message}（这一轮照常，写记忆会报错）`);
@@ -478,8 +476,6 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     modelRequests = 0;
     modelFallbacks = 0;
     netCalls = 0;
-    sayCalls = 0;
-    spokeTo.clear();
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
     let pendingWait: WaitSpec | null;
@@ -766,8 +762,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         inj: inj.total,
         net: netCalls,
         talkedTo: cycle.talkedTo,
-        said: sayCalls,
-        saidTo: [...spokeTo],
+        ...speech.take(),
         touched: cycle.touched,
       });
     } catch (err) {
@@ -815,6 +810,11 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       log(`  → 下一轮按第 ${escalation.level} 档（${escalation.symptom ? SYMPTOM_LABEL[escalation.symptom] : "?"}，连续 ${escalation.streak} 次）`);
     }
 
-    if (o.once) return;
+    if (o.once) {
+      // A one-off round hands control back to its caller instead of exiting, so the socket
+      // it opened goes with it — a listener left behind keeps that process from ever ending.
+      await new Promise<void>((resolve) => (book === null ? resolve() : book.close(() => resolve())));
+      return;
+    }
   }
 }
