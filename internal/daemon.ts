@@ -21,6 +21,7 @@ import {
   type WaitSpec,
 } from "./schedule.ts";
 import { modelFailures, repairTail } from "./session.ts";
+import { appendLedger, LEDGER_SCHEMA } from "./ledger.ts";
 import { appendLine, ensureDirs, readJson, readText, writeJson, writeText } from "./fs.ts";
 import { acquirePidLock } from "./guard.ts";
 import { ensureGatewayDirs, readMutes, writeOps } from "./mute.ts";
@@ -36,7 +37,7 @@ import {
 } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
-import { activeSince, lastSaidIn, readSaid, waitingOn } from "./people.ts";
+import { activeSince, lastSaidIn, readSaid, waitingOn, whoOf } from "./people.ts";
 import { knownPlaces } from "./gateway.ts";
 import { readAttention } from "./attention.ts";
 import { countTouched } from "./touch.ts";
@@ -186,7 +187,7 @@ function logLine(
   interventions: string[],
   backup: BackupOutcome | null,
   spent: { tokens: number; cost: number } | null,
-  files: { pruned: number; forgot: number },
+  files: { pruned: number; forgot: number; ledger?: string | null },
 ): string {
   const parts = [
     new Date().toISOString(),
@@ -220,6 +221,9 @@ function logLine(
   }
   if (files.pruned > 0) parts.push(`pruned=${files.pruned}`);
   if (files.forgot > 0) parts.push(`forgot=${files.forgot}`);
+  // Only when it happened: an unwritable ledger is not the round failing, but it is the one
+  // failure that would otherwise be silent (the history just gets a hole).
+  if (files.ledger) parts.push(`ledger=fail(${files.ledger})`);
   if (backup) parts.push(`backup=${backup.status}${backup.detail ? `(${backup.detail})` : ""}`);
   return parts.join(" ");
 }
@@ -357,6 +361,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   let modelRequests = 0;
   let modelFallbacks = 0;
   let netCalls = 0;
+  // What this round said: the `/say` calls it queued, and who they named. Reset when the
+  // round starts, like the counters above, because the socket outlives the round.
+  let sayCalls = 0;
+  const spokeTo = new Set<string>();
   if (!o.dry) {
     try {
       await startBookServer({
@@ -383,6 +391,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         },
         onModelFallback: (attempts) => {
           modelFallbacks += attempts;
+        },
+        onSay: (place) => {
+          sayCalls += 1;
+          spokeTo.add(whoOf(paths.data, place.id));
         },
       });
     } catch (err) {
@@ -466,6 +478,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     modelRequests = 0;
     modelFallbacks = 0;
     netCalls = 0;
+    sayCalls = 0;
+    spokeTo.clear();
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
     let pendingWait: WaitSpec | null;
@@ -712,20 +726,53 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       policy.cycle.defaultWakeMinutes * 60_000 * rung.backoff,
       rung.parked,
     );
+    // One scan of people/ for both readers: the page counts everybody it exchanged words
+    // with, the ledger needs the smaller set it actually spoke to.
+    const active = activeSince(paths.data, startedMs);
+    // The three counts the page prints, built once. The page keeps only the last cycle;
+    // the ledger keeps all of them, and both are rendered from this one object, so the two
+    // cannot disagree about what this round was.
+    const cycle = {
+      wake: reason,
+      // not from the inbox: it can also speak first, and that is the same act.
+      // A list, because a cycle can reach more than one person.
+      talkedTo: active.map((a) => a.who),
+      // both halves: a cycle that only wrote a journal entry did something, and a
+      // count that only watches /work would quietly teach it to touch files instead
+      touched: countTouched(paths.workspace, startedMs) + countTouched(paths.book, startedMs),
+    };
     meta = {
       ...meta,
       knockHold: handed.length === 0 ? null : { files: handed, untilMs: Date.now() + holdMs },
-      lastCycle: {
-        wake: reason,
-        // not from the inbox: it can also speak first, and that is the same act.
-        // A list, because a cycle can reach more than one person.
-        talkedTo: activeSince(paths.data, startedMs).map((a) => a.who),
-        // both halves: a cycle that only wrote a journal entry did something, and a
-        // count that only watches /work would quietly teach it to touch files instead
-        touched: countTouched(paths.workspace, startedMs) + countTouched(paths.book, startedMs),
-      },
+      lastCycle: cycle,
     };
     writeMeta(paths, meta);
+
+    // The round already happened, so an unwritable ledger must not take it down — that would
+    // make every restart pay for a full round and then die again. The failure becomes a field
+    // on the line, the same way `backup=` does. It is written before the snapshot so a restore
+    // contains the round that produced it; `at` comes from the round's own clock, not `now`.
+    let ledgerError: string | null = null;
+    try {
+      appendLedger(paths, {
+        v: LEDGER_SCHEMA,
+        wake: waking,
+        at: new Date(startedMs + result.durationMs).toISOString(),
+        durMs: result.durationMs,
+        reason,
+        sym: symptom,
+        lvl: escalation.level,
+        tools: result.toolCalls.length,
+        inj: inj.total,
+        net: netCalls,
+        talkedTo: cycle.talkedTo,
+        said: sayCalls,
+        saidTo: [...spokeTo],
+        touched: cycle.touched,
+      });
+    } catch (err) {
+      ledgerError = (err as Error).message;
+    }
 
     const backup = await maybeBackup({ paths, policy, nowMs: Date.now() });
     const line = logLine(
@@ -742,7 +789,7 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
       interventions,
       backup,
       spent,
-      { pruned: pruned.removed, forgot },
+      { pruned: pruned.removed, forgot, ledger: ledgerError },
     );
     appendLine(paths.daemonLog, line);
     log(line);

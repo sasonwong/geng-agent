@@ -76,6 +76,11 @@ export interface BookOptions {
   onModelFallback?: (attempts: number) => void;
   /** Called once per proxied connection: the only evidence that it went somewhere. */
   onNetwork?: (event: { target: string; ok: boolean; why?: string }) => void;
+  /**
+   * Called once per queued `/say`, with the place it was addressed to (absent when no place
+   * was known). The queue write is the act: delivery is the gateway's, seconds later.
+   */
+  onSay?: (place: Place) => void;
   /** How the daemon itself reaches the network: null for direct. */
   chain?: Live<Chain | null>;
 }
@@ -83,6 +88,8 @@ export interface BookOptions {
 export interface HandlerOptions {
   minWakeMs?: Live<number>;
   places?: Live<(number | Place)[]>;
+  /** See `BookOptions.onSay`: the daemon reads this to count what a round said. */
+  onSay?: (place: Place) => void;
 }
 
 interface Reply {
@@ -476,6 +483,11 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         ...(originals.length === 0 ? {} : { attachments: originals }),
         ...(replyTo === undefined ? {} : { replyTo }),
       });
+      // Counted here, not when the gateway delivers it: the gateway sweeps every two
+      // seconds and the round is over before that, so a round that only spoke would be
+      // recorded as one that did nothing. A place it could not name is not counted: with
+      // nothing to address, the queue write has nowhere to go either.
+      if (place !== undefined) o.onSay?.(place);
       return { status: 200, body: { id, count: messages.length, at: nowIso, ...(place === undefined ? {} : { channel: place.channel, place: place.label }) } };
     }
 
@@ -490,7 +502,7 @@ export function socketPath(paths: Paths): string {
 export function startBookServer(o: BookOptions): Promise<Server> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   const sock = socketPath(o.paths);
-  const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs, places: o.places });
+  const handle = bookHandler(o.paths, { minWakeMs: o.minWakeMs, places: o.places, onSay: o.onSay });
 
   // read per request: the operator edits policy.json and the daemon reloads it every cycle
   const rule = (): ProxyRule => (o.proxy === undefined ? { allow: [], cidrs: [] } : at(o.proxy));

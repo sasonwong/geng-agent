@@ -100,6 +100,15 @@ export function waitingOn(data: string): { who: string; at: string }[] {
   return out.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
 }
 
+/**
+ * The name a chat goes by: whatever they last called themselves, or the id when nobody
+ * left a line. One rule for the page and the ledger, so the same chat is not two people.
+ */
+export function whoOf(data: string, chat: number): string {
+  const tail = readSaid(data, chat, 20)?.tail ?? [];
+  return tail.filter((l) => l.dir === "in").pop()?.from ?? tail[tail.length - 1]?.from ?? `chat ${chat}`;
+}
+
 /** Everybody whose conversation moved since `sinceMs` — however many that turns out to be. */
 export function activeSince(data: string, sinceMs: number): { chat: number; who: string }[] {
   let chats: string[];
@@ -116,11 +125,7 @@ export function activeSince(data: string, sinceMs: number): { chat: number; who:
     const newest = last[last.length - 1];
     if (!newest || Number.isNaN(Date.parse(newest.at))) continue;
     if (Date.parse(newest.at) < sinceMs) continue;
-    const who =
-      last.filter((l) => l.dir === "in").pop()?.from ??
-      last[last.length - 1]?.from ??
-      `chat ${chat}`;
-    out.push({ chat, who });
+    out.push({ chat, who: whoOf(data, chat) });
   }
   return out;
 }
