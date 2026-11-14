@@ -97,10 +97,18 @@ export async function rusticAvailable(): Promise<boolean> {
   return result.code === 0;
 }
 
-/** The password never goes on a command line: /proc is world-readable. */
-function readPassword(root: string): string | null {
-  const text = readText(join(root, "secrets", "rustic.env")) ?? "";
-  for (const line of text.split("\n")) {
+/**
+ * The password never goes on a command line: /proc is world-readable.
+ *
+ * `null` is "nothing configured"; `"unreadable"` is "the file is there and its bytes are
+ * not text". Only one of those is answered by filling the file in, so reporting the second
+ * as the first turns a broken secret into a quiet "backup is off".
+ */
+function readPassword(root: string): string | null | "unreadable" {
+  const file = join(root, "secrets", "rustic.env");
+  const text = readText(file);
+  if (text === null && existsSync(file)) return "unreadable";
+  for (const line of (text ?? "").split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("RUSTIC_PASSWORD=")) continue;
     const value = trimmed.slice("RUSTIC_PASSWORD=".length).trim();
@@ -183,6 +191,9 @@ export interface SnapshotList {
 
 export async function listSnapshots(paths: Paths): Promise<SnapshotList> {
   const password = readPassword(paths.root);
+  if (password === "unreadable") {
+    return { ok: false, snapshots: [], detail: "secrets/rustic.env 在，但字节不是 UTF-8" };
+  }
   if (!password) {
     return { ok: false, snapshots: [], detail: "没有密码：secrets/rustic.env 里没有 RUSTIC_PASSWORD" };
   }
@@ -216,6 +227,7 @@ export async function maybeBackup(o: BackupOptions): Promise<BackupOutcome> {
   if (!policy.backup.enabled) return { status: "skip", detail: "off" };
 
   const password = readPassword(paths.root);
+  if (password === "unreadable") return { status: "fail", detail: "password-unreadable" };
   if (!password) {
     return { status: "skip", detail: "no-password" };
   }
@@ -293,6 +305,7 @@ export interface RestoreOptions {
 
 export async function restore(o: RestoreOptions): Promise<{ ok: boolean; detail: string }> {
   const password = readPassword(o.paths.root);
+  if (password === "unreadable") return { ok: false, detail: "secrets/rustic.env 在，但字节不是 UTF-8" };
   if (!password) return { ok: false, detail: "没有密码：secrets/rustic.env 里没有 RUSTIC_PASSWORD" };
   const repo = backupRepo(o.paths);
   if (!repoReady(repo)) return { ok: false, detail: `没有仓库：${repo}` };

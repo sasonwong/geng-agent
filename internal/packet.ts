@@ -90,8 +90,10 @@ export interface PacketInput {
   /** Conversations whose last word was theirs. */
   waiting: { who: string; at: string }[];
   /** What it wrote about itself; pasted verbatim, because a read it skips is a waking
-   * with no self at all. */
+   * with no self at all. `null` means missing or unreadable — `identityPresent` says which,
+   * because "you never wrote one" is a lie about a file that is there with bad bytes. */
   identity: string | null;
+  identityPresent: boolean;
   /** More time passed than any alarm explains — the machine was probably suspended. */
   longGap: boolean;
 }
@@ -280,7 +282,7 @@ function flatten(text: string): string {
 
 export function buildPacket(input: PacketInput): string {
   const { paths, nowMs, reason, waitWhy, lastWakeMs, waking, statePath } = input;
-  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastJournal, lastCycle, lastWords, thread, waiting, identity, mailPending } = input;
+  const { inbox, lowInbox, mutes, cut, longGap, hint, wakes24h, parked, lowPending, timezone, attention, places, filesForgotten, filesPruned, filesOldestPrunedMs, filesUsedBytes, filesCapMb, searchLeft, envChanged, lastSaid, lastJournal, lastCycle, lastWords, thread, waiting, identity, identityPresent, mailPending } = input;
 
   const out: string[] = [];
 
@@ -434,6 +436,8 @@ export function buildPacket(input: PacketInput): string {
   if (identity !== null && identity.trim() !== "") {
     out.push("", `你写下的自己（${statePath}/identity.md）：`);
     out.push("", identity.trim());
+  } else if (identity === null && identityPresent) {
+    out.push("", `你写下的自己读不出来：${statePath}/identity.md 在，但字节不是 UTF-8。`);
   } else {
     // A fact, not an instruction, and not the same line as the map in SYSTEM.md: the map
     // says what the file is for, this says it is still missing. Without it a new instance

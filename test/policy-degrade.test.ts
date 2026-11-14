@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { POLICY_RETRY_MS } from "../internal/daemon.ts";
+import { checkInstance } from "../internal/doctor.ts";
 
 const CLI = resolve(import.meta.dirname, "../cmd/geng/index.ts");
 
@@ -78,6 +79,10 @@ test("a broken policy keeps the daemon alive, says each complaint once, and keep
     const lines = said();
     assert.equal(new Set(lines).size, lines.length, `同一句话只该说一次，实际 ${lines.length} 行`);
     assert.ok(lines.every((line) => line.includes("等你修")), "每一行都要说清楚它在等人，而不是已经放弃");
+    assert.ok(
+      lines.every((line) => line.includes("不用重启")),
+      "手滑的那个人要知道改好就自己继续，不用去重启服务",
+    );
   } finally {
     child.kill();
     await exited(child);
@@ -123,4 +128,21 @@ test("a policy from a newer version is named as one, and the daemon still waits 
     await exited(child);
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// The ops line carries "改好会自动再读，不用重启", but ops is the least-read surface. A person
+// who suspects the config runs doctor first, and that table is where the same half has to be:
+// the file is bad, and fixing it is the whole repair — no restart.
+test("doctor's policy line says the fix needs no restart", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-doctor-"));
+  const policy = join(root, "data", "alice", "policy.json");
+  mkdirSync(join(root, "data", "alice"), { recursive: true });
+  writeFileSync(policy, Buffer.from([0x7b, 0x22, 0xff, 0x7d]));
+
+  const check = checkInstance(root, "alice", false).find((c) => c.name === "policy 解析");
+  assert.ok(check, "doctor 要给出一行 policy 解析");
+  assert.equal(check!.ok, false);
+  assert.match(check!.detail, /字节不是 UTF-8/, "坏字节要说成读不出，不是格式不对");
+  assert.match(check!.detail, /不用重启/, "看 doctor 的人也得知道改好就继续");
+  rmSync(root, { recursive: true, force: true });
 });

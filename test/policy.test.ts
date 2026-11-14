@@ -130,3 +130,16 @@ test("a policy from a newer version is a version mismatch, not an unreadable fil
   // Still an ExpectedError: the CLI prints one line, not a stack trace.
   assert.throws(() => loadPolicy(file), ExpectedError);
 });
+
+test("a policy that exists with bytes that are not UTF-8 throws, it does not default", () => {
+  // readText says null for a missing file and for a file whose bytes are not UTF-8.
+  // Defaulting on the second silently replaces proxyChain, proxyAllowCidrs, timezone and
+  // the wake minutes with the built-in ones — the file is there, so this is malformed,
+  // not absent.
+  const file = join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json");
+  writeFileSync(file, Buffer.from([0x7b, 0xe9, 0x7d]));
+  assert.throws(() => loadPolicy(file), ExpectedError);
+  assert.throws(() => loadPolicy(file), /UTF-8/);
+  // A missing file is still the defaults init writes.
+  assert.equal(loadPolicy(join(mkdtempSync(join(tmpdir(), "geng-policy-")), "policy.json")).timezone, defaultPolicy().timezone);
+});

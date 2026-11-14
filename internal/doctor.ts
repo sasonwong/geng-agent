@@ -197,7 +197,13 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
     policy = loadPolicy(p.policy);
     checks.push({ name: "policy 解析", ok: true, detail: `镜像 ${policy.container.image}` });
   } catch (err) {
-    checks.push({ name: "policy 解析", ok: false, detail: (err as Error).message });
+    // The same half a person needs whether they read this table or the ops line: the daemon
+    // does not exit on this, it re-reads, and fixing the file is the whole repair.
+    checks.push({
+      name: "policy 解析",
+      ok: false,
+      detail: `${(err as Error).message}——daemon 不会退出，会一直重读到读得出来；改好就不用重启`,
+    });
     return checks;
   }
 
@@ -555,10 +561,13 @@ export function checkInstance(root: string, instance: string, fix: boolean): Che
   // An empty file and no file are the same thing to the agent: the mount is created
   // empty so docker has something to bind, so "在" has to mean "has something in it".
   const identity = (readText(p.identity) ?? "").trim() !== "";
+  // Same split as the wake packet: "not written yet" and "there with bad bytes" are two
+  // different problems, and only one of them is answered by writing the file.
+  const identityPresent = existsSync(p.identity);
   checks.push({
     name: "identity.md",
     ok: identity,
-    detail: identity ? "在" : "还没写过（第一次出生之后才有意义）",
+    detail: identity ? "在" : identityPresent ? "在，但字节不是 UTF-8" : "还没写过（第一次出生之后才有意义）",
     warnOnly: true,
   });
 

@@ -53,6 +53,7 @@ function fixture(): {
     thread: null,
     waiting: [],
     identity: null,
+    identityPresent: false,
   };
   return { root, paths, input: (over) => ({ ...base, ...over }) };
 }
@@ -95,6 +96,13 @@ test("its own words are pasted verbatim, labelled, just before the reason it is 
   assert.ok(at > text.indexOf("未闭合的事"), "identity 应该排在事实之后");
   assert.ok(at < text.indexOf("你可以什么都不做"));
   // the missing-file line is replaced, not repeated next to it
+  assert.doesNotMatch(text, /你还没写下过自己/);
+});
+
+test("an identity file that is there but unreadable says so instead of claiming it was never written", () => {
+  const { input } = fixture();
+  const text = buildPacket(input({ identity: null, identityPresent: true }));
+  assert.match(text, /你写下的自己读不出来：\/state\/identity\.md 在，但字节不是 UTF-8/);
   assert.doesNotMatch(text, /你还没写下过自己/);
 });
 

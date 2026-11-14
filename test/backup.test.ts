@@ -30,6 +30,20 @@ test("a disabled or password-less backup is a skip, not a failure", async () => 
   assert.deepEqual(noPassword, { status: "skip", detail: "no-password" });
 });
 
+test("a rustic.env that is there but not text is a failure, not a missing password", async () => {
+  const paths = fixture();
+  mkdirSync(join(paths.root, "secrets"), { recursive: true });
+  // 0xFF 永远不是合法 UTF-8：以前读成 null 就是「没配」，而文件明明在、也明明有内容
+  writeFileSync(join(paths.root, "secrets", "rustic.env"), Buffer.from([0x52, 0x55, 0xff, 0x0a]));
+  assert.deepEqual(await maybeBackup({ paths, policy: defaultPolicy(), nowMs: Date.now() }), {
+    status: "fail",
+    detail: "password-unreadable",
+  });
+  const list = await listSnapshots(paths);
+  assert.equal(list.ok, false);
+  assert.match(list.detail ?? "", /UTF-8/);
+});
+
 test("restore refuses when there is nothing to restore from", async () => {
   const paths = fixture();
   const result = await restore({ paths, target: join(paths.root, "x") });
