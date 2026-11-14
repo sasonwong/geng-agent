@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { socketPath } from "../internal/book.ts";
 import { makePaths } from "../internal/paths.ts";
 import { defaultPolicy } from "../internal/policy.ts";
 import { writeJson } from "../internal/fs.ts";
@@ -29,9 +30,14 @@ test("a once-round that throws leaves no listener holding the process open", () 
     const entry = join(root, "run-once.mjs");
     writeFileSync(
       entry,
-      `import { runDaemon } from ${JSON.stringify(join(REPO, "internal", "daemon.ts"))};\n` +
+      `import { existsSync } from "node:fs";\n` +
+        `import { runDaemon } from ${JSON.stringify(join(REPO, "internal", "daemon.ts"))};\n` +
         `try {\n  await runDaemon({ root: ${JSON.stringify(root)}, instance: "alice", once: true, log: () => {} });\n` +
-        `  console.log("round returned");\n} catch (err) {\n  console.log("round threw: " + err.message);\n}\n`,
+        `  console.log("round returned");\n} catch (err) {\n` +
+        // reported from the child because the parent cannot see whether the endpoint was up
+        // at the moment of the throw: without it this test passes trivially if the throw
+        // ever moves before `startBookServer`, unref or no unref.
+        `  console.log("round threw: " + err.message + " sock=" + existsSync(${JSON.stringify(socketPath(p))}));\n}\n`,
     );
     const child = spawnSync(process.execPath, [entry], {
       cwd: REPO,
@@ -47,6 +53,9 @@ test("a once-round that throws leaves no listener holding the process open", () 
     );
     assert.equal(child.status, 0, child.stderr);
     assert.match(child.stdout, /round threw/, "这一轮应该是在 book 端点起来之后抛的");
+    // and the throw has to happen *after* the endpoint is listening, or nothing above this
+    // line proves anything: with no listener there is nothing to hold the process open
+    assert.match(child.stdout, /sock=true/, `抛点在 book 端点起来之前，这条测试是空转的：${child.stdout}`);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
