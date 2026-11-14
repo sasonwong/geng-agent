@@ -10,6 +10,7 @@ import {
   LEDGER_SCHEMA,
   parseSince,
   readLedger,
+  roundSpeech,
   type LedgerRecord,
 } from "../internal/ledger.ts";
 import { makePaths } from "../internal/paths.ts";
@@ -104,6 +105,16 @@ test("账本：坏行跳过，不赔掉整本账", () => {
     writeText(p.ledger, lines.join("\n") + "\n");
     assert.equal(readLedger(p).map((r) => r.wake).join(","), "1,5");
   });
+});
+
+test("账本：说过的话只被取走一次，下一轮不会接着数", () => {
+  // 报 `note` 的那个 socket 比一轮活得久：取数如果不清，下一行就会带上上一轮的话。
+  const s = roundSpeech((chat) => `chat ${chat}`);
+  s.note(-1001234567890);
+  s.note(-1001234567890);
+  assert.deepEqual(s.take(), { said: 2, saidTo: ["chat -1001234567890"] });
+  // 第二个读者拿到的是空的：这是「这一轮的」计数，不是累计
+  assert.deepEqual(s.take(), { said: 0, saidTo: [] });
 });
 
 test("账本：「没人叫它」和「它动了」是两个数，合起来才是主动性", () => {
