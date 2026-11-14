@@ -45,7 +45,16 @@ export interface LedgerRecord {
   net: number;
   talkedTo: string[];
   /**
-   * People it actually spoke to: outbound only.
+   * Wakes it queued a message in: one per `/say`, counted where the round wrote it, not
+   * where the gateway delivered it.
+   *
+   * Delivery is another process on a two-second sweep, and the round is over before that,
+   * so a `say` counted on the outbound transcript would land in no round's window at all —
+   * exactly the round a person is looking for. Bubbles are not counted: one call is one act.
+   */
+  said: number;
+  /**
+   * People those calls named, when the place was known. Outbound only.
    *
    * `talkedTo` counts both directions, which is right for the page ("和谁有往来") and wrong
    * for this file: a message that only arrived is somebody else's act, and counting it here
@@ -85,6 +94,7 @@ function parseLine(line: string): LedgerRecord | null {
   const tools = numOrNull(r.tools);
   const inj = numOrNull(r.inj);
   const net = numOrNull(r.net);
+  const said = numOrNull(r.said);
   const touched = numOrNull(r.touched);
   const at = typeof r.at === "string" && !Number.isNaN(Date.parse(r.at)) ? r.at : null;
   const reason = typeof r.reason === "string" && REASONS.has(r.reason) ? (r.reason as WakeKind) : null;
@@ -95,6 +105,7 @@ function parseLine(line: string): LedgerRecord | null {
     tools === null ||
     inj === null ||
     net === null ||
+    said === null ||
     touched === null ||
     at === null ||
     reason === null ||
@@ -117,6 +128,7 @@ function parseLine(line: string): LedgerRecord | null {
     tools,
     inj,
     net,
+    said,
     talkedTo,
     saidTo,
     touched,
@@ -161,7 +173,7 @@ export interface LedgerDigest {
   spoke: number;
   /** Wakes in which it exchanged words with somebody, whoever spoke first. */
   talkedTo: string[];
-  /** The subset it actually said something to. */
+  /** The subset of those it queued a message to (names only where the place was known). */
   saidTo: string[];
   /** Wakes that did not end with `sym=ok`. */
   notOk: number;
@@ -187,15 +199,15 @@ export function digestLedger(records: LedgerRecord[]): LedgerDigest {
   for (const r of records) {
     byWake[r.reason] += 1;
     bySym[r.sym] = (bySym[r.sym] ?? 0) + 1;
-    // Outbound only: an arrival is not an act (see `saidTo`).
-    const did = r.touched > 0 || r.saidTo.length > 0;
+    // Outbound only: what this round queued, not what arrived (see `said`).
+    const did = r.touched > 0 || r.said > 0;
     if (did) acted += 1;
     if (r.reason !== "knock") {
       unprompted += 1;
       if (did) unpromptedActed += 1;
     }
     touched += r.touched;
-    if (r.saidTo.length > 0) spoke += 1;
+    if (r.said > 0) spoke += 1;
     for (const name of r.talkedTo) who.add(name);
     for (const name of r.saidTo) spokeTo.add(name);
     if (r.sym !== "ok") notOk += 1;

@@ -252,6 +252,25 @@ test("saying something is a queue entry the host writes, and a chat it cannot re
   assert.equal(blankWritten.chat, -1001, "空 to 用唯一的地方，而不是 chat 0");
 });
 
+test("a queued message is counted when it is queued, not when the gateway sends it", async () => {
+  // The gateway sweeps every two seconds; a round that ends right after saying something is
+  // over before the outbound line exists. The queue write is the act, so it is counted here.
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const said: number[] = [];
+  const handle = bookHandler(paths, {
+    places: [{ id: -1001, label: "私聊 @someone", home: true, kind: "private", channel: "telegram", canFile: true, canQuote: true }],
+    onSay: (place) => said.push(place.id),
+  });
+  const ok = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["在"] }));
+  assert.equal(ok.status, 200);
+  // a refused say queued nothing, so it is not an act
+  const bad = await handle({ url: "/say", method: "POST" } as never, JSON.stringify({ messages: ["x"], to: -999 }));
+  assert.equal(bad.status, 400);
+  assert.deepEqual(said, [-1001]);
+});
+
 test("a chat the gateway learned after the daemon started can be spoken into", async () => {
   // The endpoint is built once and the daemon lives for days. Taking the list of places at
   // listen time meant the page (built fresh every cycle) offered a group the tool then

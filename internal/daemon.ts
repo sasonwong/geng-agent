@@ -37,7 +37,7 @@ import {
 } from "./meta.ts";
 import { maybeBackup, type BackupOutcome } from "./backup.ts";
 import { applyProposal, policySummary } from "./proposal.ts";
-import { activeSince, lastSaidIn, readSaid, waitingOn } from "./people.ts";
+import { activeSince, lastSaidIn, readSaid, waitingOn, whoOf } from "./people.ts";
 import { knownPlaces } from "./gateway.ts";
 import { readAttention } from "./attention.ts";
 import { countTouched } from "./touch.ts";
@@ -361,6 +361,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
   let modelRequests = 0;
   let modelFallbacks = 0;
   let netCalls = 0;
+  // What this round said: the `/say` calls it queued, and who they named. Reset when the
+  // round starts, like the counters above, because the socket outlives the round.
+  let sayCalls = 0;
+  const spokeTo = new Set<string>();
   if (!o.dry) {
     try {
       await startBookServer({
@@ -387,6 +391,10 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         },
         onModelFallback: (attempts) => {
           modelFallbacks += attempts;
+        },
+        onSay: (place) => {
+          sayCalls += 1;
+          spokeTo.add(whoOf(paths.data, place.id));
         },
       });
     } catch (err) {
@@ -470,6 +478,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     modelRequests = 0;
     modelFallbacks = 0;
     netCalls = 0;
+    sayCalls = 0;
+    spokeTo.clear();
     const plan: Plan = planFor(escalation);
     let reason: WakeReason;
     let pendingWait: WaitSpec | null;
@@ -756,7 +766,8 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
         inj: inj.total,
         net: netCalls,
         talkedTo: cycle.talkedTo,
-        saidTo: active.filter((a) => a.said).map((a) => a.who),
+        said: sayCalls,
+        saidTo: [...spokeTo],
         touched: cycle.touched,
       });
     } catch (err) {

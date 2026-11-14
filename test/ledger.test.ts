@@ -28,6 +28,7 @@ function rec(over: Partial<LedgerRecord> = {}): LedgerRecord {
     inj: 0,
     net: 0,
     talkedTo: [],
+    said: 0,
     saidTo: [],
     touched: 0,
     ...over,
@@ -61,6 +62,7 @@ test("账本：只追加，不重写已有的行；字段集合是约定", () =>
       "lvl",
       "net",
       "reason",
+      "said",
       "saidTo",
       "sym",
       "talkedTo",
@@ -109,7 +111,7 @@ test("账本：「没人叫它」和「它动了」是两个数，合起来才�
     rec({ wake: 1, reason: "knock", touched: 5 }), // 被叫醒，也写了东西
     rec({ wake: 2, reason: "timer", touched: 3 }), // 自己醒的，写了东西
     rec({ wake: 3, reason: "timer", touched: 0 }), // 自己醒的，什么也没做
-    rec({ wake: 4, reason: "nudge", saidTo: ["@someone"] }), // 兜底叫醒，它说了话
+    rec({ wake: 4, reason: "nudge", said: 1, saidTo: ["@someone"] }), // 兜底叫醒，它说了话
     rec({ wake: 5, reason: "knock", sym: "timeout", lvl: 2 }), // 被叫醒，超时
     // 只有人来说了一句、它一声没吭：这不是它做的事。两条，因为一条时「把入站算进去」
     // 恰好会和别的轮次抵平，总数看起来仍然对——这正是这类计数最容易骗过测试的地方。
@@ -128,6 +130,20 @@ test("账本：「没人叫它」和「它动了」是两个数，合起来才�
   assert.deepEqual(d.talkedTo, ["@someone"]);
   assert.equal(d.notOk, 1);
   assert.equal(d.worstLvl, 2);
+});
+
+test("账本：说了话算动了，哪怕那一下认不出是谁", () => {
+  // 队列写成功但没有可命名的 place（还没人跟它说过话）：仍是它做的事。数的是这一轮
+  // 自己排进队列的 `/say`，不是 gateway 两秒后投递出去的那条出站记录。
+  const records = [
+    rec({ wake: 1, reason: "timer", said: 1 }), // 说了，但 saidTo 空
+    rec({ wake: 2, reason: "timer", talkedTo: ["@someone"] }), // 只有人来了一句
+  ];
+  const d = digestLedger(records);
+  assert.equal(d.acted, 1);
+  assert.equal(d.unpromptedActed, 1);
+  assert.equal(d.spoke, 1);
+  assert.deepEqual(d.saidTo, []);
 });
 
 test("账本：--since 的写法要有下界，不能把「7」猜成七天", () => {
@@ -160,7 +176,7 @@ test("账本：窗口和条数只影响读，不影响写", () => {
 test("账本：给人看的那几行说清数和窗口，且不出现钱", () => {
   const records = [
     rec({ wake: 1, reason: "knock", touched: 2 }),
-    rec({ wake: 2, reason: "timer", saidTo: ["@someone"], lvl: 1 }),
+    rec({ wake: 2, reason: "timer", said: 1, saidTo: ["@someone"], lvl: 1 }),
   ];
   const text = formatLedgerDigest("alice", records, "最近 24h").join("\n");
   assert.match(text, /alice\s+账本：最近 24h · 2 轮/);

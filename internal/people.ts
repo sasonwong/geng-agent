@@ -101,20 +101,23 @@ export function waitingOn(data: string): { who: string; at: string }[] {
 }
 
 /**
- * Everybody whose conversation moved since `sinceMs` — however many that turns out to be.
- *
- * `said` separates the two directions: a message that only arrived is somebody else's act,
- * and a count that treats it as ours is exactly how a round where it said nothing gets
- * recorded as if it had spoken.
+ * The name a chat goes by: whatever they last called themselves, or the id when nobody
+ * left a line. One rule for the page and the ledger, so the same chat is not two people.
  */
-export function activeSince(data: string, sinceMs: number): { chat: number; who: string; said: boolean }[] {
+export function whoOf(data: string, chat: number): string {
+  const tail = readSaid(data, chat, 20)?.tail ?? [];
+  return tail.filter((l) => l.dir === "in").pop()?.from ?? tail[tail.length - 1]?.from ?? `chat ${chat}`;
+}
+
+/** Everybody whose conversation moved since `sinceMs` — however many that turns out to be. */
+export function activeSince(data: string, sinceMs: number): { chat: number; who: string }[] {
   let chats: string[];
   try {
     chats = readdirSync(peopleDir(data)).filter((f) => f.endsWith(".jsonl"));
   } catch {
     return [];
   }
-  const out: { chat: number; who: string; said: boolean }[] = [];
+  const out: { chat: number; who: string }[] = [];
   for (const f of chats) {
     const chat = Number(f.replace(/\.jsonl$/, ""));
     if (Number.isNaN(chat)) continue;
@@ -122,12 +125,7 @@ export function activeSince(data: string, sinceMs: number): { chat: number; who:
     const newest = last[last.length - 1];
     if (!newest || Number.isNaN(Date.parse(newest.at))) continue;
     if (Date.parse(newest.at) < sinceMs) continue;
-    const who =
-      last.filter((l) => l.dir === "in").pop()?.from ??
-      last[last.length - 1]?.from ??
-      `chat ${chat}`;
-    const said = last.some((l) => l.dir === "out" && Date.parse(l.at) >= sinceMs);
-    out.push({ chat, who, said });
+    out.push({ chat, who: whoOf(data, chat) });
   }
   return out;
 }
