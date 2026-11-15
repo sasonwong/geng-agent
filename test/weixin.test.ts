@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -174,6 +174,19 @@ test("credentials are written 600, and a blank token is reported instead of disa
   saveWeixin(root, "bob", { token: "", userId: "b@im.wechat" });
   const broken = readWeixin(root);
   assert.ok(broken.problems.some((p) => p.includes("bob") && p.includes("没有 token")));
+});
+
+test("a credentials file that is not UTF-8 is a problem, not an absent file", (t) => {
+  const root = tempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // 0xFF 永远不是合法 UTF-8：readText 返回 null，而 null 也代表「文件不在」。
+  writeFileSync(credentialsFile(root), Buffer.from([0x7b, 0xff, 0x7d]));
+  const read = readWeixin(root);
+  assert.deepEqual(read.configs, {});
+  assert.ok(
+    read.problems.some((p) => p.startsWith(credentialsFile(root))),
+    "文件在，问题就得挂在文件上，否则 doctor 一个字都不报",
+  );
 });
 
 test("an inbound owner message carries the context, opens the window, and keeps a uint64 id", async (t) => {

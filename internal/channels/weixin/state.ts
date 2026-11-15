@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { readText } from "../../fs.ts";
@@ -85,7 +85,15 @@ function text(value: unknown): string | undefined {
 export function readWeixin(root: string): WeixinFile {
   const file = credentialsFile(root);
   const raw = readText(file);
-  if (raw === null) return { configs: {}, problems: [] };
+  // `null` is both "not there" and "there with bytes that are not UTF-8". The second
+  // one used to be garbage that failed JSON.parse, so it was still a problem; saying
+  // nothing here makes doctor quiet about a file the gateway cannot load.
+  if (raw === null) {
+    return {
+      configs: {},
+      problems: existsSync(file) ? [`${file} 不是合法 JSON（字节不是 UTF-8）`] : [],
+    };
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
