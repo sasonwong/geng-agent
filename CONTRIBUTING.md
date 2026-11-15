@@ -56,14 +56,17 @@ git push origin dev:main
 merge 或 squash**：那两种都会在 `main` 上造出一个"发布提交"，`main` 和 `dev` 的内容从此只能
 靠比对才知道是否一致。
 
-这条推送走 owner 在 `main` ruleset 里的 bypass（`bypass_mode: always`）。owner 可以直接快进；
-其他账号和机器人仍然受 PR 和 required status checks 约束。`always` 也放行 force push 和删除，
-所以“main 只追加”从规则约束变成了 owner 的约定：发布只用快进，仍然不要改写 `main` 的历史。
+`main` 的规则分两条：`main: append only` 只有 `deletion` + `non_fast_forward`，没有 bypass——
+owner 也删不掉、也 force push 不了；`Protect main` 是 `pull_request` + required status checks，
+owner 在那里是 `always` bypass，所以 `git push origin dev:main` 的快进照常能推，其他账号和机器人
+仍然要 PR + 绿 check。要重写 `main`（比如抹掉一个值）得先停掉 `main: append only`，那一步留在
+ruleset 的审计记录里，而不是留在谁的记性里。
 
 两条推论：
 
-- **重写 `dev` 只能在它被快进进 `main` 之前。** `main` 按约定只追加，所以进了 `main` 的提交不可
-  重写：发现泄漏要在发版前处理。发版之后再发现，只能靠新提交清理，并在报告里说明旧值仍在历史里。
+- **重写 `dev` 只能在它被快进进 `main` 之前。** `main` 由 `main: append only` 挡着重写，所以进了
+  `main` 的提交不可重写：发现泄漏要在发版前处理。发版之后再发现，只能靠新提交清理，并在报告里
+  说明旧值仍在历史里。
 - **标签跟着快进点走**：`v0.0.N` 打在 `main` 的快进点上；`dev` 线上的里程碑用带后缀的预发布号，
   同一层从 1 往上加：`a1`、`a2`…（alpha）、`b1`…（beta）、`rc1`…（release candidate），没有后缀
   就是正式版（annotated，推上去不再移动）。所以一个标签永远指得到当时审计过的那条线，即使 `dev`
