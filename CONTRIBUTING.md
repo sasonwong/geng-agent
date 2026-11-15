@@ -51,6 +51,9 @@
 git push origin dev:main
 ```
 
+推之前一刻再对一次条件 1：`git rev-parse origin/dev` 必须还是审计过的那个 sha。审计之后又进了一个
+提交，窗口就重新打开了——发版只认推的时候，不认审计的时候。
+
 推上去的是已经审计过的那批提交本身，不产生 merge commit，所以 `main` 永远是 `dev` 的前缀——
 一条直线，`dev` 里每一条提交都过一次审计和一次 CI。**不再有 `dev → main` 的 PR，也不再用
 merge 或 squash**：那两种都会在 `main` 上造出一个"发布提交"，`main` 和 `dev` 的内容从此只能
