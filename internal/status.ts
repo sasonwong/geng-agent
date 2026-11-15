@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { knownPlaces } from "./gateway.ts";
 import { listSessionFiles } from "./command.ts";
@@ -67,6 +67,13 @@ export async function printStatus(root: string, instance: string): Promise<void>
   const wait = readWaiting(p.waiting);
 
   const identity = readText(p.identity);
+  // Same split as doctor and the wake packet: "not written" and "there with bad bytes"
+  // are two problems, and only one of them is answered by writing the file.
+  const identityText = identity
+    ? bytes(Buffer.byteLength(identity, "utf8"))
+    : existsSync(p.identity)
+      ? "在，但字节不是 UTF-8"
+      : "（未写）";
   const loops = countLoops(p);
   const sessions = listSessionFiles(p.sessionDir);
   // A session rotated or cleaned up between the listing and the stat counts as 0: one
@@ -99,7 +106,7 @@ export async function printStatus(root: string, instance: string): Promise<void>
           })()}`,
         ]
       : []),
-    `  identity    ${identity ? bytes(Buffer.byteLength(identity, "utf8")) : "（未写）"}`,
+    `  identity    ${identityText}`,
     `  未闭合      ${loops} 件`,
     `  session     ${sessions.length} 文件 / ${bytes(sessionBytes)}`,
     `  花费        ${spend.cycles} 轮 · ${spend.tokens} tokens · $${spend.cost.toFixed(4)}`,

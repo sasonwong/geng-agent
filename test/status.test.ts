@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { printStatus, spendSince } from "../internal/status.ts";
@@ -60,6 +60,25 @@ test("快照列表读不出时 status 说「读不出」，不是笼统的「没
     rmSync(root, { recursive: true, force: true });
   }
   assert.match(lines.join("\n"), /快照\s+读不出（/);
+});
+
+test("identity.md 在、字节不是 UTF-8 时，status 说「读不出来」，不是「未写」", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = makePaths(root, "alice");
+  mkdirSync(p.openLoops, { recursive: true });
+  writeFileSync(p.identity, Buffer.from([0x41, 0xff, 0x42]));
+  const lines: string[] = [];
+  const old = console.log;
+  console.log = (s: string) => lines.push(s);
+  try {
+    await printStatus(root, "alice");
+  } finally {
+    console.log = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+  const out = lines.join("\n");
+  assert.match(out, /identity\s+在，但字节不是 UTF-8/);
+  assert.doesNotMatch(out, /identity\s+（未写）/);
 });
 
 test("session 文件在列出来之后消失，status 不崩", async () => {
