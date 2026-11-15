@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { knownPlaces } from "./gateway.ts";
 import { listSessionFiles } from "./command.ts";
 import { makePaths, type Paths } from "./paths.ts";
@@ -14,6 +14,19 @@ export interface Spend {
   cycles: number;
   tokens: number;
   cost: number;
+  /** logs that are there but not UTF-8, so the numbers above are too small */
+  unreadable: string[];
+}
+
+/** A log that exists and cannot be read is not an empty log: "0 rounds" would be a lie. */
+function logText(files: string[], unreadable: string[]): string {
+  return files
+    .map((file) => {
+      const text = readText(file);
+      if (text === null && existsSync(file)) unreadable.push(basename(file));
+      return text ?? "";
+    })
+    .join("\n");
 }
 
 /**
@@ -24,8 +37,9 @@ export function spendSince(p: Paths, nowMs: number, windowMs = DAY_MS): Spend {
   // `appendLine` rotates at 20 000 lines: after a rotation yesterday's rounds are in
   // `daemon.log.1` and today's in `daemon.log`, and reading only the live one would report
   // a cheaper day than the one that happened. Older first, so the order is unchanged.
-  const text = [readText(`${p.daemonLog}.1`) ?? "", readText(p.daemonLog) ?? ""].join("\n");
-  const total: Spend = { cycles: 0, tokens: 0, cost: 0 };
+  const unreadable: string[] = [];
+  const text = logText([`${p.daemonLog}.1`, p.daemonLog], unreadable);
+  const total: Spend = { cycles: 0, tokens: 0, cost: 0, unreadable };
   for (const line of text.split("\n")) {
     const at = Date.parse(line.slice(0, 24));
     if (Number.isNaN(at) || nowMs - at > windowMs) continue;
@@ -85,8 +99,10 @@ export async function printStatus(root: string, instance: string): Promise<void>
       return n;
     }
   }, 0);
-  const logTail = (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] ?? "（无）";
   const spend = spendSince(p, now);
+  const logTail = spend.unreadable.includes(basename(p.daemonLog))
+    ? "（读不出）"
+    : (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] ?? "（无）";
   const snapshots = await listSnapshots(p);
   const latest = snapshots.ok ? snapshots.snapshots[snapshots.snapshots.length - 1] : undefined;
   // one read, one answer: the list was fetched twice in the same expression
@@ -109,7 +125,7 @@ export async function printStatus(root: string, instance: string): Promise<void>
     `  identity    ${identityText}`,
     `  未闭合      ${loops} 件`,
     `  session     ${sessions.length} 文件 / ${bytes(sessionBytes)}`,
-    `  花费        ${spend.cycles} 轮 · ${spend.tokens} tokens · $${spend.cost.toFixed(4)}`,
+    `  花费        ${spend.cycles} 轮 · ${spend.tokens} tokens · $${spend.cost.toFixed(4)}${spend.unreadable.length > 0 ? `（${spend.unreadable.join("、")} 读不出，这个数偏小）` : ""}`,
     `  快照        ${
       !snapshots.ok
         ? `读不出（${snapshots.detail ?? "?"}）`

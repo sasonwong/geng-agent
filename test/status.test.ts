@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { printStatus, spendSince } from "../internal/status.ts";
 import { makePaths } from "../internal/paths.ts";
 import { writeText } from "../internal/fs.ts";
@@ -98,4 +98,27 @@ test("session 文件在列出来之后消失，status 不崩", async () => {
     rmSync(root, { recursive: true, force: true });
   }
   assert.match(lines.join("\n"), /session\s+1 文件/, "列的那一件还在，只是按 0 字节算");
+});
+
+test("daemon.log 在但字节不是 UTF-8 时，花费不说成 0 轮", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = makePaths(root, "alice");
+  mkdirSync(dirname(p.daemonLog), { recursive: true });
+  // 坏字节那一行读不出。旧实现把它 `?? ""` 当空日志，当天花费就报 0 轮 0 美元——
+  // 「读不出」被说成了「没花钱」。
+  writeFileSync(p.daemonLog, Buffer.from([0x32, 0x30, 0x32, 0x36, 0xff, 0x0a]));
+  const spend = spendSince(p, Date.now());
+  assert.deepEqual(spend.unreadable, ["daemon.log"], "daemon.log.1 不存在，不算读不出");
+  const lines: string[] = [];
+  const old = console.log;
+  console.log = (s: string) => lines.push(s);
+  try {
+    await printStatus(root, "alice");
+  } finally {
+    console.log = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+  const out = lines.join("\n");
+  assert.match(out, /花费\s+0 轮 · 0 tokens · \$0\.0000（daemon\.log 读不出，这个数偏小）/);
+  assert.match(out, /上次一轮\s+（读不出）/);
 });
