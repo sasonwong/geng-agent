@@ -122,3 +122,22 @@ test("daemon.log 在但字节不是 UTF-8 时，花费不说成 0 轮", async ()
   assert.match(out, /花费\s+0 轮 · 0 tokens · \$0\.0000（daemon\.log 读不出，这个数偏小）/);
   assert.match(out, /上次一轮\s+（读不出）/);
 });
+
+test("轮转后 daemon.log.1 读不出时，能读的当天那件照算", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const p = makePaths(root, "alice");
+  try {
+    mkdirSync(dirname(p.daemonLog), { recursive: true });
+    // 轮转把昨天那轮挪进 .1，坏字节就落在它上面；当天那件还是好的。
+    // logText 存在的理由就是这一天：只测活文件等于没测它为什么被拆出来。
+    writeFileSync(`${p.daemonLog}.1`, Buffer.from([0x32, 0x30, 0x32, 0x36, 0xff, 0x0a]));
+    writeText(p.daemonLog, `${new Date().toISOString()} #1 wake=alarm sym=ok lvl=0 tokens=1234 cost=0.0500\n`);
+    const spend = spendSince(p, Date.now());
+    assert.deepEqual(spend.unreadable, ["daemon.log.1"], "读不出的只有轮转的那件");
+    assert.equal(spend.cycles, 1, "能读的那件还得照算，一份坏文件不能把另一份的轮次吃掉");
+    assert.equal(spend.tokens, 1234);
+    assert.equal(spend.cost, 0.05);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
