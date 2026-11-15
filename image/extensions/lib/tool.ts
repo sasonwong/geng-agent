@@ -7,18 +7,19 @@
  * The type is here so a typo in the shape is a compile error in the editor, not a waking
  * that exits before it can speak.
  */
-export interface Tool {
+export interface Tool<P = Record<string, unknown>> {
   name: string;
   label: string;
   description: string;
   parameters: Record<string, unknown>;
+  // Each tool names its own parameters at the call site: the schema is still the runtime
+  // truth, but `params.messages` now gets a type instead of `any`.
   execute: (
     id: string,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    params: any,
+    params: P,
   ) => Promise<{ content: { type: "text"; text: string }[]; details: unknown }>;
 }
 
-export function tool(t: Tool): Tool {
+export function tool<P = Record<string, unknown>>(t: Tool<P>): Tool<P> {
   return t;
 }

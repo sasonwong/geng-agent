@@ -26,7 +26,7 @@ async function call(path: string, body: Record<string, unknown>): Promise<string
   return `${payload.data === undefined ? "搜索端点没有回内容" : JSON.stringify(payload.data)}${left}`;
 }
 
-const searchTool = tool({
+const searchTool = tool<{ query: string; count?: number; need_content?: boolean }>({
   name: "web_search",
   label: "Web Search",
   description: '搜网。query 写要搜的东西。返回标题、链接和摘要；搜不了会明说为什么。',
@@ -47,7 +47,7 @@ const searchTool = tool({
   },
 });
 
-const fetchTool = tool({
+const fetchTool = tool<{ url: string }>({
   name: "web_fetch",
   label: "Web Fetch",
   description: '取一个网页的正文。url 写完整地址。返回正文（太长会截断）；取不到会明说原因。',

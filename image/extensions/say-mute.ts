@@ -27,7 +27,7 @@ async function send(route: string, body: Record<string, unknown>): Promise<{ ok:
   }
 }
 
-const sayTool = tool({
+const sayTool = tool<{ messages: string[]; to?: string; files?: string[]; replyTo?: string }>({
   name: "say",
   label: "Say",
   description:
@@ -102,7 +102,7 @@ const sayTool = tool({
   },
 });
 
-const listenTool = tool({
+const listenTool = tool<{ chats: string[]; until?: string; why?: string }>({
   name: "listen",
   label: "Listen",
   description: '让某些会话的消息直接叫醒你——平时它们只摆在收件箱里等你醒。chats 是 chat id 数组，写 "*" 表示全部，空数组表示不听了。until 可选，ISO 时刻，不写就是四小时后，最长四小时。why 可选。返回 {chats, until}。',
@@ -147,7 +147,7 @@ const listenTool = tool({
   },
 });
 
-const forgetTool = tool({
+const forgetTool = tool<{ files: string[] }>({
   name: "forget",
   label: "Forget files",
   description: '删掉别人发来的文件腾地方，下一轮醒来之前生效——这一轮你还听得到它。files 是 id 数组（形如 "F12"；老写法的 /files/… 路径也认），一次最多 50 个。返回 {files}：累计的待删清单（含之前记下、还没删掉的），不是删完剩下的——删除发生在下一轮醒来之前。',
@@ -178,7 +178,7 @@ const forgetTool = tool({
   },
 });
 
-const muteTool = tool({
+const muteTool = tool<{ target: string; minutes: number; why: string }>({
   name: "mute",
   label: "Mute",
   description: '安静一段时间：把某个来源从「会叫醒你」降成「下次醒来再看」，消息一条都不丢。target 只能是 "*"（全部环境噪音）或 "chat:<id>"（id 是数字）；dm 不接受——私聊、@你、回复你永远叫醒你。minutes 是 1–10080。why 必填，会写进下次醒来的纸上。返回 {target, until}。',
@@ -221,7 +221,7 @@ const muteTool = tool({
   },
 });
 
-const proposeTool = tool({
+const proposeTool = tool<{ value: string }>({
   name: "propose",
   label: "Propose",
   description:

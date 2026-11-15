@@ -37,7 +37,7 @@ function say(r: Reply, ok: string): string {
   return ok;
 }
 
-const journalTool = tool({
+const journalTool = tool<{ texts: string[] }>({
   name: "journal",
   label: "Journal",
   description: '往日记里写。texts 是字符串数组（1–20 条，一条一个元素），一次调用写几条。返回 {ids}：每条拿到的 id，形如 J20260302-2，可以用 open(id) 读回来。内容格式你定，没人解析。',
@@ -64,7 +64,7 @@ const journalTool = tool({
   },
 });
 
-const loopOpenTool = tool({
+const loopOpenTool = tool<{ text: string }>({
   name: "loop_open",
   label: "Open loop",
   description: '记一件没闭合的事。text 写清这件事是什么、怎么算做完——下一轮的你才认得出什么时候算完。返回 {id}，形如 L12。它会出现在每张唤醒纸的条数里，直到 loop_close。',
@@ -82,7 +82,7 @@ const loopOpenTool = tool({
   },
 });
 
-const loopCloseTool = tool({
+const loopCloseTool = tool<{ id: string; note?: string }>({
   name: "loop_close",
   label: "Close loop",
   description: '关掉一件没闭合的事。id 来自 loop_open 的返回（形如 L12，不是文件名）。note 可选，写一句为什么算完了，附在文件末尾。不删内容，只是移到 open-loops/closed/，所以纸上的条数减一。返回 {id, closed}。',
@@ -103,7 +103,7 @@ const loopCloseTool = tool({
   },
 });
 
-const discardTool = tool({
+const discardTool = tool<{ id: string; why?: string }>({
   name: "discard",
   label: "Discard journal entry",
   description: '撤掉一条写错的日记。id 来自 journal 的返回（形如 J20261104-3）。why 可选，写一句为什么不算数，附在文末。不删文件，只是移到 journal/discarded/，recall 里标「已丢弃」，open 仍然读得到。返回 {id, discarded}。已经丢弃过的再调一次不算错。',
@@ -124,7 +124,7 @@ const discardTool = tool({
   },
 });
 
-const waitTool = tool({
+const waitTool = tool<{ when: string; why?: string }>({
   name: "wait",
   label: "Wait",
   description: '定下一次什么时候醒。when 写一段时长（"20m"、"2h"、"90s"、"1d"）或者一个带时区的时刻（2026-03-02T09:15:00Z）；why 可选，写一句到时候你还认得出为什么。返回 {at}：真正生效的时刻——比最短间隔更近的会被抬到最短，回复的是抬完的时间。不调就按默认间隔醒。',

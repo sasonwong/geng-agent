@@ -28,7 +28,7 @@ async function call(route: string, body: Record<string, unknown>): Promise<strin
   return typeof parsed.text === "string" ? parsed.text : "记忆端点答了空。";
 }
 
-const recallTool = tool({
+const recallTool = tool<{ query?: string; sources?: string[]; limit?: number }>({
   name: "recall",
   label: "Recall",
   description: '翻自己的书。query 可选：给了就只回出现它的那几行，不给就按时间列最近的。sources 可选，取值 journal（日记）/ loops（没闭合的事，含已闭合）/ mail（邮件）/ people（和谁说过什么）/ inbox（收到的消息）/ sessions（醒过的每一轮）/ files（别人发来的文件），默认全翻。limit 默认 20，最多 50。每条回 id、来源、时间、一行摘要；要看全文用 open(id)。',
@@ -50,7 +50,7 @@ const recallTool = tool({
   },
 });
 
-const openTool = tool({
+const openTool = tool<{ id: string; offset?: number }>({
   name: "open",
   label: "Open",
   description: '读一件东西的全文。id 的形状：日记 J20260302-2；没闭合的事 L12（已闭合的也打得开）；一个人 P-1001（他说过的全部话）；醒过的一轮 R5；一封邮件 E12；一条收到的消息 M-1001-77；一个文件 F12（别人发来的附件，正文里写怎么拿走它）。offset 可选，接着上次读。返回正文；超过 8000 字会告诉你下一个 offset。打开一封邮件就算处理过了。',

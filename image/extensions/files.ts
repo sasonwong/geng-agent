@@ -16,7 +16,7 @@ const SOCKET = process.env.GENG_BOOK_SOCK ?? "";
 /** The container's working directory, mounted from the instance's `workspace/`. */
 const WORK = "/work";
 
-const downloadTool = tool({
+const downloadTool = tool<{ id: string; to: string }>({
   name: "download",
   label: "Download",
   description:
