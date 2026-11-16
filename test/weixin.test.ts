@@ -627,3 +627,25 @@ test("a blank token is a doctor failure", (t) => {
   const checks = weixinChannel.doctor?.(root, "alice") ?? [];
   assert.ok(checks.some((c) => c.name === "微信凭据" && !c.ok));
 });
+
+// The file left behind by a write that had to set bad bytes aside is invisible to every
+// other reader: `data/_gateway` is not something a person lists. doctor is the only surface
+// where a corruption is more than a file name. One warn, not a problem, and it deletes nothing.
+test("doctor reports the state bytes that were set aside, and says nothing when there are none", (t) => {
+  const root = tempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  saveWeixin(root, "alice", config("http://127.0.0.1:1"));
+  const clean = weixinChannel.doctor?.(root, "alice") ?? [];
+  assert.equal(clean.find((c) => c.name === "微信旧 state"), undefined, "没坏过就不要凭空多一格");
+
+  const dir = join(root, "data", "_gateway");
+  writeFileSync(join(dir, "weixin.json.bad-2"), "x");
+  writeFileSync(join(dir, "weixin.json.bad-1700000000000"), "y");
+  const check = (weixinChannel.doctor?.(root, "alice") ?? []).find((c) => c.name === "微信旧 state");
+  assert.ok(check, ".bad 文件在，doctor 一个字都不报");
+  assert.equal(check?.ok, false);
+  assert.equal(check?.warnOnly, true);
+  assert.match(String(check?.detail), /2 个/);
+  assert.match(String(check?.detail), /1970-01-01T00:00:00\.002Z/, "最老的那个按文件名里的 ms 排");
+  assert.equal(readdirSync(dir).filter((f) => f.startsWith("weixin.json.bad-")).length, 2, "doctor 不替人删");
+});

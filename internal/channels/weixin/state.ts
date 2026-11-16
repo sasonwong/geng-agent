@@ -1,6 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { readText } from "../../fs.ts";
 
 /** The fixed host `get_bot_qrcode` starts from; a status redirect may move it. */
@@ -213,6 +213,27 @@ export function writeState(root: string, states: WeixinStates): void {
     renameSync(file, `${file}.bad-${Date.now()}`);
   }
   writePrivate(file, states);
+}
+
+/**
+ * The bytes an earlier write moved aside as `<state>.bad-<ms>`. Nothing reads them — they
+ * are there so a corruption can be looked at — and the millisecond in the name is when
+ * they were set aside, so no `stat` is needed to order them.
+ */
+export function keptBadStates(root: string): { name: string; at: number }[] {
+  const file = stateFile(root);
+  const dir = dirname(file);
+  const prefix = `${basename(file)}.bad-`;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((n) => n.startsWith(prefix) && /^\d+$/.test(n.slice(prefix.length)))
+    .map((n) => ({ name: n, at: Number(n.slice(prefix.length)) }))
+    .sort((a, b) => a.at - b.at);
 }
 
 /**
