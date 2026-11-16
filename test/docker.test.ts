@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { runChild } from "../internal/docker.ts";
 
 /**
@@ -22,4 +25,23 @@ test("a command that answers really does give its stdout and exit code", async (
 test("a failed command is a null code, not an empty answer that reads as success", async () => {
   const r = await runChild(process.execPath, ["-e", "process.exit(3)"], true, 5_000);
   assert.equal(r.code, 3);
+});
+
+test("a build's output goes to a file instead of a pipe nobody reads", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-child-"));
+  try {
+    const log = join(root, "build.log");
+    const r = await runChild(
+      process.execPath,
+      ["-e", "process.stdout.write('out\\n'); process.stderr.write('err\\n')"],
+      false,
+      5_000,
+      log,
+    );
+    assert.equal(r.code, 0);
+    // both streams: a build's failure is on stderr, and that is the half worth keeping
+    assert.equal(readFileSync(log, "utf8"), "out\nerr\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

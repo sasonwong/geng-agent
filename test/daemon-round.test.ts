@@ -69,13 +69,13 @@ function fixture(root: string): Paths {
 }
 
 /** A `docker` that is not docker: `run` becomes this script, everything else says nothing. */
-function fakeDocker(root: string, p: Paths): string {
+function fakeDocker(root: string, p: Paths, missingImage = false): string {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
   writeFileSync(join(root, "pi.mjs"), PI);
   writeFileSync(
     join(bin, "docker"),
-    `#!/bin/sh\ncase "$1" in\n  run) exec "${process.execPath}" "${join(root, "pi.mjs")}" "${socketPath(p)}" "${CHAT}" ;;\n  *) exit 0 ;;\nesac\n`,
+    `#!/bin/sh\ncase "$1" in\n  run) exec "${process.execPath}" "${join(root, "pi.mjs")}" "${socketPath(p)}" "${CHAT}" ;;\n${missingImage ? "  image) exit 1 ;;\n" : ""}  *) exit 0 ;;\nesac\n`,
   );
   chmodSync(join(bin, "docker"), 0o755);
   return bin;
@@ -117,6 +117,29 @@ test("a preview of the same instance writes no ledger line", async () => {
     await runDaemon({ root, instance: "alice", once: true, dry: true, log: () => {} });
     assert.equal(existsSync(p.ledger), false, "预览不是一轮，账本上不能有它");
   } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a missing image is rebuilt before the round, and a preview does not build", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-round-build-"));
+  const oldPath = process.env.PATH;
+  try {
+    const p = fixture(root);
+    process.env.PATH = `${fakeDocker(root, p, true)}${delimiter}${oldPath ?? ""}`;
+    const marker = join(root, "built");
+    writeFileSync(join(root, "deploy", "build.sh"), `#!/bin/sh\ntouch "${marker}"\n`);
+    chmodSync(join(root, "deploy", "build.sh"), 0o755);
+
+    // the preview reads the same "no such image" and must not spend a build on it
+    await runDaemon({ root, instance: "alice", once: true, dry: true, log: () => {} });
+    assert.equal(existsSync(marker), false, "预览不是一轮，不能构建");
+
+    await runDaemon({ root, instance: "alice", once: true, log: () => {} });
+    assert.equal(existsSync(marker), true, "镜像不在时，醒来之前先重建");
+    assert.match(readFileSync(join(p.data, "build.log"), "utf8"), /镜像不在，重建 geng-agent:latest/);
+  } finally {
+    process.env.PATH = oldPath;
     rmSync(root, { recursive: true, force: true });
   }
 });

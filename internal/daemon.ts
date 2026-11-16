@@ -46,13 +46,19 @@ import { systemPromptFor } from "./prompt.ts";
 import { startBookServer } from "./book.ts";
 import { lastJournalLine } from "./recall.ts";
 import { searchConfigured, searchQuota } from "./search.ts";
-import { describeEnvChange, imageId } from "./env.ts";
+import { describeEnvChange, imageId, imageMissing } from "./env.ts";
+import { pinImage, runChild } from "./docker.ts";
 import { abortActive, runWaking, type RpcResult } from "./rpc.ts";
 import { classify, SYMPTOM_LABEL } from "./symptoms.ts";
 import { advance, loadEscalation, parkNotice, planFor, saveEscalation, slowDownNotice, timeoutNotice, type Escalation, type Plan } from "./escalation.ts";
 
 const POLL_MS = 5_000;
 const LONG_GAP_FLOOR_MS = 3 * 3_600_000;
+// A rebuild is the daemon's last repair, and the only one that needs the network. It is
+// bounded like every other child, and a failure buys half an hour before the next try:
+// a host that lost its network must not spend this on every waking.
+const BUILD_TIMEOUT_MS = 15 * 60_000;
+const BUILD_RETRY_MS = 30 * 60_000;
 // A policy file is edited by hand, so one that does not parse is a normal event. The first
 // waits are short because a person who just saved the fix wants it picked up, not waited
 // out; the last is a minute because after that nobody is watching.
@@ -227,6 +233,30 @@ function logLine(
   if (files.ledger) parts.push(`ledger=fail(${files.ledger})`);
   if (backup) parts.push(`backup=${backup.status}${backup.detail ? `(${backup.detail})` : ""}`);
   return parts.join(" ");
+}
+
+/**
+ * Rebuild the image from the checkout when docker says it is gone. `deploy/build.sh` is the
+ * same build `update.sh` runs; the daemon only decides *when*, because it is the process
+ * that cannot wake without the result. The output goes to a file: a failed build with no
+ * reason is a repair nobody can finish.
+ */
+async function rebuildImage(paths: Paths, image: string, log: (line: string) => void): Promise<boolean> {
+  const logFile = join(paths.data, "build.log");
+  appendLine(logFile, `=== ${new Date().toISOString()} 镜像不在，重建 ${image}`);
+  log(`镜像不在，重建 ${image}（日志 ${logFile}）`);
+  const r = await runChild(
+    "env",
+    [`GENG_IMAGE=${image}`, join(paths.root, "deploy", "build.sh")],
+    false,
+    BUILD_TIMEOUT_MS,
+    logFile,
+  );
+  if (r.code === 0) return true;
+  const why = r.code === null ? "超时" : `退出码 ${r.code}`;
+  appendLine(logFile, `=== 重建失败：${why}`);
+  log(`镜像重建失败：${image}（${why}）`);
+  return false;
 }
 
 export async function runDaemon(o: DaemonOptions): Promise<void> {
@@ -416,6 +446,9 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     }
   }
   let escalation: Escalation = loadEscalation(paths);
+  // One failed rebuild per half hour, in memory: a daemon restart is a person acting, and
+  // that is exactly when a retry is worth making.
+  let buildFailedAt = 0;
 
   for (;;) {
     // policy.json is read at the top of every cycle, and a proposal is spent there too:
@@ -439,11 +472,31 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // from the image tag, so a rebuild is picked up by itself — and this comparison is the
     // only thing that tells it its world changed. Read once at startup, a rebuild while the
     // daemon kept running was never reported, and `meta.env` kept claiming the old image.
+    let image = await imageId(policy);
+    // `docker system prune -a` deletes every image no container references, so the image
+    // is pinned by a keeper container (see pinImage) and rebuilt here if it is already
+    // gone. Only when docker is up and says "no such image": a daemon that starts before
+    // dockerd must not spend a build on "could not ask".
+    if (!dry && image === null && Date.now() - buildFailedAt > BUILD_RETRY_MS) {
+      if (await imageMissing(policy.container.image)) {
+        const built = await rebuildImage(paths, policy.container.image, log);
+        if (!built) buildFailedAt = Date.now();
+        image = await imageId(policy);
+        if (built && image !== null) log(`镜像重建完成 ${policy.container.image}`);
+      }
+    }
     const currentEnv = {
-      imageId: await imageId(policy),
+      imageId: image,
       search: searchConfigured(paths.root),
     };
     const envChanged = describeEnvChange(readMeta(paths).env, currentEnv);
+    // A preview must not create containers. A start keeps one running container per image
+    // whose only job is to be a reference `prune` cannot remove.
+    if (!dry && image !== null) {
+      const pinned = await pinImage(policy.container.image, image);
+      if (pinned === "pinned") log(`钉住镜像 ${policy.container.image}`);
+      if (pinned === "failed") log(`钉不住镜像 ${policy.container.image}：下一次 prune 会把它删掉`);
+    }
     // derived from the policy, so it is read after the reload above rather than once
     const longGapMs = Math.max(policy.cycle.defaultWakeMinutes * 60_000 * 3, LONG_GAP_FLOOR_MS);
     // Only while it is not running: a file vanishing under a read is the failure this

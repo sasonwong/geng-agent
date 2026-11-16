@@ -11,6 +11,17 @@ export async function imageId(policy: Policy): Promise<string | null> {
 }
 
 /**
+ * True only when docker is up and says the image does not exist. `docker image inspect`
+ * exits non-zero for both "no such image" and "cannot connect to the daemon", and a daemon
+ * that starts before dockerd would then rebuild on every boot, spending minutes to fail in
+ * the same place. `docker info` is the one call that separates the two.
+ */
+export async function imageMissing(image: string): Promise<boolean> {
+  if ((await dockerRun(["info"], false)).code !== 0) return false;
+  return (await dockerRun(["image", "inspect", image], false)).code === 1;
+}
+
+/**
  * Stated as fact, without identifiers. The image id is the daemon's own bookkeeping,
  * useless to something that cannot look it up; all it needs to know is that it woke into a
  * different world than the one it fell asleep in.
