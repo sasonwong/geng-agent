@@ -127,6 +127,30 @@ export function outboxChannel(item: Pick<OutboxItem, "channel" | "chat">, mine: 
   return mine?.known?.[String(item.chat)]?.channel ?? "telegram";
 }
 
+/**
+ * What a reload does with one channel's pollers. The running side is the pollers that are
+ * alive, not the configs: a poller that died on its own (a `fetch failed`) leaves `pollers`
+ * but not its config, so comparing configs left it dead until the process restarted — while
+ * the line it logged promised a reload would bring it back.
+ */
+export function planReload(
+  live: Iterable<[string, { fingerprint: string }]>,
+  channelId: string,
+  next: Record<string, unknown>,
+  fingerprint: (cfg: unknown) => string,
+): { stop: string[]; start: string[] } {
+  const prefix = `${channelId}:`;
+  const running = Object.fromEntries(
+    [...live]
+      .filter(([id]) => id.startsWith(prefix))
+      .map(([id, p]) => [id.slice(prefix.length), p.fingerprint]),
+  );
+  const nextFingerprints = Object.fromEntries(
+    Object.entries(next).map(([key, cfg]) => [key, fingerprint(cfg)]),
+  );
+  return reloadPlan(running, nextFingerprints);
+}
+
 export async function runGateway(o: GatewayOptions): Promise<void> {
   const log = o.log ?? ((line: string) => process.stdout.write(line + "\n"));
   assertProxySupport();
@@ -373,9 +397,7 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
       }
       const merged = channel.merge(configs[channel.id] ?? {}, next.configs);
       for (const line of merged.notes) log(line);
-      const fingerprints = (m: Record<string, unknown>): Record<string, string> =>
-        Object.fromEntries(Object.entries(m).map(([key, cfg]) => [key, channel.fingerprint(cfg)]));
-      const plan = reloadPlan(fingerprints(configs[channel.id] ?? {}), fingerprints(merged.configs));
+      const plan = planReload(pollers, channel.id, merged.configs, channel.fingerprint);
       // stop, swap, start: the new poller must read the new token, and the old one has to
       // be gone before it starts polling or both get 409
       for (const key of plan.stop) await stopPoller(`${channel.id}:${key}`);

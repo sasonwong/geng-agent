@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeBots, reloadPlan } from "../internal/gateway.ts";
+import { mergeBots, planReload, reloadPlan } from "../internal/gateway.ts";
 import type { Bots } from "../internal/bots.ts";
 
 test("an allow-only edit moves no poller", () => {
@@ -15,6 +15,25 @@ test("an allow-only edit moves no poller", () => {
 test("a changed token is stopped before it is started", () => {
   const plan = reloadPlan({ alice: "old", bob: "t2" }, { alice: "new", bob: "t2" });
   assert.deepEqual(plan, { stop: ["alice"], start: ["alice"] });
+});
+
+test("a poller that died is started again by the next reload", () => {
+  // bob's poller died on a fetch failure and left the map; his config is still there.
+  // The old call site compared configs, saw no change, and started nothing.
+  const live = new Map([["telegram:alice", { fingerprint: "t1" }]]);
+  const next = { alice: { token: "t1" }, bob: { token: "t2" } };
+  const token = (cfg: unknown): string => (cfg as { token: string }).token;
+  assert.deepEqual(planReload(live, "telegram", next, token), { stop: [], start: ["bob"] });
+});
+
+test("a poller that is alive with the same token is not moved", () => {
+  const live = new Map([
+    ["telegram:alice", { fingerprint: "t1" }],
+    ["telegram:bob", { fingerprint: "t2" }],
+  ]);
+  const next = { alice: { token: "t1" }, bob: { token: "t2" } };
+  const token = (cfg: unknown): string => (cfg as { token: string }).token;
+  assert.deepEqual(planReload(live, "telegram", next, token), { stop: [], start: [] });
 });
 
 test("a bot that came or went moves only its own poller", () => {
