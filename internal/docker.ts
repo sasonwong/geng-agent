@@ -115,5 +115,18 @@ export async function pinImage(image: string, id: string): Promise<PinResult> {
     ],
     false,
   );
-  return run.code === 0 ? "pinned" : "failed";
+  if (run.code === 0) return "pinned";
+  // Two daemons sharing one image race between rm and run: the loser's run fails on the
+  // name, and the winner's container is the same pin. `start` is a no-op on a running
+  // container, and the inspect below is what decides whether it is really the current id.
+  await dockerRun(["start", name], false);
+  const after = await dockerRun(
+    ["inspect", "--type", "container", "--format", "{{.State.Running}} {{.Image}}", name],
+    true,
+  );
+  if (after.code === 0) {
+    const [running, current] = after.text.trim().split(/\s+/);
+    if (running === "true" && current === id) return "kept";
+  }
+  return "failed";
 }

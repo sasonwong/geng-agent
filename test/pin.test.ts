@@ -18,7 +18,10 @@ async function withFake<T>(body: string, fn: (calls: () => string[]) => Promise<
   const oldPath = process.env.PATH;
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
-  writeFileSync(join(bin, "docker"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${join(root, "calls")}"\n${body}\n`);
+  writeFileSync(
+    join(bin, "docker"),
+    `#!/bin/sh\nCALLS="${join(root, "calls")}"\nprintf '%s\\n' "$*" >> "$CALLS"\n${body}\n`,
+  );
   chmodSync(join(bin, "docker"), 0o755);
   const calls = (): string[] => {
     try {
@@ -74,6 +77,38 @@ for (const [label, line] of [
     });
   });
 }
+
+test("losing the keeper race to another daemon is not a failed pin", async () => {
+  // carol won the run; alice and bob got "name already in use". The container is the pin.
+  await withFake(
+    `case "$1" in
+  inspect) n=$(grep -c '^inspect' "$CALLS" 2>/dev/null || echo 0); if [ "$n" -le 1 ]; then exit 1; fi; printf 'true ${ID}\\n'; exit 0 ;;
+  rm) exit 0 ;;
+  run) exit 1 ;;
+  start) exit 0 ;;
+  *) exit 0 ;;
+esac`,
+    async (calls) => {
+      assert.equal(await pinImage("geng-agent:latest", ID), "kept");
+      assert.ok(calls().includes(`start ${keeperName("geng-agent:latest")}`));
+    },
+  );
+});
+
+test("a keeper that really cannot start is still a failure", async () => {
+  await withFake(
+    `case "$1" in
+  inspect) exit 1 ;;
+  rm) exit 0 ;;
+  run) exit 1 ;;
+  start) exit 1 ;;
+  *) exit 0 ;;
+esac`,
+    async () => {
+      assert.equal(await pinImage("geng-agent:latest", ID), "failed");
+    },
+  );
+});
 
 test("only an answered 'no such image' counts as missing", async () => {
   // `docker image inspect` exits non-zero for both "no image" and "cannot connect". A
