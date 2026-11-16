@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { basename } from "node:path";
 import { appendLine, readText } from "./fs.ts";
 import type { Paths } from "./paths.ts";
 import { formatDuration } from "./schedule.ts";
@@ -160,13 +162,30 @@ function parseLine(line: string): LedgerRecord | null {
   };
 }
 
+export interface LedgerRead {
+  records: LedgerRecord[];
+  /** Files that are there but not UTF-8: the records read from them are missing, not absent. */
+  unreadable: string[];
+}
+
 /**
  * Oldest first, across one rotation. `appendLine` rotates at 20 000 lines, so a ledger
  * that reads only the live file would report a shorter history than happened — the same
  * hole `spendSince` had to close for `daemon.log`.
+ *
+ * A file whose bytes are not UTF-8 used to read as an empty one, which made `geng ledger`
+ * say "no records yet" about a ledger that had them. It is now named instead: the same
+ * split `logText` makes for `daemon.log`.
  */
-export function readLedger(paths: Paths, opts: { sinceMs?: number; limit?: number } = {}): LedgerRecord[] {
-  const text = [readText(`${paths.ledger}.1`) ?? "", readText(paths.ledger) ?? ""].join("\n");
+export function readLedger(paths: Paths, opts: { sinceMs?: number; limit?: number } = {}): LedgerRead {
+  const unreadable: string[] = [];
+  const text = [`${paths.ledger}.1`, paths.ledger]
+    .map((file) => {
+      const t = readText(file);
+      if (t === null && existsSync(file)) unreadable.push(basename(file));
+      return t ?? "";
+    })
+    .join("\n");
   const out: LedgerRecord[] = [];
   for (const line of text.split("\n")) {
     const rec = parseLine(line);
@@ -174,7 +193,8 @@ export function readLedger(paths: Paths, opts: { sinceMs?: number; limit?: numbe
     if (opts.sinceMs !== undefined && Date.parse(rec.at) < opts.sinceMs) continue;
     out.push(rec);
   }
-  return opts.limit !== undefined && out.length > opts.limit ? out.slice(-opts.limit) : out;
+  const records = opts.limit !== undefined && out.length > opts.limit ? out.slice(-opts.limit) : out;
+  return { records, unreadable };
 }
 
 /** One write per finished waking, from the same values the page and the log line got. */
