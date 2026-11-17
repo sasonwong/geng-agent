@@ -128,7 +128,9 @@ function withIdsLock<T>(paths: Paths, run: () => T): T {
 }
 
 /**
- * The counters, or `{}` when the file is not there yet.
+ * The counters, or `{}` when the file is not there yet. Anything else there — bytes that
+ * are not UTF-8, text that is not JSON, JSON that is not an object — has counters that
+ * this function cannot read, so it is an error, not an empty set.
  *
  * `readJson` says the same `{}` for "not there" and for "bytes that are not UTF-8", and
  * `allocate` writes what it read straight back — so a counter file in another encoding
@@ -144,11 +146,18 @@ function readIds(file: string): Ids {
     if (existsSync(file)) throw new Error(`${file} 的字节不是 UTF-8：不发号，也不覆盖`);
     return {};
   }
+  let parsed: unknown;
   try {
-    return JSON.parse(text) as Ids;
+    parsed = JSON.parse(text);
   } catch {
-    return {};
+    throw new Error(`${file} 不是 JSON：不发号，也不覆盖`);
   }
+  // `42`, `"x"`, `[]` parse fine and still carry no counter: spreading one writes only
+  // the counter this call raised, and every other series silently starts over.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`${file} 不是对象：不发号，也不覆盖`);
+  }
+  return parsed as Ids;
 }
 
 /** The highest number already used in these directories, or 0. */

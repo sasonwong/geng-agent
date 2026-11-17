@@ -102,3 +102,23 @@ test("a counter file with bad bytes is not an empty counter", () => {
   writeFileSync(p.ids, JSON.stringify({ fileN: 7 }));
   assert.equal(allocate(p, "file").n, 8);
 });
+
+test("a counter file that is JSON but not an object is not an empty counter either", () => {
+  // `42`, `"x"` and `[]` all parse. Spread one and only the counter this call raised is
+  // written back — the other series' numbers, whose entries may be gone from disk, start
+  // over. Same damage as the bad-bytes case, one step later in the read.
+  for (const body of ["42", "\"x\"", "[]", "null", ""]) {
+    const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+    const p = makePaths(root, "dave");
+    ensureDirs(requiredDirs(p));
+    writeFileSync(p.ids, body);
+
+    assert.throws(() => allocate(p, "file"), /不是 (对象|JSON)/, `${JSON.stringify(body)} 要出声`);
+    assert.equal(readFileSync(p.ids, "utf8"), body, "读不懂的计数器文件不能被覆盖");
+
+    // put a real one back and allocations go on: the error is not a wedged state
+    writeFileSync(p.ids, JSON.stringify({ fileN: 7, loopN: 3 }));
+    assert.deepEqual(allocate(p, "file").n, 8);
+    assert.deepEqual(JSON.parse(readFileSync(p.ids, "utf8")), { fileN: 8, loopN: 3 });
+  }
+});
