@@ -113,7 +113,7 @@ test("a counter file that is JSON but not an object is not an empty counter eith
     ensureDirs(requiredDirs(p));
     writeFileSync(p.ids, body);
 
-    assert.throws(() => allocate(p, "file"), /不是 (对象|JSON)/, `${JSON.stringify(body)} 要出声`);
+    assert.throws(() => allocate(p, "file"), /不是\s?(对象|JSON)/, `${JSON.stringify(body)} 要出声`);
     assert.equal(readFileSync(p.ids, "utf8"), body, "读不懂的计数器文件不能被覆盖");
 
     // put a real one back and allocations go on: the error is not a wedged state
