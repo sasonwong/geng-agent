@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -82,4 +82,23 @@ test("a holder does not delete a lock that is no longer the one it took", () => 
 
   releaseLock(lock, { token: "mine" });
   assert.equal(existsSync(lock), false, "自己的锁要能删掉");
+});
+
+test("a counter file with bad bytes is not an empty counter", () => {
+  // `readJson` says `{}` for a file it could not decode, and `allocate` writes what it
+  // read straight back — the counters it did not raise in this call are gone, and the
+  // numbers already handed out for entries no longer on disk can be handed out again.
+  const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+  const p = makePaths(root, "dave");
+  ensureDirs(requiredDirs(p));
+  // 0x80 is not valid UTF-8 on its own: the same shape as a file written in another encoding.
+  const bad = Buffer.from([0x7b, 0x80, 0x7d]);
+  writeFileSync(p.ids, bad);
+
+  assert.throws(() => allocate(p, "file"), /不是 UTF-8/, "坏字节要出声");
+  assert.deepEqual(readFileSync(p.ids), bad, "坏字节的计数器文件不能被覆盖");
+
+  // put the file back and allocations go on: the error is not a wedged state
+  writeFileSync(p.ids, JSON.stringify({ fileN: 7 }));
+  assert.equal(allocate(p, "file").n, 8);
 });
