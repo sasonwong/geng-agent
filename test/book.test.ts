@@ -204,6 +204,12 @@ test("mute, listen, forget and propose are written by the host, in the shape it 
   assert.deepEqual(forget.files, ["/files/a.jpg", "/files/b.jpg"]);
   // the list is the whole file: `parseForget` reads `files` and nothing else
   assert.deepEqual(Object.keys(forget).sort(), ["files"]);
+  // bytes it cannot read are not an empty list: overwriting would drop the older requests,
+  // and the daemon deletes the whole file after acting on what it found
+  writeFileSync(f.paths.filesForget, Buffer.from([0xff, 0xfe, 0x00]));
+  const blocked = await f.call("/files/forget", { files: ["/files/c.jpg"] });
+  assert.equal(blocked.status, 409);
+  assert.deepEqual(readFileSync(f.paths.filesForget), Buffer.from([0xff, 0xfe, 0x00]), "不覆盖");
 
   const proposal = await f.call("/proposal", { value: { cycle: { defaultWakeMinutes: 45 }, container: { timeoutSec: 9 } } });
   assert.equal(proposal.status, 200);

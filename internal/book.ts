@@ -15,6 +15,7 @@ import { NEGOTIABLE } from "./proposal.ts";
 import { parseAfter } from "./schedule.ts";
 import { readJson, readText, writeJson, writeText } from "./fs.ts";
 import { readCnbToken } from "./secret.ts";
+import { readForget } from "./files.ts";
 
 /**
  * The book endpoint: the only way into the book, because the book is not mounted.
@@ -349,10 +350,12 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         const hit = fileById(paths, f);
         return hit === null ? f : `/files/${hit.name}`;
       });
-      const before = readJson<{ files?: unknown }>(paths.filesForget, {});
-      const had = Array.isArray(before.files)
-        ? before.files.filter((f): f is string => typeof f === "string")
-        : [];
+      // Unreadable is not empty: writing the new names over it would drop the ones already
+      // asked for, and the daemon would then delete the file after acting on the short list.
+      const had = readForget(paths.filesForget);
+      if (had === null) {
+        return { status: 409, body: { error: `${paths.filesForget} 读不出来：不覆盖这张单，先修文件` } };
+      }
       const all = [...new Set([...had, ...names])];
       writeJson(paths.filesForget, { files: all });
       return { status: 200, body: { files: all, at: nowIso } };

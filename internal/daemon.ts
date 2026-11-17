@@ -11,7 +11,7 @@ import { loadPolicy, type Policy } from "./policy.ts";
 import { chainFrom } from "./proxy.ts";
 import { ExpectedError, SchemaVersionError } from "./errors.ts";
 import { ensurePolicyLocation, onDiskSchema, schemaConflict } from "./schema.ts";
-import { filesUsage, forgetFiles, forgetNames, parseForget, pruneFiles } from "./files.ts";
+import { filesUsage, forgetFiles, forgetNames, pruneFiles, readForget } from "./files.ts";
 import {
   alarmSpent,
   formatDuration,
@@ -502,10 +502,16 @@ export async function runDaemon(o: DaemonOptions): Promise<void> {
     // Only while it is not running: a file vanishing under a read is the failure this
     // must not have. Its own requests go first, then the cap. `dry` counts what a start
     // would take without taking it — the packet says the same thing either way.
-    const forgetList = parseForget(readJson<unknown>(paths.filesForget, null));
-    const gone = forgetNames(paths.filesDir, forgetList);
-    const forgot = forgetFiles(paths.filesDir, forgetList, dry);
-    if (!o.dry) rmSync(paths.filesForget, { force: true });
+    // readForget says `null` for a list that is there and unreadable: deleting the file
+    // then would throw the requests away without deleting anything.
+    const forgetList = readForget(paths.filesForget);
+    const gone = forgetNames(paths.filesDir, forgetList ?? []);
+    const forgot = forgetFiles(paths.filesDir, forgetList ?? [], dry);
+    if (forgetList === null) {
+      log(`${paths.filesForget} 读不出来：这次不删文件，单子留着`);
+    } else if (!o.dry) {
+      rmSync(paths.filesForget, { force: true });
+    }
     // A message nothing can read is moved aside instead of being skipped forever. Before
     // this, one caption-less document knocked 58 times in an hour and handed over nothing.
     const junk = [

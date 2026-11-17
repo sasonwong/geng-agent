@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bareName, filesUsage, forgetFiles, parseForget, pruneFiles } from "../internal/files.ts";
+import { bareName, filesUsage, forgetFiles, parseForget, pruneFiles, readForget } from "../internal/files.ts";
 
 const NOW = Date.parse("2026-03-02T12:00:00Z");
 const day = 24 * 60 * 60 * 1000;
@@ -91,4 +91,18 @@ test("a malformed request deletes nothing", () => {
   assert.deepEqual(parseForget(null), []);
   assert.deepEqual(parseForget({ files: "x" }), []);
   assert.deepEqual(parseForget({ files: ["/files/a", 3] }), ["/files/a"]);
+});
+
+// The daemon deletes this file once it has acted on it, so "no such file" and "a file it
+// cannot read" must not answer the same: the second one is not an empty list of requests.
+test("an unreadable forget list is not an empty one", () => {
+  const d = dir();
+  const file = join(d, "files.forget.json");
+  assert.deepEqual(readForget(file), [], "不在就是没有要删的");
+  writeFileSync(file, '{"files":["/files/a.jpg"]}');
+  assert.deepEqual(readForget(file), ["/files/a.jpg"]);
+  writeFileSync(file, Buffer.from([0x7b, 0x22, 0x66, 0xff, 0x22, 0x7d]));
+  assert.equal(readForget(file), null, "字节不是 UTF-8");
+  writeFileSync(file, "{not json");
+  assert.equal(readForget(file), null, "读得出字节，但不是 JSON");
 });
