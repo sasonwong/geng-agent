@@ -66,6 +66,20 @@ test("a closed loop moves aside instead of disappearing, and the count follows",
   );
 });
 
+test("a loop from before the id scheme can be closed by its name", async () => {
+  // It was written with a title for a name, before loops carried L numbers: `/loop/close`
+  // refused it as malformed, so `migration-id-scheme` sat on every wake packet for good.
+  const f = fixture();
+  mkdirSync(f.paths.openLoops, { recursive: true });
+  writeFileSync(join(f.paths.openLoops, "migration-id-scheme.md"), "# 迁移到 id 命名\n");
+  assert.equal(countLoops(f.paths), 1);
+
+  const closed = await f.call("/loop/close", { id: "migration-id-scheme", note: "不做" });
+  assert.equal(closed.status, 200);
+  assert.equal(countLoops(f.paths), 0);
+  assert.ok(existsSync(join(f.paths.openLoops, "closed", "migration-id-scheme.md")));
+});
+
 test("a refusal says what to fix, and never looks like success", async () => {
   const f = fixture();
   const unknown = await f.call("/loop/close", { id: "L99" });

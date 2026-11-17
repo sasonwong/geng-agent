@@ -231,14 +231,24 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
     }
 
     if (route === "/loop/close") {
-      const id = text(params, "id");
-      if (id === null) return { status: 400, body: { error: "id 不能是空的" } };
-      if (!/^L\d+$/.test(id.trim())) {
-        return { status: 400, body: { error: `id 要写成 L12 这样，收到的是 ${id}` } };
+      const raw = text(params, "id");
+      if (raw === null) return { status: 400, body: { error: "id 不能是空的" } };
+      const id = raw.trim();
+      // A loop written before the id scheme is named after its title (`migration-id-scheme`),
+      // not `L12`: demanding an L number left it on every wake packet forever. Any plain
+      // name that is a file in open-loops/ can be closed; anything else gets the old answer.
+      if (id === "" || id.includes("/") || id.includes("\\")) {
+        return { status: 400, body: { error: `id 要写成 L12 这样，收到的是 ${raw}` } };
       }
-      const name = `${id.trim()}.md`;
+      const name = `${id}.md`;
       const from = join(paths.openLoops, name);
       if (!existsSync(from)) {
+        if (!/^L\d+$/.test(id)) {
+          return { status: 400, body: { error: `id 要写成 L12 这样，收到的是 ${raw}` } };
+        }
+        return { status: 404, body: { error: `没有 ${id} 这件事：${name} 不在 open-loops/ 里` } };
+      }
+      if (!statSync(from).isFile()) {
         return { status: 404, body: { error: `没有 ${id} 这件事：${name} 不在 open-loops/ 里` } };
       }
       const note = text(params, "note");
