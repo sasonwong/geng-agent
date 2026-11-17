@@ -278,3 +278,27 @@ test("offset 越过末尾时说清有多长，而不是给一页空白", () => {
   assert.match(r.text, /末尾之后/);
   assert.doesNotMatch(r.text, /这一件没有正文/);
 });
+
+test("字节读不出的信与敲门声不消失，列表里指名道姓", () => {
+  const p = fixture();
+  // 0xff 起头：既不是 UTF-8，也凑不成 JSON。写这种文件的不是我们，是别的进程。
+  const bad = Buffer.from([0x7b, 0x22, 0x74, 0xff, 0x0a]);
+  mkdirSync(p.mail, { recursive: true });
+  writeFileSync(join(p.mail, "bad.json"), bad);
+  mkdirSync(p.inbox, { recursive: true });
+  writeFileSync(join(p.inbox, "-1001-88.json"), bad);
+
+  const listing = recallText(p, {});
+  // 旧代码：邮件整封从列表里消失，收件箱那条变成「（不知道谁） · 」的空消息
+  assert.match(listing, /^bad  mail/m);
+  assert.match(listing, /^M-1001-88  inbox/m);
+  assert.doesNotMatch(listing, /（不知道谁） · \s*$/m);
+
+  // 列表给的两个 id 都打得开，正文说的是「读不出」，不是「没有正文」
+  for (const id of ["bad", "M-1001-88"]) {
+    const r = openText(p, id, 0);
+    assert.equal(r.found, true, `${id} 打不开`);
+    assert.match(r.text, /读不出/);
+    assert.doesNotMatch(r.text, /没有正文/);
+  }
+});
