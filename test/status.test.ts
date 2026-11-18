@@ -141,3 +141,19 @@ test("轮转后 daemon.log.1 读不出时，能读的当天那件照算", () => 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("没有 daemon.log 时，「上次一轮」说（无），不是一行空白", async () => {
+  // The fallback read `?? "（无）"` on a value that is `""`, not null: the line printed
+  // nothing at all, which looks like a tail that was read and came back empty.
+  const root = mkdtempSync(join(tmpdir(), "geng-test-"));
+  const lines: string[] = [];
+  const old = console.log;
+  console.log = (s: string) => lines.push(s);
+  try {
+    await printStatus(root, "alice");
+  } finally {
+    console.log = old;
+    rmSync(root, { recursive: true, force: true });
+  }
+  assert.match(lines.join("\n"), /上次一轮\s+（无）/);
+});

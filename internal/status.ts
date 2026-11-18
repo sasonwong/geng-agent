@@ -100,9 +100,10 @@ export async function printStatus(root: string, instance: string): Promise<void>
     }
   }, 0);
   const spend = spendSince(p, now);
-  const logTail = spend.unreadable.includes(basename(p.daemonLog))
-    ? "（读不出）"
-    : (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] ?? "（无）";
+  // `||`, not `??`: a log that is not there, or is empty, gives `""` here, and an empty
+  // line is exactly what "（无）" is for. `??` never fired, because `""` is not nullish.
+  const lastLine = (readText(p.daemonLog) ?? "").trim().split("\n").slice(-1)[0] || "（无）";
+  const logTail = spend.unreadable.includes(basename(p.daemonLog)) ? "（读不出）" : lastLine;
   const snapshots = await listSnapshots(p);
   const latest = snapshots.ok ? snapshots.snapshots[snapshots.snapshots.length - 1] : undefined;
   // one read, one answer: the list was fetched twice in the same expression
