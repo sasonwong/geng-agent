@@ -122,3 +122,26 @@ test("a counter file that is JSON but not an object is not an empty counter eith
     assert.deepEqual(JSON.parse(readFileSync(p.ids, "utf8")), { fileN: 8, loopN: 3 });
   }
 });
+
+test("a counter that is not a number is not a counter either", () => {
+  // `Math.max("abc", floor)` is `NaN` and `{fileN: NaN}` is written back as `{fileN: null}`,
+  // so the series starts over and one call hands out an id called `FNaN`. `null` reads as 0
+  // on the way in, which is the same reset without the noise.
+  for (const body of ['{"fileN":null}', '{"fileN":"abc"}', '{"fileN":{}}', '{"fileN":[]}']) {
+    const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+    const p = makePaths(root, "dave");
+    ensureDirs(requiredDirs(p));
+    writeFileSync(p.ids, body);
+
+    assert.throws(() => allocate(p, "file"), /不是数字/, `${body} 要出声`);
+    assert.equal(readFileSync(p.ids, "utf8"), body, "读不懂的计数器文件不能被覆盖");
+  }
+
+  // a day stamp is the one value that is not a number, and it must still be read
+  const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+  const p = makePaths(root, "dave");
+  ensureDirs(requiredDirs(p));
+  writeFileSync(p.ids, JSON.stringify({ journalDay: "20260302", journalN: 4, fileN: 7 }));
+  assert.equal(allocate(p, "file").n, 8);
+  assert.deepEqual(JSON.parse(readFileSync(p.ids, "utf8")), { journalDay: "20260302", journalN: 4, fileN: 8 });
+});

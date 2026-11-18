@@ -157,6 +157,14 @@ function readIds(file: string): Ids {
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     throw new Error(`${file} 不是对象：不发号，也不覆盖`);
   }
+  // A value that is not a number is the same hole one step in: `Math.max("abc", n)` is
+  // `NaN`, `NaN` is written back as `null`, and the next read takes `null` for 0. `null`
+  // itself reads as 0 the first time. One bad value is the whole series, so it is refused.
+  for (const [key, value] of Object.entries(parsed)) {
+    if (key !== "journalDay" && typeof value !== "number") {
+      throw new Error(`${file} 的 ${key} 不是数字：不发号，也不覆盖`);
+    }
+  }
   return parsed as Ids;
 }
 
