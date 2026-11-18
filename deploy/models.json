@@ -18,6 +18,26 @@
           "contextWindow": 1048576,
           "maxTokens": 270000,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "hy4-flash-free",
+          "name": "Hy4 flash Free",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1048576,
+          "maxTokens": 65536,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        },
+        {
+          "id": "longcat-2.5-free",
+          "name": "LongCat 2.5 Free",
+          "api": "openai-completions",
+          "reasoning": true,
+          "input": ["text", "image"],
+          "contextWindow": 1000000,
+          "maxTokens": 262144,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         }
       ]
     }
