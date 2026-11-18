@@ -178,9 +178,14 @@ export function parseForget(raw: unknown): string[] {
 export function readForget(file: string): string[] | null {
   const text = readText(file);
   if (text === null) return existsSync(file) ? null : [];
+  let parsed: unknown;
   try {
-    return parseForget(JSON.parse(text));
+    parsed = JSON.parse(text);
   } catch {
     return null;
   }
+  // `42`, `"x"` and `[]` parse and carry no list at all: the same loss one step in, since
+  // writing the new names over one drops the ones already asked for.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  return parseForget(parsed);
 }

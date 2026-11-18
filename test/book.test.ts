@@ -209,6 +209,9 @@ test("mute, listen, forget and propose are written by the host, in the shape it 
   writeFileSync(f.paths.filesForget, Buffer.from([0xff, 0xfe, 0x00]));
   const blocked = await f.call("/files/forget", { files: ["/files/c.jpg"] });
   assert.equal(blocked.status, 409);
+  // the error travels into the container as the tool's reply: a host path there names a
+  // file nobody on that side can open, and `journal/` is how this handler's other errors say it
+  assert.equal(JSON.stringify(blocked.body).includes(f.paths.root), false, "宿主路径不该进容器的错误");
   assert.deepEqual(readFileSync(f.paths.filesForget), Buffer.from([0xff, 0xfe, 0x00]), "不覆盖");
 
   const proposal = await f.call("/proposal", { value: { cycle: { defaultWakeMinutes: 45 }, container: { timeoutSec: 9 } } });

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runDaemon } from "../internal/daemon.ts";
 import { socketPath } from "../internal/book.ts";
@@ -104,6 +104,36 @@ test("a finished round writes one ledger line, with the /say it queued", async (
     assert.equal(readdirSync(p.outbox).length, 1);
     // one unasked-for round that spoke is what the digest exists to count
     assert.equal(digestLedger(records).unpromptedActed, 1);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The daemon deletes this file once it has acted on it, so reading bad bytes as an empty
+// list threw the requests away and deleted nothing: the files stayed and the list that asked
+// for them was gone. A list it cannot read is left where it is, and so are the files.
+test("a forget list it cannot read is left alone, and so are the files", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-forget-"));
+  const oldPath = process.env.PATH;
+  try {
+    const p = fixture(root);
+    process.env.PATH = `${fakeDocker(root, p)}${delimiter}${oldPath ?? ""}`;
+    writeText(join(p.filesDir, "F1.txt"), "forget me");
+    const bad = Buffer.from([0x7b, 0x22, 0x66, 0xff, 0x22, 0x7d]);
+    mkdirSync(dirname(p.filesForget), { recursive: true });
+    writeFileSync(p.filesForget, bad);
+    const said: string[] = [];
+    await runDaemon({
+      root,
+      instance: "alice",
+      once: true,
+      log: (line) => { said.push(line); },
+    });
+
+    assert.deepEqual(readFileSync(p.filesForget), bad, "读不出的单子不能被删掉");
+    assert.equal(existsSync(join(p.filesDir, "F1.txt")), true, "单子读不出，就别按它删");
+    assert.match(said.join("\n"), /files\.forget\.json 读不出来/, "一句话也不说，就没人知道要修");
   } finally {
     process.env.PATH = oldPath;
     rmSync(root, { recursive: true, force: true });

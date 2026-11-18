@@ -105,4 +105,9 @@ test("an unreadable forget list is not an empty one", () => {
   assert.equal(readForget(file), null, "字节不是 UTF-8");
   writeFileSync(file, "{not json");
   assert.equal(readForget(file), null, "读得出字节，但不是 JSON");
+  // legal JSON that is not an object carries no list either: writing over it drops the names
+  for (const body of ["42", "\"x\"", "[]", "null"]) {
+    writeFileSync(file, body);
+    assert.equal(readForget(file), null, `${body} 要出声`);
+  }
 });
