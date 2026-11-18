@@ -114,6 +114,17 @@ function loopItems(p: Paths): Item[] {
   );
 }
 
+/**
+ * A file that is in the directory but whose bytes did not come back as JSON is not a file
+ * that is not there: `readJson` says `null` for both. Dropping it (mail) or showing it as
+ * a message that said nothing (inbox) is the same lie in two shapes — a letter that arrived
+ * is reported as one that never did, or as a blank one. The entry stays and names its file.
+ */
+function unreadable(f: string, source: Source, id: string): Item {
+  const note = "（读不出：字节不是 UTF-8，或者不是 JSON）";
+  return { id, source, at: when(f), header: note, body: `${basename(f)}\n${note}` };
+}
+
 function mailItems(p: Paths): Item[] {
   return files(p.mail, ".json").flatMap((f) => {
     const raw = readJson<{
@@ -124,7 +135,9 @@ function mailItems(p: Paths): Item[] {
     text?: unknown;
     attachments?: unknown;
   } | null>(f, null);
-    if (!raw || typeof raw.id !== "string") return [];
+    // the file name is the only id left, and it is one `open` can find again
+    if (raw === null) return [unreadable(f, "mail", basename(f, ".json"))];
+    if (typeof raw.id !== "string") return [];
     const from = typeof raw.from === "string" ? raw.from : "（没有发件人）";
     const subject = typeof raw.subject === "string" ? raw.subject : "（无主题）";
     return [
@@ -219,7 +232,8 @@ function inboxItems(p: Paths): Item[] {
   const dirs = [p.inbox, p.inboxLow];
   return dirs.flatMap((dir) =>
     files(dir, ".json").map((f) => {
-      const raw = readJson<InboxFile | null>(f, null) ?? {};
+      const raw = readJson<InboxFile | null>(f, null);
+      if (raw === null) return unreadable(f, "inbox", `M${basename(f, ".json")}`);
       const text = typeof raw.text === "string" ? raw.text : "";
       const from = typeof raw.from === "string" ? raw.from : "（不知道谁）";
       return {
