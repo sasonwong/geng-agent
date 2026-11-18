@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,4 +106,22 @@ test("a malformed weixin.json is the reason check fails, not 'no channel'", asyn
   assert.equal(out.code, 1, out.out);
   assert.match(out.out, /FAIL weixin: .*不是合法 JSON/);
   assert.doesNotMatch(out.out, /没有渠道也没有信箱/);
+});
+
+// `--json` used to answer 0 with an empty stream for a ledger it could not read: a script
+// saw "no records" and a successful exit, which is the same lie the human path had.
+test("账本的字节读不出时 --json 不是「没有记录」的成功", async () => {
+  const r = root();
+  mkdirSync(join(r, "data", "alice"), { recursive: true });
+  const ledger = join(r, "data", "alice", "ledger.jsonl");
+  writeFileSync(ledger, Buffer.from([0x7b, 0xff, 0x7d]));
+  const bad = await run(["ledger", "alice", "--root", r, "--json"]);
+  assert.equal(bad.code, 1, bad.out);
+  assert.match(bad.out, /ledger\.jsonl 读不出/);
+  assert.doesNotMatch(bad.out, /没有记录/);
+
+  // an empty ledger is still "nothing written yet": 0, not 1
+  writeFileSync(ledger, "");
+  const empty = await run(["ledger", "alice", "--root", r, "--json"]);
+  assert.equal(empty.code, 0, empty.out);
 });

@@ -311,8 +311,13 @@ async function main(): Promise<number> {
       }
       const { records, unreadable } = readLedger(p, { sinceMs, limit });
       if (args.rest.includes("--json")) {
+        // The stream stays JSON, so the sentence goes to stderr; the exit code is what a
+        // script reads, and "nothing came back" must not look like "nothing was written".
+        if (unreadable.length > 0) {
+          console.error(`${unreadable.join("、")} 读不出（字节不是 UTF-8）：它们里面的记录不在下面`);
+        }
         for (const rec of records) console.log(JSON.stringify(rec));
-        return 0;
+        return records.length === 0 && unreadable.length > 0 ? 1 : 0;
       }
       if (records.length === 0) {
         // "There with bad bytes" is not "nothing written yet": one is answered by waiting
