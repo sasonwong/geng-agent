@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type IncomingMessage } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -13,6 +13,7 @@ import {
   readState,
   readWeixin,
   saveWeixin,
+  stateFile,
   writeState,
   type WeixinConfig,
   type WeixinState,
@@ -187,6 +188,20 @@ test("a credentials file that is not UTF-8 is a problem, not an absent file", (t
     read.problems.some((p) => p.startsWith(credentialsFile(root))),
     "文件在，问题就得挂在文件上，否则 doctor 一个字都不报",
   );
+});
+
+test("a state file that is not UTF-8 is kept when the next write would replace it", (t) => {
+  const root = tempRoot();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  // 0xFF 不是合法 UTF-8：readState 回 {}，把「文件在」读成「还没状态」。
+  const bad = Buffer.from([0x7b, 0xff, 0x7d]);
+  writeFileSync(stateFile(root), bad);
+  assert.deepEqual(readState(root), {});
+  writeState(root, { alice: state({ buf: "new" }) });
+  const kept = readdirSync(join(root, "data", "_gateway")).filter((f) => f.startsWith("weixin.json.bad-"));
+  assert.equal(kept.length, 1, "旧字节要留一份，否则连查都没得查");
+  assert.deepEqual(readFileSync(join(root, "data", "_gateway", kept[0] as string)), bad);
+  assert.equal(readState(root).alice?.buf, "new", "新写的状态照旧可读");
 });
 
 test("an inbound owner message carries the context, opens the window, and keeps a uint64 id", async (t) => {

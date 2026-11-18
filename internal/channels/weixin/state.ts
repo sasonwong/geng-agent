@@ -204,7 +204,15 @@ export function readState(root: string): WeixinStates {
 }
 
 export function writeState(root: string, states: WeixinStates): void {
-  writePrivate(stateFile(root), states);
+  const file = stateFile(root);
+  // `readState` returns `{}` for a file that is there with bytes that are not UTF-8, and
+  // this write would then replace a file nobody managed to read: the only copy of every
+  // instance's cursor and context token, gone without a word. Move the bytes aside first.
+  // The session itself is rebuilt from the next inbound message, the file is not.
+  if (readText(file) === null && existsSync(file)) {
+    renameSync(file, `${file}.bad-${Date.now()}`);
+  }
+  writePrivate(file, states);
 }
 
 /**
