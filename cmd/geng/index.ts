@@ -309,15 +309,29 @@ async function main(): Promise<number> {
           return 2;
         }
       }
-      const records = readLedger(p, { sinceMs, limit });
+      const { records, unreadable } = readLedger(p, { sinceMs, limit });
       if (args.rest.includes("--json")) {
+        // The stream stays JSON, so the sentence goes to stderr; the exit code is what a
+        // script reads, and "nothing came back" must not look like "nothing was written".
+        if (unreadable.length > 0) {
+          console.error(`${unreadable.join("、")} 读不出（字节不是 UTF-8）：它们里面的记录不在下面`);
+        }
         for (const rec of records) console.log(JSON.stringify(rec));
-        return 0;
+        return records.length === 0 && unreadable.length > 0 ? 1 : 0;
       }
       if (records.length === 0) {
+        // "There with bad bytes" is not "nothing written yet": one is answered by waiting
+        // for the next round, the other by looking at the file.
+        if (unreadable.length > 0) {
+          console.log(`${args.instance}  账本：读不出（${unreadable.join("、")} 的字节不是 UTF-8），不是没有记录。`);
+          return 1;
+        }
         console.log(`${args.instance}  账本：${label}没有记录。`);
         console.log("  每跑完一轮写一条；daemon 在跑的话，下一轮醒来之后就有了。");
         return 0;
+      }
+      if (unreadable.length > 0) {
+        console.log(`  读不出    ${unreadable.join("、")}（字节不是 UTF-8）：下面这些数只来自读得出的那半。`);
       }
       for (const line of formatLedgerDigest(args.instance, records, label)) {
         console.log(line);

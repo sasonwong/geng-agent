@@ -89,7 +89,7 @@ test("a finished round writes one ledger line, with the /say it queued", async (
     process.env.PATH = `${fakeDocker(root, p)}${delimiter}${oldPath ?? ""}`;
     await runDaemon({ root, instance: "alice", once: true, log: () => {} });
 
-    const records = readLedger(p);
+    const records = readLedger(p).records;
     assert.equal(records.length, 1, "一轮一条，不多不少");
     const rec = records[0]!;
     assert.equal(rec.wake, 1);

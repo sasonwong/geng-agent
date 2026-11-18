@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -53,7 +53,7 @@ test("账本：只追加，不重写已有的行；字段集合是约定", () =>
     appendLedger(p, rec({ wake: 2, at: "2026-03-02T07:00:00.000Z" }));
     // 第二行只能长在后面：重写一次就等于这本账不再能当证据
     assert.ok((readText(p.ledger) ?? "").startsWith(first));
-    assert.equal(readLedger(p).map((r) => r.wake).join(","), "1,2");
+    assert.equal(readLedger(p).records.map((r) => r.wake).join(","), "1,2");
 
     // 甲类接口：字段是定死的，加一个字段要有意为之
     const keys = [
@@ -72,10 +72,10 @@ test("账本：只追加，不重写已有的行；字段集合是约定", () =>
       "v",
       "wake",
     ];
-    assert.deepEqual(Object.keys(readLedger(p)[0] ?? {}).sort(), keys.sort());
+    assert.deepEqual(Object.keys(readLedger(p).records[0] ?? {}).sort(), keys.sort());
     // 钱不在这本账里：tokens/cost 只在 daemon.log，spendSince 读那份
-    assert.equal("cost" in (readLedger(p)[0] ?? {}), false);
-    assert.equal("tokens" in (readLedger(p)[0] ?? {}), false);
+    assert.equal("cost" in (readLedger(p).records[0] ?? {}), false);
+    assert.equal("tokens" in (readLedger(p).records[0] ?? {}), false);
   });
 });
 
@@ -86,7 +86,7 @@ test("账本：轮转之后两份都读，旧的在前面", () => {
     // 这正是 spendSince 为 daemon.log 修过的那个洞。
     writeText(`${p.ledger}.1`, JSON.stringify(rec({ wake: 1 })) + "\n");
     appendLedger(p, rec({ wake: 2, at: "2026-03-02T07:00:00.000Z" }));
-    assert.equal(readLedger(p).map((r) => r.wake).join(","), "1,2");
+    assert.equal(readLedger(p).records.map((r) => r.wake).join(","), "1,2");
   });
 });
 
@@ -103,7 +103,32 @@ test("账本：坏行跳过，不赔掉整本账", () => {
       JSON.stringify(rec({ wake: 5, at: "2026-03-02T07:00:00.000Z" })),
     ];
     writeText(p.ledger, lines.join("\n") + "\n");
-    assert.equal(readLedger(p).map((r) => r.wake).join(","), "1,5");
+    assert.equal(readLedger(p).records.map((r) => r.wake).join(","), "1,5");
+  });
+});
+
+test("账本：整个文件不是 UTF-8 时点名它，不当它是空的", () => {
+  withRoot((root) => {
+    const p = makePaths(root, "alice");
+    mkdirSync(join(root, "data", "alice"), { recursive: true });
+    // 0xFF 永远不是合法 UTF-8：readText 回 null，而 null 以前也代表「没有这本账」
+    writeFileSync(p.ledger, Buffer.from([0x7b, 0xff, 0x7d]));
+    const all = readLedger(p);
+    assert.deepEqual(all.records, []);
+    assert.deepEqual(all.unreadable, ["ledger.jsonl"]);
+
+    // 轮转的另一半读得出：只有坏的那份被点名，好的那份照样数
+    rmSync(p.ledger);
+    writeFileSync(`${p.ledger}.1`, Buffer.from([0x41, 0xff]));
+    appendLedger(p, rec({ wake: 7 }));
+    const half = readLedger(p);
+    assert.equal(half.records.map((r) => r.wake).join(","), "7");
+    assert.deepEqual(half.unreadable, ["ledger.jsonl.1"]);
+
+    // 没写过的账本不是「读不出」：这两种情况要分开
+    withRoot((empty) => {
+      assert.deepEqual(readLedger(makePaths(empty, "alice")).unreadable, []);
+    });
   });
 });
 
@@ -177,8 +202,8 @@ test("账本：窗口和条数只影响读，不影响写", () => {
     appendLedger(p, rec({ wake: 1, at: "2026-03-02T06:00:00.000Z" }));
     appendLedger(p, rec({ wake: 2, at: "2026-03-02T11:00:00.000Z" }));
     const since = Date.parse("2026-03-02T10:00:00Z");
-    assert.equal(readLedger(p, { sinceMs: since }).map((r) => r.wake).join(","), "2");
-    assert.equal(readLedger(p, { limit: 1 }).map((r) => r.wake).join(","), "2");
+    assert.equal(readLedger(p, { sinceMs: since }).records.map((r) => r.wake).join(","), "2");
+    assert.equal(readLedger(p, { limit: 1 }).records.map((r) => r.wake).join(","), "2");
     // 读不删、不搬：原文件两行都还在
     assert.equal((readText(p.ledger) ?? "").trim().split("\n").length, 2);
   });
