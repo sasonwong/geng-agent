@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { readText } from "./fs.ts";
 
 /**
  * Files people sent it. Two ways out: it asks for specific ones to be forgotten, and the
@@ -165,4 +166,26 @@ export function parseForget(raw: unknown): string[] {
   if (!raw || typeof raw !== "object") return [];
   const files = (raw as { files?: unknown }).files;
   return Array.isArray(files) ? files.filter((f): f is string => typeof f === "string") : [];
+}
+
+/**
+ * The pending forget list, or `null` when the file is there but cannot be read.
+ *
+ * `[]` and `null` must not be the same answer here: the daemon deletes this file after
+ * acting on it, so reading an unreadable list as an empty one deletes the requests
+ * instead of the files — nothing is removed, and nothing says so.
+ */
+export function readForget(file: string): string[] | null {
+  const text = readText(file);
+  if (text === null) return existsSync(file) ? null : [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  // `42`, `"x"` and `[]` parse and carry no list at all: the same loss one step in, since
+  // writing the new names over one drops the ones already asked for.
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  return parseForget(parsed);
 }
