@@ -87,6 +87,20 @@ const offsetsByRoot = new Map<string, Record<string, number>>();
 /** Same reason as the offsets: a reload is not a process restart, so neither is the count. */
 const handleFailuresByRoot = new Map<string, Map<string, number>>();
 
+/** `null`, a number or an array parses as JSON but is not a table; writing an index into it throws. */
+function asOffsets(parsed: unknown): Record<string, number> | null {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  return parsed as Record<string, number>;
+}
+
+function parseOffsets(text: string): Record<string, number> | null {
+  try {
+    return asOffsets(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The file is the one place every bot's poller says where it got to, and it is shared: a
  * file that is there with bytes that are not JSON is not an empty table. Reading it as one
@@ -103,12 +117,13 @@ export function loadOffsets(file: string, note: (line: string) => void): Record<
     return offsets;
   }
   if (text !== null) {
-    try {
-      offsets = JSON.parse(text) as Record<string, number>;
-    } catch {
+    const parsed = parseOffsets(text);
+    if (parsed === null) {
       const aside = `${file}.bad-${Date.now()}`;
       renameSync(file, aside);
-      note(`${file} 不是 JSON（不是空表）：原件挪到 ${aside}，这批 bot 从 0 重来，Telegram 会重投最近的更新`);
+      note(`${file} 不是 JSON 对象（不是空表）：原件挪到 ${aside}，这批 bot 从 0 重来，Telegram 会重投最近的更新`);
+    } else {
+      offsets = parsed;
     }
   }
   return offsets;
@@ -137,11 +152,9 @@ export function saveOffsets(file: string, offsets: Record<string, number>, insta
   if (text === null && existsSync(file)) {
     renameSync(file, `${file}.bad-${Date.now()}`);
   } else if (text !== null) {
-    try {
-      onDisk = JSON.parse(text) as Record<string, number>;
-    } catch {
-      renameSync(file, `${file}.bad-${Date.now()}`);
-    }
+    const parsed = parseOffsets(text);
+    if (parsed === null) renameSync(file, `${file}.bad-${Date.now()}`);
+    else onDisk = parsed;
   }
   writeJson(file, { ...offsets, ...onDisk, [instance]: next });
 }

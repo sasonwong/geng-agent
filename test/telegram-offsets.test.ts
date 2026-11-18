@@ -35,6 +35,30 @@ test("a file that is not there at all is an empty table, with no noise", () => {
   assert.deepEqual(notes, []);
 });
 
+test("JSON that is not a table (null, a number, an array) is kept aside too, not written into", () => {
+  for (const body of ["null", "7", "[]", '"x"']) {
+    const file = offsetsFile();
+    writeFileSync(file, body);
+    const notes: string[] = [];
+    assert.deepEqual(loadOffsets(file, (line) => notes.push(line)), {}, body);
+    assert.equal(existsSync(file), false, `${body}: the file is moved aside`);
+    assert.equal(
+      readdirSync(join(file, "..")).filter((name) => name.includes(".bad-")).length,
+      1,
+      body,
+    );
+    assert.equal(notes.length, 1, body);
+  }
+});
+
+test("a poller started on such a file can still save its offset", () => {
+  const file = offsetsFile();
+  writeFileSync(file, "null");
+  const offsets = loadOffsets(file, () => {});
+  assert.doesNotThrow(() => saveOffsets(file, offsets, "alice", 5));
+  assert.deepEqual(read(file), { alice: 5 });
+});
+
 test("writing one bot's offset keeps the offsets another poller wrote since we read", () => {
   const file = offsetsFile();
   writeFileSync(file, JSON.stringify({ bob: 500, carol: 700 }));
