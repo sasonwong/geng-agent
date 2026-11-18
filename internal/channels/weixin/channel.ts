@@ -29,6 +29,7 @@ import {
   chatIdFor,
   credentialsFile,
   DEFAULT_BASE_URL,
+  keptBadStates,
   mergeWeixin,
   readState,
   readWeixin,
@@ -537,6 +538,19 @@ function doctor(root: string, instance: string): ChannelCheck[] {
     } else {
       checks.push({ name: "微信会话", ok: true, detail: `窗口开着，还能发 ${BUBBLE_LIMIT - used} 条` });
     }
+  }
+  // A write that had to set bad bytes aside leaves `<state>.bad-<ms>` behind, and nothing
+  // else ever looks at `data/_gateway`: doctor is the only surface where a corruption is
+  // not just a file name. Not deleted here — whether to keep the old bytes is a person's
+  // call. `data/_gateway` is global, so every configured instance's run says the same.
+  const kept = keptBadStates(root);
+  if (kept.length > 0) {
+    checks.push({
+      name: "微信旧 state",
+      ok: false,
+      warnOnly: true,
+      detail: `${kept.length} 个 weixin.json.bad-*，最老 ${new Date((kept[0] as { at: number }).at).toISOString()}——旧字节留了一份没删，要不要恢复自己拷回去`,
+    });
   }
   return checks;
 }
