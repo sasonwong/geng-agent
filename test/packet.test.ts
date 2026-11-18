@@ -452,7 +452,7 @@ test("a line that answers another one says so, without a lookup", () => {
       },
     }),
   );
-  assert.match(text, /对方：说的就是这句（回：原文在这）/);
+  assert.match(text, /对方：说的就是这句（回 #-100-7：原文在这）/);
   assert.match(text, /你：原文在这\n/);
 });
 
