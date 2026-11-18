@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -82,4 +82,66 @@ test("a holder does not delete a lock that is no longer the one it took", () => 
 
   releaseLock(lock, { token: "mine" });
   assert.equal(existsSync(lock), false, "自己的锁要能删掉");
+});
+
+test("a counter file with bad bytes is not an empty counter", () => {
+  // `readJson` says `{}` for a file it could not decode, and `allocate` writes what it
+  // read straight back — the counters it did not raise in this call are gone, and the
+  // numbers already handed out for entries no longer on disk can be handed out again.
+  const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+  const p = makePaths(root, "dave");
+  ensureDirs(requiredDirs(p));
+  // 0x80 is not valid UTF-8 on its own: the same shape as a file written in another encoding.
+  const bad = Buffer.from([0x7b, 0x80, 0x7d]);
+  writeFileSync(p.ids, bad);
+
+  assert.throws(() => allocate(p, "file"), /不是 UTF-8/, "坏字节要出声");
+  assert.deepEqual(readFileSync(p.ids), bad, "坏字节的计数器文件不能被覆盖");
+
+  // put the file back and allocations go on: the error is not a wedged state
+  writeFileSync(p.ids, JSON.stringify({ fileN: 7 }));
+  assert.equal(allocate(p, "file").n, 8);
+});
+
+test("a counter file that is JSON but not an object is not an empty counter either", () => {
+  // `42`, `"x"` and `[]` all parse. Spread one and only the counter this call raised is
+  // written back — the other series' numbers, whose entries may be gone from disk, start
+  // over. Same damage as the bad-bytes case, one step later in the read.
+  for (const body of ["42", "\"x\"", "[]", "null", ""]) {
+    const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+    const p = makePaths(root, "dave");
+    ensureDirs(requiredDirs(p));
+    writeFileSync(p.ids, body);
+
+    assert.throws(() => allocate(p, "file"), /不是\s?(对象|JSON)/, `${JSON.stringify(body)} 要出声`);
+    assert.equal(readFileSync(p.ids, "utf8"), body, "读不懂的计数器文件不能被覆盖");
+
+    // put a real one back and allocations go on: the error is not a wedged state
+    writeFileSync(p.ids, JSON.stringify({ fileN: 7, loopN: 3 }));
+    assert.deepEqual(allocate(p, "file").n, 8);
+    assert.deepEqual(JSON.parse(readFileSync(p.ids, "utf8")), { fileN: 8, loopN: 3 });
+  }
+});
+
+test("a counter that is not a number is not a counter either", () => {
+  // `Math.max("abc", floor)` is `NaN` and `{fileN: NaN}` is written back as `{fileN: null}`,
+  // so the series starts over and one call hands out an id called `FNaN`. `null` reads as 0
+  // on the way in, which is the same reset without the noise.
+  for (const body of ['{"fileN":null}', '{"fileN":"abc"}', '{"fileN":{}}', '{"fileN":[]}']) {
+    const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+    const p = makePaths(root, "dave");
+    ensureDirs(requiredDirs(p));
+    writeFileSync(p.ids, body);
+
+    assert.throws(() => allocate(p, "file"), /不是数字/, `${body} 要出声`);
+    assert.equal(readFileSync(p.ids, "utf8"), body, "读不懂的计数器文件不能被覆盖");
+  }
+
+  // a day stamp is the one value that is not a number, and it must still be read
+  const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+  const p = makePaths(root, "dave");
+  ensureDirs(requiredDirs(p));
+  writeFileSync(p.ids, JSON.stringify({ journalDay: "20260302", journalN: 4, fileN: 7 }));
+  assert.equal(allocate(p, "file").n, 8);
+  assert.deepEqual(JSON.parse(readFileSync(p.ids, "utf8")), { journalDay: "20260302", journalN: 4, fileN: 8 });
 });
