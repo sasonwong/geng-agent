@@ -1,5 +1,6 @@
+import { existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { readJson, writeJson } from "../fs.ts";
+import { readText, writeJson } from "../fs.ts";
 import { attachmentOf, placeholderFor, type Attachment } from "../attach.ts";
 import { readBots, type Bots } from "../bots.ts";
 import { quoteFor, quotedOf } from "../quote.ts";
@@ -86,14 +87,63 @@ const offsetsByRoot = new Map<string, Record<string, number>>();
 /** Same reason as the offsets: a reload is not a process restart, so neither is the count. */
 const handleFailuresByRoot = new Map<string, Map<string, number>>();
 
-function offsetsFor(root: string): Record<string, number> {
+/**
+ * The file is the one place every bot's poller says where it got to, and it is shared: a
+ * file that is there with bytes that are not JSON is not an empty table. Reading it as one
+ * starts every bot at `0`, and Telegram then hands over the last 24 hours again.
+ */
+export function loadOffsets(file: string, note: (line: string) => void): Record<string, number> {
+  let offsets: Record<string, number> = {};
+  const text = readText(file);
+  if (text === null && existsSync(file)) {
+    // Keep the bytes: the copy that would say where everyone stopped is the only one.
+    const aside = `${file}.bad-${Date.now()}`;
+    renameSync(file, aside);
+    note(`${file} 读不出（不是空表）：原件挪到 ${aside}，这批 bot 从 0 重来，Telegram 会重投最近的更新`);
+    return offsets;
+  }
+  if (text !== null) {
+    try {
+      offsets = JSON.parse(text) as Record<string, number>;
+    } catch {
+      const aside = `${file}.bad-${Date.now()}`;
+      renameSync(file, aside);
+      note(`${file} 不是 JSON（不是空表）：原件挪到 ${aside}，这批 bot 从 0 重来，Telegram 会重投最近的更新`);
+    }
+  }
+  return offsets;
+}
+
+function offsetsFor(root: string, note: (line: string) => void): Record<string, number> {
   const file = join(root, "data", "_gateway", "offsets.json");
   let offsets = offsetsByRoot.get(root);
   if (offsets === undefined) {
-    offsets = readJson<Record<string, number>>(file, {});
+    offsets = loadOffsets(file, note);
     offsetsByRoot.set(root, offsets);
   }
   return offsets;
+}
+
+/**
+ * Write back only this instance's new offset. Every poller holds its own copy of the same
+ * file, so writing that copy back puts the other bots' offsets back where they were when
+ * we read it — and after a bad read they were not there at all. What is on disk now wins
+ * for the instances this call is not moving; Telegram redelivers whatever we drop.
+ */
+export function saveOffsets(file: string, offsets: Record<string, number>, instance: string, next: number): void {
+  offsets[instance] = next;
+  const text = readText(file);
+  let onDisk: Record<string, number> = {};
+  if (text === null && existsSync(file)) {
+    renameSync(file, `${file}.bad-${Date.now()}`);
+  } else if (text !== null) {
+    try {
+      onDisk = JSON.parse(text) as Record<string, number>;
+    } catch {
+      renameSync(file, `${file}.bad-${Date.now()}`);
+    }
+  }
+  writeJson(file, { ...offsets, ...onDisk, [instance]: next });
 }
 
 function offsetsFile(root: string): string {
@@ -181,7 +231,7 @@ async function start(ctx: StartContext): Promise<void> {
     `${ctx.instance} 上线：@${me.username}${initial.listen ? ` listen=${initial.listen}` : ""} ${allowLine(initial)}` +
       ` home=${initial.chat ?? ctx.chats?.home ?? "未知"}`,
   );
-  const offsets = offsetsFor(ctx.root);
+  const offsets = offsetsFor(ctx.root, (line) => ctx.ops(line));
   const file = offsetsFile(ctx.root);
   // One count per failing update, in memory on purpose: a process restart is a fresh set
   // of attempts, and the offsets file already says where the next start resumes from.
@@ -224,8 +274,7 @@ async function start(ctx: StartContext): Promise<void> {
         );
         handleFailures.delete(`${ctx.instance}:${update.update_id}`);
       }
-      offsets[ctx.instance] = update.update_id + 1;
-      writeJson(file, offsets);
+      saveOffsets(file, offsets, ctx.instance, update.update_id + 1);
     }
   }
 }
