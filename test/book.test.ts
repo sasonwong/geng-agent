@@ -66,12 +66,30 @@ test("a closed loop moves aside instead of disappearing, and the count follows",
   );
 });
 
+test("a loop from before the id scheme can be closed by its name", async () => {
+  // It was written with a title for a name, before loops carried L numbers: `/loop/close`
+  // refused it as malformed, so `migration-id-scheme` sat on every wake packet for good.
+  const f = fixture();
+  mkdirSync(f.paths.openLoops, { recursive: true });
+  writeFileSync(join(f.paths.openLoops, "migration-id-scheme.md"), "# 迁移到 id 命名\n");
+  assert.equal(countLoops(f.paths), 1);
+
+  const closed = await f.call("/loop/close", { id: "migration-id-scheme", note: "不做" });
+  assert.equal(closed.status, 200);
+  assert.equal(countLoops(f.paths), 0);
+  assert.ok(existsSync(join(f.paths.openLoops, "closed", "migration-id-scheme.md")));
+});
+
 test("a refusal says what to fix, and never looks like success", async () => {
   const f = fixture();
   const unknown = await f.call("/loop/close", { id: "L99" });
   assert.equal(unknown.status, 404);
   assert.match(String((unknown.body as { error: string }).error), /没有 L99/);
-  const shape = await f.call("/loop/close", { id: "第12件" });
+  // a name is a shape now: one that is not there is missing, not malformed
+  const named = await f.call("/loop/close", { id: "第12件" });
+  assert.equal(named.status, 404);
+  assert.match(String((named.body as { error: string }).error), /没有 第12件/);
+  const shape = await f.call("/loop/close", { id: "closed/L1" });
   assert.equal(shape.status, 400);
   assert.match(String((shape.body as { error: string }).error), /L12/);
   const route = await f.call("/nope", {});

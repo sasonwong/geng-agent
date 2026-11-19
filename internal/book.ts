@@ -231,14 +231,23 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
     }
 
     if (route === "/loop/close") {
-      const id = text(params, "id");
-      if (id === null) return { status: 400, body: { error: "id 不能是空的" } };
-      if (!/^L\d+$/.test(id.trim())) {
-        return { status: 400, body: { error: `id 要写成 L12 这样，收到的是 ${id}` } };
+      const raw = text(params, "id");
+      if (raw === null) return { status: 400, body: { error: "id 不能是空的" } };
+      const id = raw.trim();
+      // A loop written before the id scheme is named after its title (`migration-id-scheme`),
+      // not `L12`: demanding an L number left it on every wake packet forever. Any plain
+      // name that is a file in open-loops/ can be closed. A plain name that is not there is
+      // a 404 like any missing `L` number — its shape said nothing was wrong with it, and a
+      // 400 here would read as "names are not allowed" to the one that just mistyped it.
+      if (id === "" || id.includes("/") || id.includes("\\")) {
+        return {
+          status: 400,
+          body: { error: `id 要写成 L12，或者 open-loops/ 里那个文件名（不带 .md），收到的是 ${raw}` },
+        };
       }
-      const name = `${id.trim()}.md`;
+      const name = `${id}.md`;
       const from = join(paths.openLoops, name);
-      if (!existsSync(from)) {
+      if (!existsSync(from) || !statSync(from).isFile()) {
         return { status: 404, body: { error: `没有 ${id} 这件事：${name} 不在 open-loops/ 里` } };
       }
       const note = text(params, "note");

@@ -85,11 +85,11 @@ const loopOpenTool = tool<{ text: string }>({
 const loopCloseTool = tool<{ id: string; note?: string }>({
   name: "loop_close",
   label: "Close loop",
-  description: '关掉一件没闭合的事。id 来自 loop_open 的返回（形如 L12，不是文件名）。note 可选，写一句为什么算完了，附在文件末尾。不删内容，只是移到 open-loops/closed/，所以纸上的条数减一。返回 {id, closed}。',
+  description: '关掉一件没闭合的事。id 来自 loop_open 的返回（形如 L12）；早于编号的那些按它在 open-loops/ 里的文件名（不带 .md）。note 可选，写一句为什么算完了，附在文件末尾。不删内容，只是移到 open-loops/closed/，所以纸上的条数减一。返回 {id, closed}。',
   parameters: {
     type: "object",
     properties: {
-      id: { type: "string", description: '要关的那件事，形如 "L12"。' },
+      id: { type: "string", description: '要关的那件事：形如 "L12"，或早于编号的那件的文件名（不带 .md）。' },
       note: { type: "string", description: "为什么算完了，一句话。" },
     },
     required: ["id"],
