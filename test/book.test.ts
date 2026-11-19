@@ -85,7 +85,11 @@ test("a refusal says what to fix, and never looks like success", async () => {
   const unknown = await f.call("/loop/close", { id: "L99" });
   assert.equal(unknown.status, 404);
   assert.match(String((unknown.body as { error: string }).error), /没有 L99/);
-  const shape = await f.call("/loop/close", { id: "第12件" });
+  // a name is a shape now: one that is not there is missing, not malformed
+  const named = await f.call("/loop/close", { id: "第12件" });
+  assert.equal(named.status, 404);
+  assert.match(String((named.body as { error: string }).error), /没有 第12件/);
+  const shape = await f.call("/loop/close", { id: "closed/L1" });
   assert.equal(shape.status, 400);
   assert.match(String((shape.body as { error: string }).error), /L12/);
   const route = await f.call("/nope", {});
