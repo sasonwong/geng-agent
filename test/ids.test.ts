@@ -145,3 +145,30 @@ test("a counter that is not a number is not a counter either", () => {
   assert.equal(allocate(p, "file").n, 8);
   assert.deepEqual(JSON.parse(readFileSync(p.ids, "utf8")), { journalDay: "20260302", journalN: 4, fileN: 8 });
 });
+
+// These errors come back through the book's `guard` as a 500 and are read inside the
+// container, which has no `data/` at all: the host's path there is not a pointer to the
+// file, it only says where the deployment lives. `doctor` already calls this file
+// `meta/ids.json`, so the message does too.
+test("读不出计数器的报错只说 meta/ids.json，不带宿主的目录", () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-ids-"));
+  const p = makePaths(root, "dave");
+  ensureDirs(requiredDirs(p));
+  const bodies: [string, Buffer | string][] = [
+    ["坏字节", Buffer.from([0x7b, 0x80, 0x7d])],
+    ["不是 JSON", "{oops"],
+    ["不是对象", "42"],
+    ["值不是数字", '{"fileN":"abc"}'],
+  ];
+  for (const [why, body] of bodies) {
+    writeFileSync(p.ids, body);
+    let said = "";
+    try {
+      allocate(p, "file");
+    } catch (err) {
+      said = (err as Error).message;
+    }
+    assert.match(said, /^meta\/ids\.json /, `${why}：要点名是哪一件，收到的是「${said}」`);
+    assert.ok(!said.includes(root), `${why}：容器里读到的报错不能带宿主目录`);
+  }
+});

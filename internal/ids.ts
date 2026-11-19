@@ -98,6 +98,19 @@ export function releaseLock(lock: string, owner: LockOwner): void {
   if (lockOf(lock)?.token === owner.token) rmSync(lock, { force: true });
 }
 
+/**
+ * What to call the counter file in a message a reader on the other side of the mount sees.
+ *
+ * These errors come back through the book's `guard` as a 500, and the container has no
+ * `data/` at all: an absolute host path there is not a pointer to anything, it only says
+ * where the deployment lives. `doctor` already calls this file `meta/ids.json`, so the
+ * errors do too — the same way `book.ts` names `journal/` instead of the host's path.
+ * Built from the path rather than written out, so moving `meta/` cannot leave a stale name.
+ */
+function idsName(paths: Paths): string {
+  return `${basename(dirname(paths.ids))}/${basename(paths.ids)}`;
+}
+
 function withIdsLock<T>(paths: Paths, run: () => T): T {
   const lock = `${paths.ids}.lock`;
   mkdirSync(dirname(lock), { recursive: true });
@@ -115,7 +128,7 @@ function withIdsLock<T>(paths: Paths, run: () => T): T {
         continue;
       }
       if (Date.now() - waited > 5_000) {
-        throw new Error(`ids.json 的锁 5 秒拿不到（${lock}）`);
+        throw new Error(`${idsName(paths)} 的锁 5 秒拿不到：另一次取号还没结束`);
       }
       sleep(50);
     }
@@ -139,30 +152,37 @@ function withIdsLock<T>(paths: Paths, run: () => T): T {
  * discarded or forgotten is not on disk anymore, and the counter is the only thing that
  * still remembers it. Throwing keeps both the file and the promise that no number goes
  * out twice; a human can put the file back and the next allocation is right again.
+ *
+ * The message names `meta/ids.json`, not the path it was given: these errors reach a
+ * reader inside the container (through the book's `guard`), where the host's path is a
+ * layout hint and nothing else. `test/ids.test.ts` holds that — it asserts the message
+ * says the name and does not contain the directory the file is really in.
  */
-function readIds(file: string): Ids {
+function readIds(paths: Paths): Ids {
+  const file = paths.ids;
+  const name = idsName(paths);
   const text = readText(file);
   if (text === null) {
-    if (existsSync(file)) throw new Error(`${file} 的字节不是 UTF-8：不发号，也不覆盖`);
+    if (existsSync(file)) throw new Error(`${name} 的字节不是 UTF-8：不发号，也不覆盖`);
     return {};
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw new Error(`${file} 不是 JSON：不发号，也不覆盖`);
+    throw new Error(`${name} 不是 JSON：不发号，也不覆盖`);
   }
   // `42`, `"x"`, `[]` parse fine and still carry no counter: spreading one writes only
   // the counter this call raised, and every other series silently starts over.
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    throw new Error(`${file} 不是对象：不发号，也不覆盖`);
+    throw new Error(`${name} 不是对象：不发号，也不覆盖`);
   }
   // A value that is not a number is the same hole one step in: `Math.max("abc", n)` is
   // `NaN`, `NaN` is written back as `null`, and the next read takes `null` for 0. `null`
   // itself reads as 0 the first time. One bad value is the whole series, so it is refused.
   for (const [key, value] of Object.entries(parsed)) {
     if (key !== "journalDay" && typeof value !== "number") {
-      throw new Error(`${file} 的 ${key} 不是数字：不发号，也不覆盖`);
+      throw new Error(`${name} 的 ${key} 不是数字：不发号，也不覆盖`);
     }
   }
   return parsed as Ids;
@@ -196,7 +216,7 @@ function highest(dirs: string[], pattern: RegExp): number {
  */
 export function allocate(paths: Paths, kind: IdKind): { id: string; n: number; day: string } {
   return withIdsLock(paths, () => {
-    const ids = readIds(paths.ids);
+    const ids = readIds(paths);
     const day = today(Date.now());
     if (kind === "loop") {
       const floor = highest([paths.openLoops, join(paths.openLoops, "closed")], /^L(\d+)\.md$/);
