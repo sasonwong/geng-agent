@@ -387,6 +387,27 @@ test("a channel that cannot carry files or quotes refuses at the book, not the g
   assert.equal(readdirSync(paths.outbox).length, 1, "被拒的那两次不该入队");
 });
 
+test("an fs error names the book's path, not the host's", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const server = await startBookServer({ paths, log: () => {} });
+  try {
+    const sock = socketPath(paths);
+    // a handler that throws instead of answering: journal/ is a file, so writeText cannot
+    // make the directory for the entry and the message carries the host path
+    rmSync(paths.journal, { recursive: true });
+    writeFileSync(paths.journal, "");
+    const r = await postJson(sock, "/journal", { texts: ["x"] });
+    assert.equal(r.status, 500);
+    const body = JSON.parse(r.body) as { error: string };
+    assert.match(body.error, /journal/, "书里的名字要留着");
+    assert.ok(!body.error.includes(paths.data), `宿主路径回了容器：${body.error}`);
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
+});
+
 test("a file leaves the book as bytes over the same socket, and only by id", async () => {
   const root = mkdtempSync(join(tmpdir(), "geng-book-"));
   const paths = makePaths(root, "alice");
