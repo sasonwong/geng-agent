@@ -101,6 +101,27 @@ test("open on a transcript shows what a reply was answering, whole and with its 
   assert.ok(r.text.includes(long), "引用的正文不能被截断");
 });
 
+test("open still places a quote that has no text, and does not print an empty colon", () => {
+  const p = fixture();
+  mkdirSync(p.people, { recursive: true });
+  // an image or a file comes back with an id and a sender and nothing to quote: the
+  // annotation is all that puts the reply somewhere, so it must not be dropped
+  writeFileSync(
+    join(p.people, "5715826350.jsonl"),
+    JSON.stringify({
+      at: "2026-03-02T08:01:00Z",
+      dir: "in",
+      text: "这张呢？",
+      from: "telegram:@you",
+      id: "5715826350-2",
+      quote: { id: "5715826350-3", from: "telegram:@me" },
+    }) + "\n",
+  );
+
+  const r = openText(p, "P5715826350", 0);
+  assert.match(r.text, /这张呢？（回 #5715826350-3 telegram:@me）$/m);
+});
+
 test("opening a mail is what makes it no longer new, in the same call", () => {
   const p = fixture();
   mkdirSync(p.mail, { recursive: true });
