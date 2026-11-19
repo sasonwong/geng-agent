@@ -1,4 +1,4 @@
-import { existsSync, renameSync } from "node:fs";
+import { existsSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { readText, writeJson } from "../fs.ts";
 import { attachmentOf, placeholderFor, type Attachment } from "../attach.ts";
@@ -27,6 +27,7 @@ import {
 } from "./core.ts";
 import type {
   Channel,
+  ChannelCheck,
   Chats,
   Inbound,
   LoadResult,
@@ -102,31 +103,34 @@ function parseOffsets(text: string): Record<string, number> | null {
 }
 
 /**
+ * Keep bytes that cannot be used, next to where they were, and say so.
+ *
+ * The copy that says where every bot stopped is the only one, so it is moved, never
+ * overwritten. The name carries the pid as well as the millisecond because two pollers
+ * can meet the same bad file at once, and a rename over an earlier aside would destroy
+ * exactly that copy — the same loss, one step further in.
+ */
+function keepAside(file: string, why: string, note: (line: string) => void): void {
+  const aside = `${file}.bad-${Date.now()}-${process.pid}`;
+  renameSync(file, aside);
+  note(`${file} ${why}：原件挪到 ${aside}，这批 bot 从 0 重来，Telegram 会重投最近的更新`);
+}
+
+/**
  * The file is the one place every bot's poller says where it got to, and it is shared: a
  * file that is there with bytes that are not JSON is not an empty table. Reading it as one
  * starts every bot at `0`, and Telegram then hands over the last 24 hours again.
  */
 export function loadOffsets(file: string, note: (line: string) => void): Record<string, number> {
-  let offsets: Record<string, number> = {};
   const text = readText(file);
-  if (text === null && existsSync(file)) {
-    // Keep the bytes: the copy that would say where everyone stopped is the only one.
-    const aside = `${file}.bad-${Date.now()}`;
-    renameSync(file, aside);
-    note(`${file} 读不出（不是空表）：原件挪到 ${aside}，这批 bot 从 0 重来，Telegram 会重投最近的更新`);
-    return offsets;
+  if (text === null) {
+    if (existsSync(file)) keepAside(file, "读不出（不是空表）", note);
+    return {};
   }
-  if (text !== null) {
-    const parsed = parseOffsets(text);
-    if (parsed === null) {
-      const aside = `${file}.bad-${Date.now()}`;
-      renameSync(file, aside);
-      note(`${file} 不是 JSON 对象（不是空表）：原件挪到 ${aside}，这批 bot 从 0 重来，Telegram 会重投最近的更新`);
-    } else {
-      offsets = parsed;
-    }
-  }
-  return offsets;
+  const parsed = parseOffsets(text);
+  if (parsed !== null) return parsed;
+  keepAside(file, "不是 JSON 对象（不是空表）", note);
+  return {};
 }
 
 function offsetsFor(root: string, note: (line: string) => void): Record<string, number> {
@@ -144,16 +148,25 @@ function offsetsFor(root: string, note: (line: string) => void): Record<string, 
  * file, so writing that copy back puts the other bots' offsets back where they were when
  * we read it — and after a bad read they were not there at all. What is on disk now wins
  * for the instances this call is not moving; Telegram redelivers whatever we drop.
+ *
+ * A file that went bad while we were running is kept aside here as well: this write would
+ * otherwise turn it into `{"<instance>": n}` and drop everyone else's offsets in silence.
  */
-export function saveOffsets(file: string, offsets: Record<string, number>, instance: string, next: number): void {
+export function saveOffsets(
+  file: string,
+  offsets: Record<string, number>,
+  instance: string,
+  next: number,
+  note: (line: string) => void,
+): void {
   offsets[instance] = next;
   const text = readText(file);
   let onDisk: Record<string, number> = {};
-  if (text === null && existsSync(file)) {
-    renameSync(file, `${file}.bad-${Date.now()}`);
-  } else if (text !== null) {
+  if (text === null) {
+    if (existsSync(file)) keepAside(file, "读不出（不是空表）", note);
+  } else {
     const parsed = parseOffsets(text);
-    if (parsed === null) renameSync(file, `${file}.bad-${Date.now()}`);
+    if (parsed === null) keepAside(file, "不是 JSON 对象（不是空表）", note);
     else onDisk = parsed;
   }
   writeJson(file, { ...offsets, ...onDisk, [instance]: next });
@@ -287,7 +300,7 @@ async function start(ctx: StartContext): Promise<void> {
         );
         handleFailures.delete(`${ctx.instance}:${update.update_id}`);
       }
-      saveOffsets(file, offsets, ctx.instance, update.update_id + 1);
+      saveOffsets(file, offsets, ctx.instance, update.update_id + 1, (line) => ctx.ops(line));
     }
   }
 }
@@ -374,6 +387,27 @@ export const telegramChannel: Channel = {
   },
   defaultChat(cfg: unknown, chats: Chats | undefined): number | undefined {
     return targetChat(undefined, (cfg as BotConfig).chat, chats?.home) ?? undefined;
+  },
+  // `data/_gateway` is global and nothing else reads it, so a quarantined file there is
+  // a file name and no news until doctor names it — the same reason the weixin state has
+  // a check. Absent is quiet; one kept aside is a warn.
+  doctor(root: string): ChannelCheck[] {
+    let names: string[];
+    try {
+      names = readdirSync(join(root, "data", "_gateway"));
+    } catch {
+      return [];
+    }
+    const bad = names.filter((n) => n.startsWith("offsets.json.bad-"));
+    if (bad.length === 0) return [];
+    return [
+      {
+        name: "telegram offsets 旧副本",
+        ok: false,
+        warnOnly: true,
+        detail: `${bad.length} 个 offsets.json.bad-*：读不出时原件挪到了那儿，这批 bot 从 0 重来了一次，Telegram 重投了最近 24 小时的更新——要不要恢复自己拷回去`,
+      },
+    ];
   },
   describe(_instance: string, cfg: unknown, chats: Chats | undefined): string {
     const c = cfg as BotConfig;
