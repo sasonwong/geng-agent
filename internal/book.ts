@@ -526,6 +526,12 @@ export function startBookServer(o: BookOptions): Promise<Server> {
       res.writeHead(status, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
+    // An fs error carries the host's absolute path, and the reader at the other end of the
+    // socket is the container, where that path does not resolve. What it can resolve is the
+    // book's own names — `journal/J…`, `open-loops/L…`, `meta/ids.json` — so the two host
+    // prefixes come off before the message leaves, and `log` above keeps the whole thing.
+    const forReader = (why: string): string =>
+      why.split(`${o.paths.book}/`).join("").split(`${o.paths.data}/`).join("");
     // A handler that throws would take the daemon down with it, and the round with the
     // daemon: every failure becomes an answer the agent can read instead.
     const guard = (err: unknown): void => {
@@ -538,7 +544,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
         res.destroy();
         return;
       }
-      reply(500, { error: `宿主那边出错了：${why}` });
+      reply(500, { error: `宿主那边出错了：${forReader(why)}` });
     };
     // The one route that is not JSON: bytes go out as bytes. It is the only way a file
     // leaves the book, so `download` names a file by id and chooses where it lands.
@@ -571,7 +577,7 @@ export function startBookServer(o: BookOptions): Promise<Server> {
           .on("error", () => res.destroy())
           .pipe(res);
       } catch (err) {
-        reply(500, { error: `读不出来：${(err as Error).message}` });
+        reply(500, { error: `读不出来：${forReader((err as Error).message)}` });
       }
       return;
     }
