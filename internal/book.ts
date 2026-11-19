@@ -146,14 +146,21 @@ function flatKeys(obj: unknown, prefix = ""): string[] {
   );
 }
 
-/** Append to a file it may not have written yet, keeping whatever is already there. */
-function appendText(file: string, addition: string): void {
+/**
+ * Append to a file it may not have written yet, keeping whatever is already there.
+ *
+ * `name` is what the reader inside the container sees, `journal/J…` or `open-loops/L…`:
+ * this error goes back through `guard` as a 500, and the container has no `/state` at all,
+ * so the host's path in it is a layout hint and nothing else — the same reason `ids.ts`
+ * names `meta/ids.json`.
+ */
+function appendText(file: string, addition: string, name: string): void {
   const before = readText(file);
   // `readText` says null for a file that is not there and for one whose bytes are not
   // UTF-8. Writing the addition as a fresh file would erase the second kind: a note on a
   // journal entry is not worth losing the entry it is about.
   if (before === null && existsSync(file)) {
-    throw new Error(`${file} 的字节不是 UTF-8：不追加，也不覆盖`);
+    throw new Error(`${name} 的字节不是 UTF-8：不追加，也不覆盖`);
   }
   const glue = before === null || before === "" || before.endsWith("\n") ? "" : "\n";
   writeText(file, `${before ?? ""}${glue}${addition}\n`);
@@ -214,7 +221,7 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         return { status: 404, body: { error: `没有 ${id} 这条：${name} 不在 journal/ 里` } };
       }
       const why = text(params, "why");
-      if (why !== null) appendText(from, `\n[丢弃 ${nowIso}] ${why.trim()}`);
+      if (why !== null) appendText(from, `\n[丢弃 ${nowIso}] ${why.trim()}`, `journal/${name}`);
       // like a closed loop: moved, not deleted. The entry was written by someone, and the
       // book records that it happened even after it stops being true.
       mkdirSync(paths.journalDiscarded, { recursive: true });
@@ -251,7 +258,7 @@ export function bookHandler(paths: Paths, o: HandlerOptions = {}) {
         return { status: 404, body: { error: `没有 ${id} 这件事：${name} 不在 open-loops/ 里` } };
       }
       const note = text(params, "note");
-      if (note !== null) appendText(from, `\n[闭合 ${nowIso}] ${note.trim()}`);
+      if (note !== null) appendText(from, `\n[闭合 ${nowIso}] ${note.trim()}`, `open-loops/${name}`);
       // Closing is a place to put it, not a deletion: the note stays readable, and the
       // count only follows files, so a subdirectory does not inflate it.
       const done = join(paths.openLoops, "closed");

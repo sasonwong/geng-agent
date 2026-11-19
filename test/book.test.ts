@@ -662,6 +662,31 @@ test("a note is not written over bytes the book cannot read", async () => {
   // not UTF-8: readText gives null, and a fresh write would be the whole file gone
   const bad = Buffer.from([0x41, 0xff, 0x42]);
   writeFileSync(file, bad);
-  await assert.rejects(() => f.call("/loop/close", { id, note: "回信来了" }), /不是 UTF-8/);
+  // The message comes back to the container through `guard` as a 500, where the host's
+  // directory is not a path: it has to name the file the way the book does elsewhere.
+  await assert.rejects(
+    () => f.call("/loop/close", { id, note: "回信来了" }),
+    (err: Error) => {
+      assert.match(err.message, /open-loops\/L1\.md 的字节不是 UTF-8/);
+      assert.equal(err.message.includes(f.root), false, "宿主的路径不进消息");
+      return true;
+    },
+  );
   assert.deepEqual(readFileSync(file), bad, "原来的字节要还在");
+});
+
+test("a discard note names the journal entry, not the directory it sits in", async () => {
+  const f = fixture();
+  const written = await f.call("/journal", { texts: ["那条要撤的"] });
+  const id = (written.body as { ids: string[] }).ids[0] as string;
+  const file = join(f.paths.journal, `${id}.md`);
+  writeFileSync(file, Buffer.from([0x41, 0xff, 0x42]));
+  await assert.rejects(
+    () => f.call("/discard", { id, why: "不算数" }),
+    (err: Error) => {
+      assert.match(err.message, new RegExp(`journal/${id}\\.md 的字节不是 UTF-8`));
+      assert.equal(err.message.includes(f.root), false, "宿主的路径不进消息");
+      return true;
+    },
+  );
 });
