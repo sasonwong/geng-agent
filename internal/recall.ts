@@ -178,6 +178,24 @@ interface SaidLine {
   text?: unknown;
   from?: unknown;
   id?: unknown;
+  quote?: { id?: unknown; from?: unknown; text?: unknown };
+}
+
+/**
+ * The line someone answered, as the gateway stored it with the reply.
+ *
+ * It is written on the transcript line and nowhere else, so if this view drops it the
+ * quote is unreachable: the page excerpts 60 characters and the inbox file has never
+ * carried it. Whose/which is the point of keeping it — a reply nobody can place is
+ * answered by guesswork.
+ */
+function quotedLine(q: SaidLine["quote"]): string {
+  if (q === null || typeof q !== "object") return "";
+  const id = typeof q.id === "string" && q.id !== "" ? ` #${q.id}` : "";
+  const from = typeof q.from === "string" && q.from !== "" ? ` ${q.from}` : "";
+  const text = typeof q.text === "string" ? q.text : "";
+  if (id === "" && from === "" && text === "") return "";
+  return `（回${id}${from}${text === "" ? "" : `：${text}`}）`;
 }
 
 /** One item per person, with the whole transcript as its body: `open` pages it. */
@@ -202,7 +220,7 @@ function peopleItems(p: Paths): Item[] {
       // The date is not decoration: a transcript spans days, and a bare `13:07` reads as
       // today. `recall` used to show only the time, so an old line looked like a new one.
       const at = typeof said.at === "string" && said.at !== "" ? stamp(said.at) : "????-??-?? ??:??";
-      lines.push(`${at} ${who}${ref} ${said.text}`);
+      lines.push(`${at} ${who}${ref} ${said.text}${quotedLine(said.quote)}`);
     }
     const last = lines[lines.length - 1] ?? "（没说过话）";
     return [

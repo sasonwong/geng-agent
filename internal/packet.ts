@@ -155,7 +155,9 @@ function renderThread(t: ThreadInput, nowMs: number): string[] {
   const age = Number.isNaN(oldest) ? "" : `，最早的一句在 ${formatDuration(nowMs - oldest)}前`;
   const out = [`你和 ${t.who} 说过 ${t.total} 句，下面是最新的 ${t.lines.length} 句${age}：`];
   for (const line of t.lines) {
-    const back = line.quote?.text ? `（回：${excerpt(line.quote.text, 60)}）` : "";
+    const back = line.quote?.text
+      ? `（回${line.quote.id ? ` #${line.quote.id}` : ""}：${excerpt(line.quote.text, 60)}）`
+      : "";
     out.push(`  ${line.dir === "out" ? "你" : "对方"}：${excerpt(line.text, 200)}${back}`);
   }
   // the file is not in the container any more: the way back to it is the tool, by the id

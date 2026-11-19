@@ -74,6 +74,54 @@ test("a query answers with the newest matches, with dates, not the oldest", () =
   assert.doesNotMatch(text, /2026-01-01 01:00/);
 });
 
+test("open on a transcript shows what a reply was answering, whole and with its id", () => {
+  const p = fixture();
+  mkdirSync(p.people, { recursive: true });
+  // longer than the page's 60-character excerpt: the point of open is that nothing is cut
+  const long = "这一句是我上一轮说过的话，长度超过六十个字，页面上只会留下开头那几个字加一个截断号，" +
+    "所以这里要证明 open 拿出来的是整句，而且带着可以拿去 replyTo 的 id。";
+  writeFileSync(
+    join(p.people, "-1001234567890.jsonl"),
+    [
+      JSON.stringify({ at: "2026-03-02T08:00:00Z", dir: "out", text: long, id: "-1001234567890-1" }),
+      JSON.stringify({
+        at: "2026-03-02T08:01:00Z",
+        dir: "in",
+        text: "这么快？",
+        from: "telegram:@you",
+        id: "-1001234567890-2",
+        quote: { id: "-1001234567890-1", from: "telegram:@me", text: long },
+      }),
+    ].join("\n") + "\n",
+  );
+
+  const r = openText(p, "P-1001234567890", 0);
+  assert.equal(r.found, true);
+  assert.match(r.text, /这么快？（回 #-1001234567890-1 telegram:@me：这一句是我上一轮说过的话/);
+  assert.ok(r.text.includes(long), "引用的正文不能被截断");
+});
+
+test("open still places a quote that has no text, and does not print an empty colon", () => {
+  const p = fixture();
+  mkdirSync(p.people, { recursive: true });
+  // an image or a file comes back with an id and a sender and nothing to quote: the
+  // annotation is all that puts the reply somewhere, so it must not be dropped
+  writeFileSync(
+    join(p.people, "-1001234567890.jsonl"),
+    JSON.stringify({
+      at: "2026-03-02T08:01:00Z",
+      dir: "in",
+      text: "这张呢？",
+      from: "telegram:@you",
+      id: "-1001234567890-2",
+      quote: { id: "-1001234567890-3", from: "telegram:@me" },
+    }) + "\n",
+  );
+
+  const r = openText(p, "P-1001234567890", 0);
+  assert.match(r.text, /这张呢？（回 #-1001234567890-3 telegram:@me）$/m);
+});
+
 test("opening a mail is what makes it no longer new, in the same call", () => {
   const p = fixture();
   mkdirSync(p.mail, { recursive: true });
