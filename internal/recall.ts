@@ -240,6 +240,7 @@ interface InboxFile {
   at?: unknown;
   from?: unknown;
   text?: unknown;
+  date?: unknown;
 }
 
 /**
@@ -254,12 +255,14 @@ function inboxItems(p: Paths): Item[] {
       if (raw === null) return unreadable(f, "inbox", `M${basename(f, ".json")}`);
       const text = typeof raw.text === "string" ? raw.text : "";
       const from = typeof raw.from === "string" ? raw.from : "（不知道谁）";
+      // the channel's own send time, when the channel had one: `at` is when we handled it
+      const sent = typeof raw.date === "number" ? ` · date=${raw.date}` : "";
       return {
         id: `M${basename(f, ".json")}`,
         source: "inbox" as const,
         at: typeof raw.at === "string" ? raw.at : when(f),
         header: `${from} · ${firstLine(text)}`,
-        body: `${from} · ${typeof raw.at === "string" ? raw.at : "（没有时间）"} · id=${basename(f, ".json")}\n\n${text}`,
+        body: `${from} · ${typeof raw.at === "string" ? raw.at : "（没有时间）"}${sent} · id=${basename(f, ".json")}\n\n${text}`,
       };
     }),
   );
