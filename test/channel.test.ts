@@ -96,6 +96,30 @@ test("a normalized message lands in the inbox and the transcript, whichever chan
   assert.equal(chats?.known?.["111"]?.channel, "telegram");
 });
 
+test("a message's own timestamp lands beside `at`, which stays when we handled it", async () => {
+  const f = fixture();
+  await handleInbound(
+    f.host,
+    "alice",
+    message({ at: "2026-11-20T14:29:00.000Z", date: 1795184160 }),
+  );
+  const record = JSON.parse(readFileSync(join(f.paths.inbox, "111-42.json"), "utf8")) as {
+    at: string;
+    date?: number;
+  };
+  assert.equal(record.at, "2026-11-20T14:29:00.000Z");
+  assert.equal(record.date, 1795184160);
+});
+
+test("a channel with no timestamp of its own writes no `date`", async () => {
+  const f = fixture();
+  await handleInbound(f.host, "alice", message());
+  const record = JSON.parse(readFileSync(join(f.paths.inbox, "111-42.json"), "utf8")) as {
+    date?: number;
+  };
+  assert.equal("date" in record, false);
+});
+
 test("a guest never reaches the inbox, and its id is printed for the allow list", async () => {
   const f = fixture();
   await handleInbound(f.host, "alice", message({ allowed: false, fromId: "999" }));

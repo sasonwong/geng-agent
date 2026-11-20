@@ -145,6 +145,9 @@ export interface Inbound {
   fromId?: string;
   text: string;
   at: string;
+  /** The channel's own timestamp for the message, seconds since the epoch, when it has
+   *  one. `at` stays "when this side handled it" — sorting and ageing read that. */
+  date?: number;
   allowed: boolean;
   isDm: boolean;
   isMention: boolean;

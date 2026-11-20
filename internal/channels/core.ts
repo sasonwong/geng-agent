@@ -340,6 +340,7 @@ export async function handleInbound(host: InboundHost, key: string, msg: Inbound
     text: msg.text,
     ...(msg.who === undefined ? {} : { from: msg.who }),
     at: msg.at,
+    ...(msg.date === undefined ? {} : { date: msg.date }),
     chat: msg.chat,
     ...(stored ? { attachments: [stored] } : {}),
   });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { loadOffsets, saveOffsets, telegramChannel } from "../internal/channels/telegram.ts";
+import { loadOffsets, saveOffsets, telegramChannel, toInbound } from "../internal/channels/telegram.ts";
 
 function offsetsFile(): string {
   const dir = mkdtempSync(join(tmpdir(), "offsets-"));
@@ -99,4 +99,20 @@ test("doctor names the offsets files that were kept aside, and is quiet without 
   assert.equal(checks.length, 1);
   assert.match(checks[0]?.detail ?? "", /offsets\.json\.bad-/);
   assert.equal(checks[0]?.warnOnly, true);
+});
+
+test("a message's own date is carried across, beside when we handled it", () => {
+  const inbound = toInbound(
+    {
+      message_id: 42,
+      date: 1795184160,
+      chat: { id: 111, type: "private" },
+      from: { id: 1, username: "tester" },
+      text: "你好",
+    },
+    { id: 9, username: "bot" },
+    { token: "t" },
+  );
+  assert.equal(inbound.date, 1795184160);
+  assert.notEqual(inbound.at, String(inbound.date), "`at` stays the handling time");
 });
