@@ -37,6 +37,9 @@ export interface TgFileRef {
 
 export interface TgMessage {
   message_id: number;
+  /** When Telegram accepted the message, seconds since the epoch. Not when we saw it: a
+   *  long poll can hand back updates minutes after they were sent. */
+  date?: number;
   from?: { id: number; username?: string; first_name?: string };
   chat: { id: number; type: "private" | "group" | "supergroup" | "channel"; title?: string };
   text?: string;
