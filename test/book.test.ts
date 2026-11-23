@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -403,6 +403,18 @@ test("an fs error names the book's path, not the host's", async () => {
     const body = JSON.parse(r.body) as { error: string };
     assert.match(body.error, /journal/, "书里的名字要留着");
     assert.ok(!body.error.includes(paths.data), `宿主路径回了容器：${body.error}`);
+    // /files/ answers from its own catch instead of the guard: a name that readdir sees
+    // but stat cannot follow (the file went away after the lookup) carries the host path
+    // just the same, and this exit has to strip it too
+    symlinkSync(join(root, "gone"), join(paths.filesDir, "F1-0-report.pdf"));
+    await assert.rejects(
+      () => getToFile(sock, "/files/F1", join(root, "out.bin")),
+      (err: Error) => {
+        assert.match(err.message, /files\/F1-0-report\.pdf/, "书里的名字要留着");
+        assert.ok(!err.message.includes(paths.data), `宿主路径回了容器：${err.message}`);
+        return true;
+      },
+    );
   } finally {
     await new Promise<void>((r) => server.close(() => r()));
   }
