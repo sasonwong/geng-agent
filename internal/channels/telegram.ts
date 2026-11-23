@@ -199,7 +199,7 @@ function remoteOf(att: Attachment | null, token: string): RemoteAttachment | nul
   };
 }
 
-function toInbound(message: TgMessage, me: BotIdentity, cfg: BotConfig): Inbound {
+export function toInbound(message: TgMessage, me: BotIdentity, cfg: BotConfig): Inbound {
   const att = remoteOf(attachmentOf(message), cfg.token);
   const quote = quotedOf(message.chat.id, message.reply_to_message, nameOf) ?? undefined;
   const privateChat = message.chat.type === "private";
@@ -213,6 +213,7 @@ function toInbound(message: TgMessage, me: BotIdentity, cfg: BotConfig): Inbound
     fromId: String(message.from?.id ?? "?"),
     text: message.text ?? message.caption ?? "",
     at: new Date().toISOString(),
+    ...(message.date === undefined ? {} : { date: message.date }),
     allowed: !cfg.allow || cfg.allow.includes(message.from?.id ?? 0),
     isDm: privateChat,
     isMention: isMentioned(message, me),
