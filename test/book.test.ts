@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -385,6 +385,39 @@ test("a channel that cannot carry files or quotes refuses at the book, not the g
   assert.equal(quote.status, 400);
   assert.match(String((quote.body as { error: string }).error), /不能引用/);
   assert.equal(readdirSync(paths.outbox).length, 1, "被拒的那两次不该入队");
+});
+
+test("an fs error names the book's path, not the host's", async () => {
+  const root = mkdtempSync(join(tmpdir(), "geng-book-"));
+  const paths = makePaths(root, "alice");
+  ensureDirs(requiredDirs(paths));
+  const server = await startBookServer({ paths, log: () => {} });
+  try {
+    const sock = socketPath(paths);
+    // a handler that throws instead of answering: journal/ is a file, so writeText cannot
+    // make the directory for the entry and the message carries the host path
+    rmSync(paths.journal, { recursive: true });
+    writeFileSync(paths.journal, "");
+    const r = await postJson(sock, "/journal", { texts: ["x"] });
+    assert.equal(r.status, 500);
+    const body = JSON.parse(r.body) as { error: string };
+    assert.match(body.error, /journal/, "书里的名字要留着");
+    assert.ok(!body.error.includes(paths.data), `宿主路径回了容器：${body.error}`);
+    // /files/ answers from its own catch instead of the guard: a name that readdir sees
+    // but stat cannot follow (the file went away after the lookup) carries the host path
+    // just the same, and this exit has to strip it too
+    symlinkSync(join(root, "gone"), join(paths.filesDir, "F1-0-report.pdf"));
+    await assert.rejects(
+      () => getToFile(sock, "/files/F1", join(root, "out.bin")),
+      (err: Error) => {
+        assert.match(err.message, /files\/F1-0-report\.pdf/, "书里的名字要留着");
+        assert.ok(!err.message.includes(paths.data), `宿主路径回了容器：${err.message}`);
+        return true;
+      },
+    );
+  } finally {
+    await new Promise<void>((r) => server.close(() => r()));
+  }
 });
 
 test("a file leaves the book as bytes over the same socket, and only by id", async () => {
