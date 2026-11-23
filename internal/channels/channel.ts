@@ -145,8 +145,9 @@ export interface Inbound {
   fromId?: string;
   text: string;
   at: string;
-  /** The channel's own timestamp for the message, seconds since the epoch, when it has
-   *  one. `at` stays "when this side handled it" — sorting and ageing read that. */
+  /** The channel's own timestamp, seconds since the epoch, when the channel reports it
+   *  apart from `at`. Weixin gives only `at`, and there `at` is the channel's own time.
+   *  Sorting and ageing read `at`. */
   date?: number;
   allowed: boolean;
   isDm: boolean;
