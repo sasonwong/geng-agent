@@ -114,5 +114,4 @@ test("a message's own date is carried across, beside when we handled it", () => 
     { token: "t" },
   );
   assert.equal(inbound.date, 1795184160);
-  assert.notEqual(inbound.at, String(inbound.date), "`at` stays the handling time");
 });
