@@ -180,6 +180,17 @@ test("every line it can quote carries the id it has to quote with, all the way t
   assert.deepEqual(queued.replyTo, { chat: -1001, messageId: 151 });
 });
 
+test("an inbox body shows the channel's own date when there is one, and says nothing when there is not", () => {
+  const p = fixture();
+  mkdirSync(p.inbox, { recursive: true });
+  writeFileSync(join(p.inbox, "-1001-160.json"), JSON.stringify({ at: "2026-11-20T14:29:00.000Z", date: 1795184160, from: "telegram:@someone", text: "有 date" }));
+  writeFileSync(join(p.inbox, "-1001-161.json"), JSON.stringify({ at: "2026-11-20T14:29:00.000Z", from: "telegram:@someone", text: "没有 date" }));
+
+  assert.match(openText(p, "M-1001-160", 0).text, /2026-11-20T14:29:00\.000Z · date=1795184160 · id=-1001-160/);
+  // at stays the only time shown for a record that has none: no invented value, no placeholder
+  assert.match(openText(p, "M-1001-161", 0).text, /2026-11-20T14:29:00\.000Z · id=-1001-161/);
+});
+
 test("a file in the listing keeps its original name, and its size is what it is", () => {
   const p = fixture();
   mkdirSync(p.filesDir, { recursive: true });
