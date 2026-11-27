@@ -111,7 +111,7 @@ test("every -e value is really passed to docker as an env var", () => {
 });
 
 
-test("the search socket is mounted only when it exists, and at the same path", () => {
+test("the search socket is mounted only when it exists, and at /run/search.sock", () => {
   const root = mkdtempSync(join(tmpdir(), "geng-test-"));
   const paths = makePaths(root, "alice");
   const sock = join(root, "run", "search.sock");
