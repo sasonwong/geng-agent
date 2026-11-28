@@ -530,7 +530,8 @@ docker 的 `--env-file` 都把 `=` 后面直到行尾整段当成值：`DEEPSEEK
 unit 的 `RuntimeDirectory=geng` 建出来的目录。写死 `/run/geng/search.sock` 是 system unit
 的形状：普通用户的 user unit 既没权限在那儿建目录，daemon 找的也还是另一个路径。
 
-**端点是 unix socket，不是端口。** 容器能连它是因为 daemon 把 socket 文件按同一个路径挂进去，
+**端点是 unix socket，不是端口。** 容器能连它是因为 daemon 把 socket 文件挂到容器里的
+`/run/search.sock`（不是宿主那条路径，见下表），
 不是因为网络上有一个地址能打——所以出口规则里不再有私网例外，`ss -ltnp` 上也看不到任何东西。
 `GENG_SEARCH_SOCKET` 由 daemon 在 `docker run` 时注入，**不要写进 `secrets/<实例>.env`**：
 写进去的值和宿主上的不一致时，容器里会有一个连不上的路径。
