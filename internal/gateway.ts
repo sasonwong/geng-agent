@@ -194,9 +194,9 @@ export async function runGateway(o: GatewayOptions): Promise<void> {
     const w = watchFor(key);
     const verdict = w.check(texts, Date.now());
     if (verdict === "rate") {
-      writeOps(ops, "gateway", `${key} 在 1 分钟内要发 ${w.attempts} 条，暂停投递 10 分钟。消息没丢。`);
+      writeOps(ops, "gateway", `${key} 在 1 分钟内要发 ${w.attempts} 次（一次可以是一批），暂停投递 10 分钟。消息没丢。`);
     } else if (verdict === "repeat") {
-      writeOps(ops, "gateway", `${key} 连续发了同一句话 ${REPEAT_LIMIT} 次，暂停投递 10 分钟。消息没丢。`);
+      writeOps(ops, "gateway", `${key} 一分钟内同一句话发了 ${REPEAT_LIMIT} 次，暂停投递 10 分钟。消息没丢。`);
     }
     return verdict;
   };

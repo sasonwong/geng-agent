@@ -396,7 +396,7 @@ journalctl --user -u geng-gateway -n 5    # 应有「重载 telegram/alice：…
 
    两个都漏的时候症状很像：人说的话照收，所以你不会起疑。区别是 privacy 没关时别的 bot 只在
    @ / 回复它的时候才到，bot-to-bot 没开时一条都不到。开了之后 Telegram 也不再替它拦 bot 之间的
-   循环，刹车只剩 gateway 自己的 tripwire（一分钟 30 条、同一句 10 次 → 停 10 分钟）。
+   循环，刹车只剩 gateway 自己的 tripwire（一分钟 30 次投递尝试、同一句 10 次 → 停 10 分钟；一次 `say` 的多句算一次）。
 3. `ops` bot 只建一个：daemon 和 gateway 都借它说话，消息带 `[daemon@alice]` / `[gateway]` 前缀。
    **有了任何 bot 就得有它**：没有 `ops` 时，静音通知、gateway 断线、停车通知只会堆在
    `data/_ops/outbox` 里——gateway 只在这个键下排空那队列，`geng doctor` 的「bot 接线」会说
